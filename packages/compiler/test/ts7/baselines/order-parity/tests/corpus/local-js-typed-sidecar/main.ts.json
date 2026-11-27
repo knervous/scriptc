@@ -1,7 +1,0 @@
-{
- "order": [
-  "<repo>/tests/corpus/local-js-typed-sidecar/lib.d.ts",
-  "<repo>/tests/corpus/local-js-typed-sidecar/main.ts"
- ],
- "diags": []
-}

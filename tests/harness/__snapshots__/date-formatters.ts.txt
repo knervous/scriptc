@@ -1,17 +1,17 @@
-date-formatters.ts:6:25 - error SC2020: 'Date.prototype.toLocaleDateString at locale "de-DE"' is part of the standard library types but has no scriptc lowering yet
+date-formatters.ts:4:1 - error SC2020: 'Date.prototype.toString' is part of the standard library types but has no scriptc lowering yet
 
-  5 | const date = new Date(0);
-  6 | date.toLocaleDateString("de-DE");
-    |                         ^~~~~~~
-  7 | date.toLocaleString(["en-US"]);
+  3 | const date = new Date(0);
+  4 | date.toString();
+    | ^~~~~~~~~~~~~~~
+  5 | date.toLocaleString();
 
-  hint: which locale Node picks for a requested tag is locale negotiation, which is not modelled; the default locale (no argument), "en-US" and "en" compile
+  hint: getTime(), valueOf(), toISOString(), the local/UTC calendar getters, and getTimezoneOffset() are supported; Date setters and locale/string formatters have no lowering
 
-date-formatters.ts:7:21 - error SC2020: 'Date.prototype.toLocaleString with a non-literal locale' is part of the standard library types but has no scriptc lowering yet
+date-formatters.ts:5:1 - error SC2020: 'Date.prototype.toLocaleString' is part of the standard library types but has no scriptc lowering yet
 
-  6 | date.toLocaleDateString("de-DE");
-  7 | date.toLocaleString(["en-US"]);
-    |                     ^~~~~~~~~
-  8 | 
+  4 | date.toString();
+  5 | date.toLocaleString();
+    | ^~~~~~~~~~~~~~~~~~~~~
+  6 | 
 
-  hint: the locale is decided at compile time: omit it or pass undefined for the default locale, or write "en-US" or "en"
+  hint: getTime(), valueOf(), toISOString(), the local/UTC calendar getters, and getTimezoneOffset() are supported; Date setters and locale/string formatters have no lowering

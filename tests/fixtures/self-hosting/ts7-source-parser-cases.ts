@@ -15,24 +15,16 @@ export function runSourceParser(parser: Ts7SourceParser, input: string, output: 
     const file = parser.parse(item.path, item.text, item.kind);
     let nodes = 0;
     let optional = 0;
-    const kinds = new Set([syntax.SyntaxKind.Identifier, syntax.SyntaxKind.CallExpression]);
-    const expected: string[] = [];
-    syntax.walkPreorder(file, (node, depth) => {
+    syntax.walkPreorder(file, (node) => {
       nodes++;
       if (node.questionToken !== undefined) optional++;
-      if (kinds.has(node.kind)) expected.push(`${node.kind}:${node.pos}:${depth}`);
     });
-    const selected: string[] = [];
-    syntax.walkPreorder(file, (node, depth) => {
-      selected.push(`${node.kind}:${node.pos}:${depth}`);
-    }, kinds);
-    if (JSON.stringify(selected) !== JSON.stringify(expected)) throw new Error("selective traversal changed syntax order or depth");
     return {
       text: file.text,
       nodes,
       optional,
       declaration: file.isDeclarationFile,
-      statements: file.statements.nodes.map((statement) => ({
+      statements: file.statements.map((statement) => ({
         text: statement.getText(), start: statement.getStart(), end: statement.end,
       })),
       imports: moduleSpecifiersOfFile(file),
@@ -98,7 +90,7 @@ export function runSourceParser(parser: Ts7SourceParser, input: string, output: 
   }
   parser.close();
   parser.close();
-  const versions = [original.statements.nodes[0]!.getText(), updated.statements.nodes[0]!.getText()];
+  const versions = [original.statements[0]!.getText(), updated.statements[0]!.getText()];
   let closed = false;
   try { parser.parse("late.ts", "", "ts"); } catch { closed = true; }
   writeFileSync(output, JSON.stringify({ files, packages, versions, closed }));

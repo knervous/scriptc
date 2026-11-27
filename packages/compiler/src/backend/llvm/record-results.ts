@@ -1,3 +1,4 @@
+// This file was modified from scriptc (Apache-2.0); see MODIFICATIONS.md.
 import { constructorEscapePoint } from "../cycle-mutability.js";
 import {
   VOID,
@@ -55,7 +56,7 @@ export function completeRecordLiteral(
   e: IrExpr & { kind: "recordLit" },
   shape: IrRecordShape | undefined,
 ): boolean {
-  if (!shape || e.nullProto || e.fields.some((field) => field.overflow)) return false;
+  if (!shape || e.nullProto || e.fields.some((field) => field.overflow || field.drop)) return false;
   const names = new Set(e.fields.map((field) => field.name));
   return shape.fields.every((field) => names.has(field.name));
 }

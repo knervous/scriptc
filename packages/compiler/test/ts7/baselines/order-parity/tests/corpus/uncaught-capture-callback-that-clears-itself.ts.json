@@ -1,6 +1,0 @@
-{
- "order": [
-  "<repo>/tests/corpus/uncaught-capture-callback-that-clears-itself.ts"
- ],
- "diags": []
-}

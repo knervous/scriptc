@@ -1,6 +1,0 @@
-{
- "order": [
-  "<repo>/tests/corpus/local-class-lifetimes.ts"
- ],
- "diags": []
-}

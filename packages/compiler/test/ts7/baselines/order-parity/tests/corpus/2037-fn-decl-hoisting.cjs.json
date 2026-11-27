@@ -1,6 +1,0 @@
-{
- "order": [
-  "<repo>/tests/corpus/2037-fn-decl-hoisting.cjs"
- ],
- "diags": []
-}

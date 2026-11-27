@@ -1,6 +1,0 @@
-{
- "order": [
-  "<repo>/tests/corpus/5110-var-hoisting-early-reads.ts"
- ],
- "diags": []
-}

@@ -1,3 +1,4 @@
+// This file was modified from scriptc (Apache-2.0); see MODIFICATIONS.md.
 /** Platform-linker invocation for a previously created native link plan.
  *
  * No source file is accepted here.  That makes it mechanically impossible
@@ -203,7 +204,7 @@ export async function executableLinkerEnvironmentFingerprint(
     .update("\0")
     .update(defaultLinkerLinkIdentity)
     .update("\0");
-  for (const name of ["PATH", "SCRIPTC_TEST_RUNTIME_SRC_DIR"] as const) {
+  for (const name of ["PATH", "SCRIPTC_FETCH_CURL", "SCRIPTC_TEST_RUNTIME_SRC_DIR"] as const) {
     const value = env[name];
     hash
       .update(name)
@@ -455,6 +456,7 @@ export async function linkNativeExecutable(
         ...mapArgs,
         ...(withLld ? inputs : inputsWithoutLld(plan.target, inputs)),
         ...systemLibraryLinkerArgs(plan.target, plan.systemLibraries),
+        ...(plan.host?.linkArgs ?? []),
         "-o",
         privateOut,
       ];

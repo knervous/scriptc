@@ -1,0 +1,276 @@
+{
+ "schema": "scriptc-pgo-site-profile/1",
+ "key": "hand-made by make-fixture-profile.mjs: every o.<field> access monomorphic on {id,value,tag}",
+ "pathsRelativeTo": "this file",
+ "files": {
+  "js-literal-structs-helper.js": {
+   "sha256": "ca49c412b208cf5f53d3b605540831f7fd3b5b9f1862893ec5bb71a9d0b671b3"
+  }
+ },
+ "sites": [
+  {
+   "kind": "load",
+   "property": "id",
+   "file": "js-literal-structs-helper.js",
+   "span": {
+    "start": 312,
+    "end": 316
+   },
+   "state": "monomorphic",
+   "receivers": [
+    {
+     "kind": "plain-object",
+     "fields": [
+      "id",
+      "value",
+      "tag"
+     ],
+     "own": {
+      "index": 0,
+      "how": "field:s"
+     }
+    }
+   ]
+  },
+  {
+   "kind": "load",
+   "property": "value",
+   "file": "js-literal-structs-helper.js",
+   "span": {
+    "start": 319,
+    "end": 326
+   },
+   "state": "monomorphic",
+   "receivers": [
+    {
+     "kind": "plain-object",
+     "fields": [
+      "id",
+      "value",
+      "tag"
+     ],
+     "own": {
+      "index": 1,
+      "how": "field:s"
+     }
+    }
+   ]
+  },
+  {
+   "kind": "load",
+   "property": "id",
+   "file": "js-literal-structs-helper.js",
+   "span": {
+    "start": 395,
+    "end": 399
+   },
+   "state": "monomorphic",
+   "receivers": [
+    {
+     "kind": "plain-object",
+     "fields": [
+      "id",
+      "value",
+      "tag"
+     ],
+     "own": {
+      "index": 0,
+      "how": "field:s"
+     }
+    }
+   ]
+  },
+  {
+   "kind": "store",
+   "property": "id",
+   "file": "js-literal-structs-helper.js",
+   "span": {
+    "start": 441,
+    "end": 445
+   },
+   "state": "monomorphic",
+   "receivers": [
+    {
+     "kind": "plain-object",
+     "fields": [
+      "id",
+      "value",
+      "tag"
+     ],
+     "own": {
+      "index": 0,
+      "how": "field:s"
+     }
+    }
+   ]
+  },
+  {
+   "kind": "load",
+   "property": "id",
+   "file": "js-literal-structs-helper.js",
+   "span": {
+    "start": 458,
+    "end": 462
+   },
+   "state": "monomorphic",
+   "receivers": [
+    {
+     "kind": "plain-object",
+     "fields": [
+      "id",
+      "value",
+      "tag"
+     ],
+     "own": {
+      "index": 0,
+      "how": "field:s"
+     }
+    }
+   ]
+  },
+  {
+   "kind": "store",
+   "property": "value",
+   "file": "js-literal-structs-helper.js",
+   "span": {
+    "start": 499,
+    "end": 506
+   },
+   "state": "monomorphic",
+   "receivers": [
+    {
+     "kind": "plain-object",
+     "fields": [
+      "id",
+      "value",
+      "tag"
+     ],
+     "own": {
+      "index": 1,
+      "how": "field:s"
+     }
+    }
+   ]
+  },
+  {
+   "kind": "load",
+   "property": "value",
+   "file": "js-literal-structs-helper.js",
+   "span": {
+    "start": 519,
+    "end": 526
+   },
+   "state": "monomorphic",
+   "receivers": [
+    {
+     "kind": "plain-object",
+     "fields": [
+      "id",
+      "value",
+      "tag"
+     ],
+     "own": {
+      "index": 1,
+      "how": "field:s"
+     }
+    }
+   ]
+  },
+  {
+   "kind": "load",
+   "property": "id",
+   "file": "js-literal-structs-helper.js",
+   "span": {
+    "start": 566,
+    "end": 570
+   },
+   "state": "monomorphic",
+   "receivers": [
+    {
+     "kind": "plain-object",
+     "fields": [
+      "id",
+      "value",
+      "tag"
+     ],
+     "own": {
+      "index": 0,
+      "how": "field:s"
+     }
+    }
+   ]
+  },
+  {
+   "kind": "load",
+   "property": "value",
+   "file": "js-literal-structs-helper.js",
+   "span": {
+    "start": 584,
+    "end": 591
+   },
+   "state": "monomorphic",
+   "receivers": [
+    {
+     "kind": "plain-object",
+     "fields": [
+      "id",
+      "value",
+      "tag"
+     ],
+     "own": {
+      "index": 1,
+      "how": "field:s"
+     }
+    }
+   ]
+  },
+  {
+   "kind": "load",
+   "property": "value",
+   "file": "js-literal-structs-helper.js",
+   "span": {
+    "start": 606,
+    "end": 613
+   },
+   "state": "monomorphic",
+   "receivers": [
+    {
+     "kind": "plain-object",
+     "fields": [
+      "id",
+      "value",
+      "tag"
+     ],
+     "own": {
+      "index": 1,
+      "how": "field:s"
+     }
+    }
+   ]
+  },
+  {
+   "kind": "load",
+   "property": "tag",
+   "file": "js-literal-structs-helper.js",
+   "span": {
+    "start": 617,
+    "end": 622
+   },
+   "state": "monomorphic",
+   "receivers": [
+    {
+     "kind": "plain-object",
+     "fields": [
+      "id",
+      "value",
+      "tag"
+     ],
+     "own": {
+      "index": 2,
+      "how": "field:h"
+     }
+    }
+   ]
+  }
+ ]
+}

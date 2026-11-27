@@ -1,0 +1,18 @@
+{
+  // Fixture compiles adopt the nearest tsconfig's checking options. Without
+  // this file the fork's fixtures picked up client/tsconfig.json in the main
+  // checkout and NO config in a scratch worktree, so the same fixture checked
+  // strict in one place and non-strict in the other. These are the client's
+  // adopted values, pinned here so every checkout checks fixtures alike --
+  // except noFallthroughCasesInSwitch: a lint, and fixtures test fall-through.
+  "compilerOptions": {
+    "strict": true,
+    "noImplicitAny": false,
+    "noUnusedLocals": true,
+    "noUnusedParameters": true,
+    "skipLibCheck": true
+  },
+  // The fixtures' ambient world (world/fixture-world.d.ts): browser builds
+  // take the project's .d.ts files from the include directories.
+  "include": ["world"]
+}

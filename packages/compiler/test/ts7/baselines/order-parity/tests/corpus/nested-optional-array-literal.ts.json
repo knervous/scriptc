@@ -1,6 +1,0 @@
-{
- "order": [
-  "<repo>/tests/corpus/nested-optional-array-literal.ts"
- ],
- "diags": []
-}

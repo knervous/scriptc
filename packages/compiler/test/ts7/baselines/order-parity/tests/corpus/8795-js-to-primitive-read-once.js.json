@@ -1,6 +1,0 @@
-{
- "order": [
-  "<repo>/tests/corpus/8795-js-to-primitive-read-once.js"
- ],
- "diags": []
-}

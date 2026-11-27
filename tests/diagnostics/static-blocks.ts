@@ -2,18 +2,10 @@
 // silently drop the block (the classStaticBlock13 miscompile: an unreferenced
 // class's deferred diagnostics vanished along with the block's side effects).
 
-// `this` inside a static block names the class constructor and lowers over
-// it (corpus class-static-block-this-names-the-class); `super` names the
-// base constructor, which has no value form.
-class BaseClass {
-  static flag(): boolean {
-    return true;
-  }
-}
-
-class UsesSuper extends BaseClass {
+// `this` inside a static block names the class constructor — no value form.
+class UsesThis {
   static {
-    super.flag();
+    const me = this;
   }
 }
 

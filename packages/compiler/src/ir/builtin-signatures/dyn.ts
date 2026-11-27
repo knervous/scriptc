@@ -1,3 +1,4 @@
+// This file was modified from scriptc (Apache-2.0); see MODIFICATIONS.md.
 import { BIGINT_T, arrayOf, BOOL, DYN, F64, STRING, SYMBOL_T, VOID } from "../ir.js";
 import { defineLibFnSignatures } from "./shared.js";
 
@@ -144,15 +145,14 @@ export const dynSignatures = defineLibFnSignatures({
    * interned function per name, the same one dynamic values answer for
    * `.constructor`. The name is a compiler-chosen literal. */
   "dyn.globalConstructor": { argTypes: [STRING], result: DYN },
+  /* Upstream's one-operand "dyn.builtinFunction" (a timer global read as a
+   * value) shares its name with this fork's two-operand form below
+   * (namespace, name), which this fork's frontend emits; the fork's form
+   * keeps the name, and upstream's frontend form never reaches this IR. */
   /* A module class value (`http.IncomingMessage`, `http2.Http2ServerRequest`):
    * the module and class names plus the class's arity. */
   "dyn.moduleClassValue": { argTypes: [STRING, STRING, F64], result: DYN },
-  /** A builtin global function (setTimeout, setInterval, setImmediate,
-   * the clear functions, queueMicrotask, process.nextTick) read as a
-   * JavaScript value: one interned function per name whose calls run the
-   * timer APIs (it pulls in the event loop). The name is a compiler-chosen
-   * literal. */
-  "dyn.builtinFunction": { argTypes: [STRING], result: DYN },
+  "dyn.builtinFunction": { argTypes: [STRING, STRING], result: DYN },
   "dyn.namespaceNew": { argTypes: [STRING, DYN], result: DYN },
   "dyn.namespaceDefine": { argTypes: [DYN, STRING, DYN, F64, F64], result: VOID },
   "dyn.nativeRegexIs": { argTypes: [DYN], result: BOOL },
@@ -193,7 +193,8 @@ export const dynSignatures = defineLibFnSignatures({
    * first fulfillment (AggregateError once every entry rejects).
    * Thenable elements adopt; the second argument reads a program class
    * instance's `then` (the compiled property dispatch). */
-  "dyn.promiseAll": { argTypes: [DYN, DYN], result: { kind: "promise", inner: DYN } },
+  // This fork's frontend passes the entries only (no `then` reader): one operand, or upstream's two (validate.ts).
+  "dyn.promiseAll": { argTypes: [DYN], result: { kind: "promise", inner: DYN } },
   "dyn.promiseAllSettled": { argTypes: [DYN, DYN], result: { kind: "promise", inner: DYN } },
   "dyn.promiseAny": { argTypes: [DYN, DYN], result: { kind: "promise", inner: DYN } },
   /** PromiseResolve over one checked-dynamic value: the promise it holds,
@@ -329,16 +330,7 @@ export const dynSignatures = defineLibFnSignatures({
    * Symbol(Symbol.iterator))"). The frontend picks by position. */
   "dyn.packPushSpreadIter": { argTypes: [DYN, DYN], result: VOID },
   "dyn.reflectApply": { argTypes: [DYN, DYN, DYN], result: DYN },
-  /** Reflect.construct(target, argumentsList[, newTarget]): constructs
-   * `target` with the list's elements, using `newTarget`'s prototype when
-   * the third ARGUMENT is present (an explicit undefined is Node's
-   * IsConstructor TypeError, not the absent case, so the trailing bool is
-   * the call's arity). A distinct newTarget over an ordinary function runs
-   * the target over a receiver built from newTarget's prototype; the forms
-   * the runtime cannot build honestly (a class or builtin target with a
-   * distinct newTarget) throw the "not supported yet" Error rather than
-   * diverge. May throw Node's TypeErrors. */
-  "dyn.reflectConstruct": { argTypes: [DYN, DYN, DYN, BOOL], result: DYN },
+  "dyn.reflectConstruct": { argTypes: [DYN, DYN, DYN], result: DYN },
   "dyn.reflectGet": { argTypes: [DYN, DYN, DYN], result: DYN },
   /** `using` / `await using` with a dyn value (scr_json.c): usingMethod
    * runs the declaration's checks and answers what usingDispose calls at
@@ -350,7 +342,12 @@ export const dynSignatures = defineLibFnSignatures({
   "dyn.reflectDefine": { argTypes: [DYN, DYN, DYN], result: BOOL },
   "dyn.abstractEq": { argTypes: [DYN, DYN], result: BOOL },
   "dyn.assignAll": { argTypes: [DYN, DYN], result: DYN },
-
+  /** `Object.create(null)` (scr_json.c): a fresh NULL-PROTOTYPE dyn
+   * dictionary. The checked-dynamic tree's OBJ dispatch is already own-member-only —
+   * Node's null-proto answer — so the flag's whole job is the observations
+   * that SEE the prototype: inspect's "[Object: null prototype]" prefix
+   * and deepStrictEqual's prototype gate. Never throws. Static builds
+   * only; --dynamic routes Object.create through the engine instead. */
   "dyn.objCreateNullProto": { argTypes: [], result: DYN },
   "dyn.arrayPrototype": { argTypes: [], result: DYN },
   "dyn.arrayConstructor": { argTypes: [], result: DYN },
@@ -489,4 +486,35 @@ export const dynSignatures = defineLibFnSignatures({
   /** The same refusal given the transfer list's first member, an
    * ArrayBuffer: a Buffer pool slab gets Node's untransferable message. */
   "dyn.cloneTransferFailWith": { argTypes: [DYN], result: DYN },
+/* ── this fork: the browser target, native dyn and the native host ── */
+"dyn.isArrayIndex": { argTypes: [DYN, F64], result: BOOL },
+"dyn.arrayCtor": { argTypes: [DYN], result: DYN },
+"dyn.arrayFromLength": { argTypes: [DYN, DYN, DYN], result: DYN },
+"dyn.isArrayStoreIndex": { argTypes: [DYN, F64], result: BOOL },
+"dyn.arrayIndexGet": { argTypes: [DYN, F64], result: DYN },
+"dyn.isPristineArrayIterable": { argTypes: [DYN], result: BOOL },
+"dyn.arrayPatternElement": { argTypes: [DYN, F64], result: DYN },
+"dyn.arrayIteratorAt": { argTypes: [DYN, F64], result: DYN },
+"dyn.arrayIndexSet": { argTypes: [DYN, F64, DYN], result: VOID },
+"dyn.isStringIndex": { argTypes: [DYN, F64], result: BOOL },
+"dyn.stringIndexGet": { argTypes: [DYN, F64], result: DYN },
+"dyn.isTypedArrayIndex": { argTypes: [DYN, F64], result: BOOL },
+"dyn.typedArrayIndexGet": { argTypes: [DYN, F64], result: DYN },
+"dyn.typedArrayIndexSet": { argTypes: [DYN, F64, DYN], result: VOID },
+"dyn.isClassInstance": { argTypes: [DYN], result: BOOL },
+"dyn.isTypedRecord": { argTypes: [DYN], result: BOOL },
+"dyn.needsOpen": { argTypes: [DYN], result: BOOL },
+"dyn.reflectValue": { argTypes: [DYN], result: DYN },
+"dyn.symbolConstructorValue": { argTypes: [DYN, DYN, DYN], result: DYN },
+"dyn.namespaceValue": { argTypes: [DYN, STRING], result: DYN },
+"dyn.arrayConstructorValue": { argTypes: [DYN, DYN, DYN], result: DYN },
+"dyn.objectConstructorValue": { argTypes: [DYN, DYN], result: DYN },
+"dyn.constructorStatics": { argTypes: [DYN, DYN, DYN, STRING], result: DYN },
+"dyn.collectionCtor": { argTypes: [STRING], result: DYN },
+"dyn.opened": { argTypes: [DYN], result: DYN },
+"dyn.instanceOfGlobal": { argTypes: [DYN, STRING], result: BOOL },
+"dyn.proxyRevocable": { argTypes: [DYN, DYN], result: DYN },
+"dyn.reflectSetData": { argTypes: [DYN, DYN, DYN], result: BOOL },
+// `new Map(src)` / `new Set(src)` in a JS source (browser target): the collection name, then the source.
+"dyn.newCollection": { argTypes: [STRING, DYN], result: DYN },
 });

@@ -1,6 +1,0 @@
-{
- "order": [
-  "<repo>/tests/corpus/5317-map-iterate-while-mutating.ts"
- ],
- "diags": []
-}

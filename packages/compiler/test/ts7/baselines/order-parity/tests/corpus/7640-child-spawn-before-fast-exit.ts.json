@@ -1,6 +1,0 @@
-{
- "order": [
-  "<repo>/tests/corpus/7640-child-spawn-before-fast-exit.ts"
- ],
- "diags": []
-}

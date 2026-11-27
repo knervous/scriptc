@@ -1,6 +1,0 @@
-{
- "order": [
-  "<repo>/tests/corpus/5176-object-keys-typed-as-unknown.ts"
- ],
- "diags": []
-}

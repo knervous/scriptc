@@ -1,3 +1,4 @@
+// This file was modified from scriptc (Apache-2.0); see MODIFICATIONS.md.
 import { isStableReceiverOperand } from "../../ir/analysis.js";
 import type { IrExpr, IrStrIntrinsicMethod } from "../../ir/ir.js";
 import type { LlValue, LlvmEmitterContext } from "./expr-context.js";
@@ -32,6 +33,7 @@ export function borrowsStringInputs(method: IrStrIntrinsicMethod): boolean {
     case "toWellFormed":
     case "byteLength":
     case "cpAtByte":
+    case "cpAt":
       return true;
     default:
       return false;

@@ -1,3 +1,4 @@
+// This file was modified from scriptc (Apache-2.0); see MODIFICATIONS.md.
 import { commentText, unsignedHex } from "../literals.js";
 import { InternalCompilerError } from "../../errors.js";
 import type { BlockBuilder } from "./blocks.js";
@@ -255,9 +256,12 @@ export function ffiNativeTypeLl(
     case "string":
     case "bytes":
     case "mutable-bytes":
-      throw new InternalCompilerError(
-        `llvm emitter bug: span class '${cls}' has no scalar LLVM type`,
-      );
+    case "retained-bytes":
+      throw new InternalCompilerError(`llvm emitter bug: span class '${cls}' has no scalar LLVM type`);
+    case "dyn":
+      throw new InternalCompilerError("llvm emitter bug: the dyn FFI class exists only on a WasmGC shared runtime");
+    case "shared-bytes":
+      throw new InternalCompilerError("llvm emitter bug: the shared-bytes FFI return exists only on a WasmGC link");
     case "void":
       return "void";
   }

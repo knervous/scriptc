@@ -1,3 +1,4 @@
+// This file was modified from scriptc (Apache-2.0); see MODIFICATIONS.md.
 // Generated from packages/compiler/src/ir/ir.ts by scripts/generate-ir-codec.mjs.
 // Run `pnpm generate:ir-codec` after changing the IR's types.
 import type { IrBindingSource, IrClassDef, IrContracts, IrExpr, IrFfiCallbackParam, IrFfiContextParam, IrFfiImport, IrFfiParam, IrFfiReleaseParam, IrFunction, IrGlobal, IrLibCallback, IrLibExport, IrLibIdentity, IrLibSection, IrLibTrapOverlay, IrLocal, IrModule, IrNodeIslandModules, IrParam, IrRecordField, IrRecordLink, IrRecordShape, IrStmt, IrType, IrUnionDef, IrUnionDiscriminant, IrWasmModule, IrWasmUntranslated, SrcLoc } from "./ir.js";
@@ -1015,7 +1016,7 @@ function encIrType(w: IrWriter, v: IrType): void {
       w.keys(Object.keys(v), KEYS30);
       return;
     }
-    case "jsval": {
+    case "jsword": {
       w.length(26);
       w.keys(Object.keys(v), KEYS31);
       return;
@@ -1277,7 +1278,7 @@ function decIrType(r: IrReader): IrType {
       return o;
     }
     case 26: {
-      const o: Extract<IrType, { kind: "jsval" }> = { kind: "jsval" };
+      const o: Extract<IrType, { kind: "jsword" }> = { kind: "jsword" };
       return o;
     }
     case 27: {

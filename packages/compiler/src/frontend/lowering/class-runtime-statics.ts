@@ -1,9 +1,10 @@
-import { dynUndefinedExpr, varRef } from "../../ir/build.js";
+// This file was modified from scriptc (Apache-2.0); see MODIFICATIONS.md.
 import * as ts from "../ts7/adapter.js";
-import { BOOL, DYN, STRING, type IrExpr, type IrLocal, type IrStmt } from "../../ir/ir.js";
+import { BOOL, DYN, STRING, type IrExpr, type IrStmt } from "../../ir/ir.js";
+import { varRef } from "../../ir/build.js";
 import { locOf } from "../program.js";
-import type { Lowerer } from "./lowerer.js";
-import { classMemberNameOf, classValueRef, type ClassInfo } from "./lower-classes.js";
+import { dynUndefinedExpr, type Lowerer } from "./lowerer.js";
+import { classValueRef, type ClassInfo } from "./lower-classes.js";
 import { classPrototypeData } from "./class-prototypes.js";
 
 export function hasRuntimeStatics(info: ClassInfo): boolean {
@@ -13,74 +14,22 @@ export function hasRuntimeStatics(info: ClassInfo): boolean {
   return false;
 }
 
-/** Whether the class value's property table defines the static `name`: the
- * members a class that keeps its statics in the table declares there. A
- * class whose table holds only a `Symbol.hasInstance` hook keeps its other
- * statics in module storage, so those keep their own lowering. A computed
- * name defines the key it folds to (`static ['m']` defines `m`, overriding
- * an inherited static); a name keyed at run time defines no key a source
- * name reads. */
-export function runtimeStaticDefines(lowerer: Lowerer, info: ClassInfo, name: string): boolean {
-  for (let current: ClassInfo | null = info; current; current = current.base) {
-    for (const member of current.runtimeStatics ?? []) {
-      const memberName = (member as { name?: ts.PropertyName }).name;
-      if (memberName === undefined) continue;
-      if (classMemberNameOf(lowerer, memberName) === name) return true;
-    }
-  }
-  return false;
-}
-
 /** Constructor descriptors preserve inherited getter receivers and static
  * initialization order. Factory evaluations additionally own independent
- * fields and closures when the same factory is called repeatedly.
- *
- * `binding` is the local that holds the class under its own name (a
- * function-local class declaration's binding, or the inner name of a
- * function-local class expression whose body names itself), declared
- * without a value. It is assigned before any static member is defined, so
- * static initializers and methods read the class through it. */
-export function initializeRuntimeStatics(
-  lowerer: Lowerer,
-  info: ClassInfo,
-  value: IrExpr,
-  binding?: IrLocal,
-): IrExpr {
-  if (!info.runtimeStatics && !info.runtimePrototypeMembers) {
-    if (!binding) return value;
-    return {
-      kind: "seqExpr",
-      stmts: [{ kind: "assign", localId: binding.id, value, loc: value.loc }],
-      result: varRef(binding.id, binding.type, value.loc),
-      type: binding.type,
-      loc: value.loc,
-    };
-  }
+ * fields and closures when the same factory is called repeatedly. */
+export function initializeRuntimeStatics(lowerer: Lowerer, info: ClassInfo, value: IrExpr): IrExpr {
+  if (!info.runtimeStatics && !info.runtimePrototypeMembers) return value;
   const loc = value.loc;
   const local = lowerer.declareHiddenLocal("%staticClass", value.type);
   const receiver = varRef(local.id, value.type, loc);
   const boxed = lowerer.coerceToExpected(receiver, DYN);
-  const base =
-    !info.localClass && info.base && !info.def.baseValueGlobal
-      ? lowerer.coerceToExpected(classValueRef(lowerer, info.base, info.decl!), DYN)
-      : dynUndefinedExpr(loc);
+  const base = !info.localClass && info.base && !info.def.baseValueGlobal
+    ? lowerer.coerceToExpected(classValueRef(lowerer, info.base, info.decl!), DYN)
+    : dynUndefinedExpr(loc);
   const statements: IrStmt[] = [
     { kind: "varDecl", localId: local.id, init: value, loc },
-    ...(binding
-      ? [
-          {
-            kind: "assign" as const,
-            localId: binding.id,
-            value: lowerer.coerceToExpected(receiver, binding.type),
-            loc,
-          },
-        ]
-      : []),
-    {
-      kind: "exprStmt",
-      expr: { kind: "libCall", fn: "dyn.classInherit", args: [boxed, base], type: DYN, loc },
-      loc,
-    },
+    // A callable base was chained when the class initialized (the base function's own props); an absent base chains nothing.
+    ...(info.callableBase ? [] : [{ kind: "exprStmt" as const, expr: { kind: "libCall" as const, fn: "dyn.classInherit" as const, args: [boxed, base], type: DYN, loc }, loc }]),
   ];
   const previousThis = lowerer.ctx.thisLocal;
   try {
@@ -89,132 +38,41 @@ export function initializeRuntimeStatics(
     for (const member of members) {
       if (!member.name || !ts.isComputedPropertyName(member.name)) continue;
       const key = lowerer.declareHiddenLocal("%staticKey", DYN);
-      statements.push({
-        kind: "varDecl",
-        localId: key.id,
-        init: {
-          kind: "libCall",
-          fn: "dyn.propertyKey",
-          args: [lowerer.lowerExprExpecting(member.name.expression, DYN)],
-          type: DYN,
-          loc: locOf(member.name),
-        },
-        loc: locOf(member.name),
-      });
+      statements.push({ kind: "varDecl", localId: key.id, init: { kind: "libCall", fn: "dyn.propertyKey",
+        args: [lowerer.lowerExprExpecting(member.name.expression, DYN)], type: DYN, loc: locOf(member.name) }, loc: locOf(member.name) });
       computedKeys.set(member, varRef(key.id, DYN, locOf(member.name)));
     }
     lowerer.ctx.thisLocal = local;
     // Methods and accessors exist before any static initializer executes.
-    const definitions = members.filter(
-      (member) => ts.isMethodDeclaration(member) || ts.isAccessor(member),
-    );
-    const initializers = members.filter(
-      (member) => !ts.isMethodDeclaration(member) && !ts.isAccessor(member),
-    );
+    const definitions = members.filter((member) => ts.isMethodDeclaration(member) || ts.isAccessor(member));
+    const initializers = members.filter((member) => !ts.isMethodDeclaration(member) && !ts.isAccessor(member));
     for (const member of [...definitions, ...initializers]) {
       if (ts.isClassStaticBlockDeclaration(member)) {
-        statements.push(...lowerer.lowerStmts(member.body.statements.nodes));
+        statements.push(...lowerer.lowerStmts(member.body.statements));
         continue;
       }
       if (!member.name) continue;
       const memberLoc = locOf(member);
-      // A private static field: its native global, assigned in order.
-      if (ts.isPrivateIdentifier(member.name)) {
-        const name = member.name.text;
-        const field = info.staticFields.find((candidate) => candidate.name === name);
-        if (!ts.isPropertyDeclaration(member) || !field) {
-          lowerer.unsupported("SC1090", member, "private static fields without an initializer");
-        }
-        statements.push({
-          kind: "assign",
-          localId: field.globalId,
-          value: lowerer.lowerExprExpecting(member.initializer!, field.type),
-          loc: memberLoc,
-        });
-        continue;
-      }
       const key: IrExpr = ts.isComputedPropertyName(member.name)
         ? computedKeys.get(member)!
-        : lowerer.coerceToExpected(
-            {
-              kind: "strLit",
-              value: ts.isNumericLiteral(member.name)
-                ? String(Number(member.name.text))
-                : member.name.text!,
-              type: STRING,
-              loc: memberLoc,
-            },
-            DYN,
-          );
+        : lowerer.coerceToExpected({ kind: "strLit", value: ts.isNumericLiteral(member.name)
+          ? String(Number(member.name.text)) : member.name.text!, type: STRING, loc: memberLoc }, DYN);
       const fields: { key: string; value: IrExpr }[] = [
-        {
-          key: "configurable",
-          value: lowerer.coerceToExpected(
-            { kind: "boolLit", value: true, type: BOOL, loc: memberLoc },
-            DYN,
-          ),
-        },
-        {
-          key: "enumerable",
-          value: lowerer.coerceToExpected(
-            {
-              kind: "boolLit",
-              value: ts.isPropertyDeclaration(member),
-              type: BOOL,
-              loc: memberLoc,
-            },
-            DYN,
-          ),
-        },
+        { key: "configurable", value: lowerer.coerceToExpected({ kind: "boolLit", value: true, type: BOOL, loc: memberLoc }, DYN) },
+        { key: "enumerable", value: lowerer.coerceToExpected({ kind: "boolLit", value: ts.isPropertyDeclaration(member), type: BOOL, loc: memberLoc }, DYN) },
       ];
       if (ts.isGetAccessorDeclaration(member) || ts.isSetAccessorDeclaration(member)) {
-        fields.push({
-          key: ts.isGetAccessorDeclaration(member) ? "get" : "set",
-          value: lowerer.coerceToExpected(lowerer.lowerLambda(member), DYN),
-        });
+        fields.push({ key: ts.isGetAccessorDeclaration(member) ? "get" : "set", value: lowerer.coerceToExpected(lowerer.lowerLambda(member), DYN) });
       } else if (ts.isMethodDeclaration(member) || ts.isPropertyDeclaration(member)) {
-        fields.push({
-          key: "writable",
-          value: lowerer.coerceToExpected(
-            { kind: "boolLit", value: true, type: BOOL, loc: memberLoc },
-            DYN,
-          ),
-        });
-        fields.push({
-          key: "value",
-          value: ts.isMethodDeclaration(member)
-            ? lowerer.coerceToExpected(lowerer.lowerLambda(member), DYN)
-            : member.initializer
-              ? lowerer.lowerExprExpecting(member.initializer, DYN)
-              : dynUndefinedExpr(memberLoc),
-        });
+        fields.push({ key: "writable", value: lowerer.coerceToExpected({ kind: "boolLit", value: true, type: BOOL, loc: memberLoc }, DYN) });
+        fields.push({ key: "value", value: ts.isMethodDeclaration(member)
+          ? lowerer.coerceToExpected(lowerer.lowerLambda(member), DYN)
+          : member.initializer ? lowerer.lowerExprExpecting(member.initializer, DYN) : dynUndefinedExpr(memberLoc) });
       }
-      const target = info.runtimePrototypeMembers?.includes(member)
-        ? classPrototypeData(lowerer, info, memberLoc, receiver)!
-        : boxed;
-      statements.push({
-        kind: "exprStmt",
-        expr: {
-          kind: "libCall",
-          fn: "dyn.defineProperty",
-          args: [
-            target,
-            key,
-            {
-              kind: "dynObjLit",
-              fields: fields.map((field) => ({
-                key: { kind: "strLit", value: field.key, type: STRING, loc: memberLoc },
-                value: field.value,
-              })),
-              type: DYN,
-              loc: memberLoc,
-            },
-          ],
-          type: DYN,
-          loc: memberLoc,
-        },
-        loc: memberLoc,
-      });
+      const target = info.runtimePrototypeMembers?.includes(member) ? classPrototypeData(lowerer, info, memberLoc, receiver)! : boxed;
+      statements.push({ kind: "exprStmt", expr: { kind: "libCall", fn: "dyn.defineProperty", args: [target, key,
+        { kind: "dynObjLit", fields: fields.map((field) => ({ key: { kind: "strLit", value: field.key, type: STRING, loc: memberLoc }, value: field.value })), type: DYN, loc: memberLoc },
+      ], type: DYN, loc: memberLoc }, loc: memberLoc });
     }
   } finally {
     lowerer.ctx.thisLocal = previousThis;

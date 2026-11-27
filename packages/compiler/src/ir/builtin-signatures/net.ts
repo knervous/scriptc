@@ -1,3 +1,4 @@
+// This file was modified from scriptc (Apache-2.0); see MODIFICATIONS.md.
 import {
   BOOL,
   BYTES_U8,
@@ -440,4 +441,7 @@ export const netSignatures = defineLibFnSignatures({
    * data), and server.close() consults it before closing. */
   "net.serverCloseBind": { argTypes: [NETSERVER_T], result: VOID },
   "net.serverSetCloseOverride": { argTypes: [NETSERVER_T, null], result: VOID },
+/** The fork's frontend: net.connect over a RUNTIME option bag (computed keys): Node-order validation, then the
+ * compiler-rendered fence. ALWAYS THROWS. May-throw seed. */
+"net.connectOptsChk": { argTypes: [DYN, STRING], result: VOID },
 });

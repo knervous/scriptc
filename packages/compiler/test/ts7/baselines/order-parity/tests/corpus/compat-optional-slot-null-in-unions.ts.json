@@ -1,6 +1,0 @@
-{
- "order": [
-  "<repo>/tests/corpus/compat-optional-slot-null-in-unions.ts"
- ],
- "diags": []
-}

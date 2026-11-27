@@ -1,3 +1,4 @@
+// This file was modified from scriptc (Apache-2.0); see MODIFICATIONS.md.
 /* scriptc runtime — cycle collection (scr_cycle.c), the small-object
  * allocator (scr_alloc.c) and cross-thread publication (scr_publish.c).
  * Included by scr_runtime.h, which says where new declarations go. */
@@ -338,11 +339,22 @@ void scr_cyc_free(void *obj); /* frees the block, header included */
  *
  * Compiled to the plain system calls under SCR_RC_AUDIT and AddressSanitizer
  * (the audit lane must see every logical free as a real free), on targets
- * without a cheap address-space reservation (wasm32, Windows, 32-bit), and
- * in thread-instanced library archives, where several runtime instances
- * run on embedder threads the runtime does not manage. Elsewhere the
- * allocator state is unsynchronized: runtime objects are only allocated
- * and freed on their runtime thread (native worker jobs never touch them).
+ * without a cheap address-space reservation (wasm32, 32-bit), with
+ * -DSCR_NO_SMALL_ALLOC (the way back to the system allocator), and in
+ * thread-instanced library archives, where several runtime instances run
+ * on embedder threads the runtime does not manage. Windows reserves the
+ * window with VirtualAlloc and commits pages as the bump limits reach them
+ * (scr_alloc.c). Elsewhere the allocator state is unsynchronized: runtime
+ * objects are only allocated and freed on their runtime thread (native
+ * worker jobs never touch them).
+ *
+ * Thread-instanced executables (SCR_THREAD_INSTANCES without SCR_LIB: this
+ * fork's threaded native programs, one runtime instance per thread) on
+ * Windows use the workers' per-thread arenas below (SCR_SA_PER_THREAD), so
+ * a value one instance hands another (the client's seam) can be freed on
+ * either thread. Elsewhere they keep the system allocator: there the
+ * program-lifetime region (SCR_COMPACT_REFS) and the Linux page policies
+ * of scr_alloc.c assume one script thread or worker threads.
  *
  * Worker executables (SCR_WORKERS) give every script thread its own
  * allocator: `scr_sa` is thread-local and describes the thread's ARENA, one
@@ -360,9 +372,9 @@ void scr_cyc_free(void *obj); /* frees the block, header included */
  * so they stay valid after their allocating thread exits. Threads beyond
  * SCR_SA_ARENAS, or a refused reservation, use the system allocator. */
 #include <stdlib.h>
-#if defined(SCR_RC_AUDIT) || defined(__SANITIZE_ADDRESS__) || defined(__wasi__) || \
-    defined(__wasm__) || defined(_WIN32) || UINTPTR_MAX != UINT64_MAX ||              \
-    (defined(SCR_LIB) && defined(SCR_THREAD_INSTANCES))
+#if defined(SCR_RC_AUDIT) || defined(__SANITIZE_ADDRESS__) || defined(__wasi__) ||          \
+    defined(__wasm__) || defined(SCR_NO_SMALL_ALLOC) || UINTPTR_MAX != UINT64_MAX ||           \
+    (defined(SCR_THREAD_INSTANCES) && (defined(SCR_LIB) || !defined(_WIN32)))
 #define SCR_SMALL_ALLOC 0
 #elif defined(__has_feature)
 #if __has_feature(address_sanitizer)
@@ -372,6 +384,11 @@ void scr_cyc_free(void *obj); /* frees the block, header included */
 #endif
 #else
 #define SCR_SMALL_ALLOC 1
+#endif
+/* Every script thread its own arena: worker executables, and the
+ * thread-instanced executables whose allocator is live (above). */
+#if SCR_SMALL_ALLOC && (defined(SCR_WORKERS) || defined(SCR_THREAD_INSTANCES))
+#define SCR_SA_PER_THREAD 1
 #endif
 
 void *scr_mem_realloc(void *p, size_t n);
@@ -407,7 +424,7 @@ typedef struct ScrPlrChunk {
   char *next;
   char *limit;
 } ScrPlrChunk;
-#if defined(SCR_WORKERS) || (defined(SCR_LIB) && defined(SCR_THREAD_INSTANCES))
+#if defined(SCR_WORKERS) || defined(SCR_THREAD_INSTANCES)
 extern _Thread_local ScrPlrChunk scr_plr_chunk;
 #else
 extern ScrPlrChunk scr_plr_chunk;
@@ -559,6 +576,12 @@ _Static_assert(offsetof(ScrThreadHot, sa) == 0 && offsetof(ScrThreadHot, cyc_liv
                    offsetof(ScrThreadHot, weak_dispose_hook) == 1000,
                "llvm/alloc.ts addresses ScrThreadHot fields at these offsets");
 #endif
+#elif defined(SCR_SA_PER_THREAD)
+/* Thread-instanced executables: the calling thread's arena. Emitted code
+ * never inlines the allocator there (llvm/alloc.ts inlineAllocSupported),
+ * so the state is a thread-local of its own; the collector's counts are
+ * the instance's SCR_TL globals. */
+extern _Thread_local ScrSaState scr_sa;
 #else
 extern ScrSaState scr_sa;
 #endif
@@ -596,7 +619,15 @@ void scr_sa_loop_waiting(bool waiting);
 #define SCR_SA_FREE_FOREIGN(p) scr_sa_free_foreign(p)
 #else
 #define scr_sa_thread_shares() ((void)0)
-#if SCR_SMALL_ALLOC
+#ifdef SCR_SA_PER_THREAD
+/* Thread-instanced executables: a block outside the calling thread's
+ * arena, another arena's (remote free) or the system's. */
+void scr_sa_free_foreign(void *p);
+/* The calling thread is done with its arena. A thread's arena is parked
+ * when the thread exits (scr_alloc.c); tests park it themselves. */
+void scr_sa_thread_park(void);
+#define SCR_SA_FREE_FOREIGN(p) scr_sa_free_foreign(p)
+#elif SCR_SMALL_ALLOC
 /* A block outside the allocator's own chunks: the system's. */
 void scr_sa_free_foreign(void *p);
 #define SCR_SA_FREE_FOREIGN(p) scr_sa_free_foreign(p)
@@ -657,7 +688,7 @@ void *scr_mem_realloc_ref(void *p, size_t n);
 size_t scr_mem_block_size(const void *p);
 
 static inline void scr_mem_free(void *p) {
-#ifndef SCR_WORKERS
+#ifndef SCR_SA_PER_THREAD
   {
     uintptr_t off = (uintptr_t)p - scr_sa.base;
     if (off < scr_sa_slice_span) {
@@ -854,8 +885,10 @@ void scr_cyc_pub_fill(void);
  * optimized emitted code appends through a per-module helper
  * (llvm/alloc.ts cycleAppendHelper) that addresses roots[0].v, roots[0].n,
  * window and alloc_trigger at fixed offsets. Builds whose collector state
- * is thread-local (worker executables, thread-instanced libraries) never
- * append on a fast path. */
+ * is thread-local (worker executables, thread-instanced libraries, and this
+ * fork's thread-instanced executables, whose instances each run their own
+ * collector on their own thread) never append on a fast path: their buffers
+ * are the instance's. */
 typedef struct ScrCycBuffer {
   void **v;
   size_t n, cap;
@@ -871,7 +904,7 @@ typedef struct ScrCycBuffers {
    * the window's formula lies above the window (scr_cyc_window_update). */
   size_t window_slack;
 } ScrCycBuffers;
-#if !defined(SCR_WORKERS) && !(defined(SCR_LIB) && defined(SCR_THREAD_INSTANCES))
+#if !defined(SCR_WORKERS) && !defined(SCR_THREAD_INSTANCES)
 #define SCR_CYC_INLINE_BUFFERING 1
 extern ScrCycBuffers scr_cyc_buffers;
 #if UINTPTR_MAX == UINT64_MAX

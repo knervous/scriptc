@@ -1,3 +1,4 @@
+// This file was modified from scriptc (Apache-2.0); see MODIFICATIONS.md.
 /* Inline UTF-16 reads of proven-ASCII strings.
  *
  * Strings are UTF-8, so `length` and `charCodeAt` need a UTF-16 mapping in
@@ -140,10 +141,16 @@ function loadLength(sz: string): string[] {
 
 /** Whether emitted reads use the runtime's scan receiver: from ordinary
  * global storage, or, in worker executables, from the thread's static TLS
- * block (executableTls). */
+ * block (executableTls). This fork's pieces of a multi-program process
+ * (nativeEntry: the threaded native layout, whose runtime is built with
+ * SCR_THREAD_INSTANCES) keep the receiver thread-local without a static TLS
+ * block of their own, so they call the runtime as thread-instanced
+ * libraries do: reading the plain global addressed one thread's TLS
+ * template offset instead of the thread's receiver. */
 export function stringScanInline(host: LlvmEmitterContext): boolean {
   return (
-    host.executableTls || (host.mod.workers !== true && host.mod.lib?.threadInstances !== true)
+    host.executableTls ||
+    (host.mod.workers !== true && host.mod.lib?.threadInstances !== true && host.nativeEntry === null)
   );
 }
 

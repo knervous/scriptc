@@ -1,7 +1,0 @@
-{
- "order": [
-  "<repo>/tests/corpus/7623-key-order-javascript-built-records/lib.js",
-  "<repo>/tests/corpus/7623-key-order-javascript-built-records/main.ts"
- ],
- "diags": []
-}

@@ -1,6 +1,0 @@
-{
- "order": [
-  "<repo>/tests/corpus/receiver-before-effectful-key.ts"
- ],
- "diags": []
-}

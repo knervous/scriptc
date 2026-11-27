@@ -1,6 +1,0 @@
-{
- "order": [
-  "<repo>/tests/corpus/5150-small-array-inline-slots.ts"
- ],
- "diags": []
-}

@@ -1,6 +1,0 @@
-{
- "order": [
-  "<repo>/tests/fixtures/npm/cases/island-instanceof-regexp/main.ts"
- ],
- "diags": []
-}

@@ -1,6 +1,0 @@
-{
- "order": [
-  "<repo>/tests/corpus/2984-http-static-close-upgrade.ts"
- ],
- "diags": []
-}

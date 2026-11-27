@@ -1,3 +1,0 @@
-{
-    "node-builtin.http2": ["tests/corpus/2260-http2-constants.cjs"]
-}

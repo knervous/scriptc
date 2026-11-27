@@ -1,0 +1,90 @@
+{
+  "compiler": {
+    "rev": "0947779e2448af54e328473b4b5ef2a7ac9ecd33",
+    "dirty": true,
+    "srcDiff": "b6863ea35a4f997a",
+    "srcTree": "ecf8ec8c08be61c0",
+    "distTree": "ed0353b13b75ecff",
+    "optimizer": {
+      "path": "vendor/binaryen-133/binaryen-version_133",
+      "tree": "d6bfc55fd7cea4c1"
+    },
+    "binaryenJs": "132.0.0",
+    "node": "v26.7.0",
+    "arch": "arm64"
+  },
+  "checks": [
+    {
+      "optimization": "dev",
+      "values": [
+        26,
+        47,
+        35,
+        35,
+        59
+      ],
+      "nodeMatched": true,
+      "staticBaselineIdentical": true,
+      "boundaryChecks": true,
+      "records": [
+        "r0"
+      ],
+      "bytes": 2489
+    },
+    {
+      "optimization": "release",
+      "values": [
+        26,
+        47,
+        35,
+        35,
+        59
+      ],
+      "nodeMatched": true,
+      "staticBaselineIdentical": true,
+      "boundaryChecks": true,
+      "records": [
+        "r0"
+      ],
+      "bytes": 513
+    },
+    {
+      "refusal": "dynamic",
+      "reasons": [
+        "closed profile: export total must use the scalar entry ABI",
+        "closed profile: type jsval has no admitted representation in this slice",
+        "closed profile: operation jsExit is not admitted",
+        "closed profile: type jsval has no admitted representation in this slice",
+        "closed profile: operation jsOp is not admitted"
+      ]
+    },
+    {
+      "refusal": "mutation",
+      "reasons": [
+        "closed profile: type jsval has no admitted representation in this slice",
+        "closed profile: type jsval has no admitted representation in this slice",
+        "closed profile: operation jsMarshal is not admitted",
+        "closed profile: operation jsOp is not admitted",
+        "closed profile: type jsval has no admitted representation in this slice",
+        "closed profile: type jsval has no admitted representation in this slice",
+        "closed profile: operation jsMarshal is not admitted"
+      ]
+    },
+    {
+      "refusal": "host",
+      "reasons": [
+        "closed profile: operation jsExit is not admitted",
+        "closed profile: type jsval has no admitted representation in this slice",
+        "closed profile: operation jsOp is not admitted",
+        "closed profile: type jsval has no admitted representation in this slice",
+        "closed profile: operation jsOp is not admitted"
+      ]
+    },
+    {
+      "refusal": "reference-entry",
+      "reasons": [
+        "closed profile: export total must use the scalar entry ABI"
+      ]
+    }
+  ]
+}

@@ -1,1 +1,0 @@
-{ "name": "island-server-fibers", "private": true, "type": "module", "scriptc": { "packages": { "server-kit": "node" } } }

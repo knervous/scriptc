@@ -1,6 +1,0 @@
-{
- "order": [
-  "<repo>/tests/corpus/compat-errors-cert-future.mjs"
- ],
- "diags": []
-}

@@ -1,6 +1,0 @@
-{
- "order": [
-  "<repo>/tests/corpus/unassigned-let-library-callbacks.ts"
- ],
- "diags": []
-}

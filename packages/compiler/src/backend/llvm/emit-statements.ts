@@ -1,4 +1,6 @@
+// This file was modified from scriptc (Apache-2.0); see MODIFICATIONS.md.
 /* LlEmitter's statement emission: the statement switch, try/catch, switch, loop copies, speculative writes and string self-concatenation. */
+import { emitFrozenRecordGuard } from "./frozen-records.js";
 import { isDeferredDiagnosticFence } from "../../ir/deferred-fence.js";
 import { emitInlineArrayInit, inlineFieldTail } from "./inline-arrays.js";
 import { emitLoopBytesHeaders } from "./bytes-headers.js";
@@ -576,6 +578,8 @@ export function emitStmtBody(emitter: LlEmitter, s: IrStmt): void {
         emitter.provenDenseIndex(s.arr, s.index),
         int32,
       );
+      // A frozen array's write throws from the runtime (Object.freeze, this fork).
+      if (emitter.arraysMayFreeze) emitter.emitPendingCheck();
       break;
     }
     case "arraySetLength": {
@@ -675,6 +679,7 @@ export function emitStmtBody(emitter: LlEmitter, s: IrStmt): void {
       if (s.kind === "arrayDelete")
         B.line(`call zeroext i1 @${fn}(ptr ${arr.name}, double ${idx.name})`);
       else B.line(`call void @${fn}(ptr ${arr.name}, double ${idx.name})`);
+      if (emitter.arraysMayFreeze) emitter.emitPendingCheck();
       break;
     }
     case "bytesSet": {
@@ -814,11 +819,21 @@ export function emitStmtBody(emitter: LlEmitter, s: IrStmt): void {
         s.kind === "fieldSet"
           ? emitter.classFieldPtr(obj.name, s.className, s.field, "compressed")
           : emitter.recordFieldPtr(obj.name, s.shapeId, s.field);
+      // A record the program may freeze: the write tests its frozen bit first (a sloppy-mode skip releases the
+      // value it would have moved in).
+      const frozenDone = s.kind === "recordSet"
+        ? emitFrozenRecordGuard(emitter, obj.name, s.shapeId, emitter.internLiteral(s.field), 0, s.loc,
+          () => { if (isRefCounted(type)) emitter.releaseFrame(v.name, type); })
+        : null;
       // A result-slot entry fills zeroed caller storage, each field once; a
       // constructor's first store to its own field fills the slot `new` left.
       if (resultSlotStore(emitter.currentFunctionName, s) || emitter.freshFieldStores.has(s))
         emitter.initField(ptr, type, inline, v);
       else emitter.replaceField(ptr, type, inline, v);
+      if (frozenDone) {
+        B.br(frozenDone);
+        B.startBlock(frozenDone);
+      }
       if (
         s.kind === "fieldSet" &&
         s.field === "name" &&
@@ -850,9 +865,27 @@ export function emitStmtBody(emitter: LlEmitter, s: IrStmt): void {
         emitter.emitPublishedFieldGuard(obj.name, null, "[key]");
       }
       const ovf = emitter.recordOvfPtr(obj.name, s.shapeId);
+      // A frozen record refuses the delete of a key it has (deleting an absent key is no change).
+      let frozenDone: string | null = null;
+      if (emitter.freezableShapes.has(s.shapeId)) {
+        emitter.declare(`declare zeroext i1 @scr_map_has_str(ptr, ptr)`);
+        const present = B.tmp();
+        B.line(`${present} = call zeroext i1 @scr_map_has_str(ptr ${ovf}, ptr ${key.name})`);
+        const check = B.newLabel("frozen.delete");
+        const plain = B.newLabel("frozen.absent");
+        B.condBr(present, check, plain);
+        B.startBlock(check);
+        frozenDone = emitFrozenRecordGuard(emitter, obj.name, s.shapeId, key.name, 2, s.loc, () => {});
+        B.br(plain);
+        B.startBlock(plain);
+      }
       emitter.declare(`declare zeroext i1 @scr_map_delete_str(ptr, ptr)`);
       const t = B.tmp();
       B.line(`${t} = call zeroext i1 @scr_map_delete_str(ptr ${ovf}, ptr ${key.name})`);
+      if (frozenDone) {
+        B.br(frozenDone);
+        B.startBlock(frozenDone);
+      }
       break;
     }
     case "recordKeySet": {
@@ -896,10 +929,37 @@ export function emitStmtBody(emitter: LlEmitter, s: IrStmt): void {
       const v = emitter.emitExpr(s.value);
       if (emitter.publishedTypes?.recordGuarded(s.shapeId) === true)
         emitter.emitPublishedFieldGuard(obj.name, null, "[key]");
-      if (isRefCounted(v.type)) emitter.toHeap(v);
       const shape = emitter.recordShape(s.shapeId);
       // The fields a key can name (never the hidden key-order index).
       const keyed = keyedRecordFields(shape);
+      // A record the program may freeze: the write tests its frozen bit first. A key the record has assigns, any
+      // other adds (Node's two messages); a sloppy-mode skip releases the value the write would have moved in.
+      let frozenDone: string | null = null;
+      if (emitter.freezableShapes.has(s.shapeId)) {
+        let present = "false";
+        for (const f of keyed) {
+          const hit = B.tmp(), any = B.tmp();
+          B.line(`${hit} = call zeroext i1 @scr_str_eq(ptr ${key.name}, ptr ${emitter.internLiteral(f.name)})`);
+          B.line(`${any} = or i1 ${present}, ${hit}`);
+          present = any;
+        }
+        if (shape.indexValue) {
+          emitter.declare(`declare zeroext i1 @scr_map_has_str(ptr, ptr)`);
+          const has = B.tmp(), any = B.tmp();
+          B.line(`${has} = call zeroext i1 @scr_map_has_str(ptr ${emitter.recordOvfPtr(obj.name, s.shapeId)}, ptr ${key.name})`);
+          B.line(`${any} = or i1 ${present}, ${has}`);
+          present = any;
+        }
+        emitter.declare(`declare zeroext i1 @scr_str_eq(ptr, ptr)`);
+        frozenDone = emitFrozenRecordGuard(emitter, obj.name, s.shapeId, key.name, { assignWhen: present }, s.loc,
+          () => { if (isRefCounted(v.type)) emitter.releaseFrame(v.name, v.type); });
+      }
+      const finish = (): void => {
+        if (!frozenDone) return;
+        B.br(frozenDone);
+        B.startBlock(frozenDone);
+      };
+      if (isRefCounted(v.type)) emitter.toHeap(v);
       // Signature-free shapes dispatch over their (one-typed) declared
       // fields and TRAP on a miss (scr_record_key_miss — JS would add
       // the property, which a monomorphic struct cannot); overflow
@@ -915,6 +975,7 @@ export function emitStmtBody(emitter: LlEmitter, s: IrStmt): void {
         // insert — no field chain.
         const ovf = emitter.recordOvfPtr(obj.name, s.shapeId);
         emitter.mapSet(ovf, "str", vAcc, key.name, v.name);
+        finish();
         break;
       }
       const join = B.newLabel("rks.j");
@@ -992,6 +1053,7 @@ export function emitStmtBody(emitter: LlEmitter, s: IrStmt): void {
         // MAY THROW exactly when a dyn value can validate against a
         // declared field (stmts.ts's condition).
         if (keyed.length > 0) emitter.emitPendingCheck();
+        finish();
         break;
       }
       for (const f of keyed) {
@@ -1043,12 +1105,14 @@ export function emitStmtBody(emitter: LlEmitter, s: IrStmt): void {
         B.br(join);
         B.startBlock(join);
         emitter.emitPendingCheck();
+        finish();
         break;
       }
       const ovf = emitter.recordOvfPtr(obj.name, s.shapeId);
       emitter.mapSet(ovf, "str", vAcc, key.name, v.name);
       B.br(join);
       B.startBlock(join);
+      finish();
       break;
     }
     case "block": {

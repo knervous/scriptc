@@ -1,0 +1,4 @@
+data 200 text/plain;charset=utf-8 hi there
+blob 200 text/plain blob body
+http 200 hello from the lane
+then 200

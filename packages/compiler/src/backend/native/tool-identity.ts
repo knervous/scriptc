@@ -1,3 +1,4 @@
+// This file was modified from scriptc (Apache-2.0); see MODIFICATIONS.md.
 import { toolchainEnvironmentFingerprint } from "../toolchain-environment.js";
 import { createHash, randomUUID } from "node:crypto";
 import { constants as fsConstants } from "node:fs";
@@ -37,6 +38,7 @@ export async function executableNativeEnvironmentFingerprint(
     .update("\0");
   for (const name of [
     "PATH",
+    "SCRIPTC_FETCH_CURL",
     "SCRIPTC_TEST_RUNTIME_SRC_DIR",
     "SCRIPTC_TEST_VENDOR_CACHE_DIR",
     "SCRIPTC_TEST_TRUST_COMPILER_WRAPPER",

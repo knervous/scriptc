@@ -1,6 +1,0 @@
-{
- "order": [
-  "<repo>/tests/corpus/fs-close-no-callback-error.cjs"
- ],
- "diags": []
-}

@@ -1,3 +1,4 @@
+// This file was modified from scriptc (Apache-2.0); see MODIFICATIONS.md.
 // Generated from packages/compiler/src/ir/ir.ts by scripts/generate-ir-fields.mjs.
 // Run `pnpm generate:ir-fields` after changing the fields of an IR node.
 import type { IrExpr, IrStmt, IrType } from "./ir.js";
@@ -185,6 +186,10 @@ export function eachStringField(
       if (typeof node.fnName === "string") visit(node.fnName, "fnName");
       return;
     }
+    case "dynFromJsval": {
+      visit(node.kind, "kind");
+      return;
+    }
     case "dynHasKey": {
       visit(node.kind, "kind");
       visit(node.key, "key");
@@ -194,6 +199,7 @@ export function eachStringField(
       visit(node.kind, "kind");
       visit(node.method, "method");
       visit(node.calleeName, "calleeName");
+      if (typeof node.domInterface === "string") visit(node.domInterface, "domInterface");
       return;
     }
     case "dynIterN": {
@@ -292,6 +298,26 @@ export function eachStringField(
     case "intrinsic": {
       visit(node.kind, "kind");
       visit(node.name, "name");
+      return;
+    }
+    case "jsBridgePromise": {
+      visit(node.kind, "kind");
+      return;
+    }
+    case "jsExit": {
+      visit(node.kind, "kind");
+      return;
+    }
+    case "jsMarshal": {
+      visit(node.kind, "kind");
+      return;
+    }
+    case "jsOp": {
+      visit(node.kind, "kind");
+      visit(node.op, "op");
+      if (typeof node.name === "string") visit(node.name, "name");
+      if (typeof node.calleeName === "string") visit(node.calleeName, "calleeName");
+      if (typeof node.domInterface === "string") visit(node.domInterface, "domInterface");
       return;
     }
     case "jsonStringify": {
@@ -933,6 +959,14 @@ export function walkExprFields(node: IrExpr, walker: IrFieldWalker, skipType: bo
       }
       return;
     }
+    case "dynFromJsval": {
+      walker.string(node.kind);
+      walkExprFields(node.value, walker, skipType);
+      if (!skipType) {
+        walkTypeFields(node.type, walker, skipType);
+      }
+      return;
+    }
     case "dynHasKey": {
       walker.string(node.kind);
       walker.string(node.key);
@@ -949,6 +983,9 @@ export function walkExprFields(node: IrExpr, walker: IrFieldWalker, skipType: bo
       walker.string(node.calleeName);
       if (node.calleeNameValue !== undefined && node.calleeNameValue !== null) {
         walkExprFields(node.calleeNameValue, walker, skipType);
+      }
+      if (node.domInterface !== undefined && node.domInterface !== null) {
+        walker.string(node.domInterface);
       }
       for (const item13 of node.args) {
         walkExprFields(item13, walker, skipType);
@@ -1104,6 +1141,50 @@ export function walkExprFields(node: IrExpr, walker: IrFieldWalker, skipType: bo
       }
       return;
     }
+    case "jsBridgePromise": {
+      walker.string(node.kind);
+      walkExprFields(node.value, walker, skipType);
+      if (!skipType) {
+        walkTypeFields(node.type, walker, skipType);
+      }
+      return;
+    }
+    case "jsExit": {
+      walker.string(node.kind);
+      walkExprFields(node.value, walker, skipType);
+      if (!skipType) {
+        walkTypeFields(node.type, walker, skipType);
+      }
+      return;
+    }
+    case "jsMarshal": {
+      walker.string(node.kind);
+      walkExprFields(node.value, walker, skipType);
+      if (!skipType) {
+        walkTypeFields(node.type, walker, skipType);
+      }
+      return;
+    }
+    case "jsOp": {
+      walker.string(node.kind);
+      walker.string(node.op);
+      if (node.name !== undefined && node.name !== null) {
+        walker.string(node.name);
+      }
+      if (node.calleeName !== undefined && node.calleeName !== null) {
+        walker.string(node.calleeName);
+      }
+      if (node.domInterface !== undefined && node.domInterface !== null) {
+        walker.string(node.domInterface);
+      }
+      for (const item17 of node.args) {
+        walkExprFields(item17, walker, skipType);
+      }
+      if (!skipType) {
+        walkTypeFields(node.type, walker, skipType);
+      }
+      return;
+    }
     case "jsonStringify": {
       walker.string(node.kind);
       walkExprFields(node.value, walker, skipType);
@@ -1118,8 +1199,8 @@ export function walkExprFields(node: IrExpr, walker: IrFieldWalker, skipType: bo
     case "libCall": {
       walker.string(node.kind);
       walker.string(node.fn);
-      for (const item17 of node.args) {
-        walkExprFields(item17, walker, skipType);
+      for (const item18 of node.args) {
+        walkExprFields(item18, walker, skipType);
       }
       if (!skipType) {
         walkTypeFields(node.type, walker, skipType);
@@ -1145,8 +1226,8 @@ export function walkExprFields(node: IrExpr, walker: IrFieldWalker, skipType: bo
       walker.string(node.kind);
       walker.string(node.method);
       walkExprFields(node.receiver, walker, skipType);
-      for (const item18 of node.args) {
-        walkExprFields(item18, walker, skipType);
+      for (const item19 of node.args) {
+        walkExprFields(item19, walker, skipType);
       }
       if (!skipType) {
         walkTypeFields(node.type, walker, skipType);
@@ -1156,9 +1237,9 @@ export function walkExprFields(node: IrExpr, walker: IrFieldWalker, skipType: bo
     case "mapNew": {
       walker.string(node.kind);
       if (node.seed !== undefined && node.seed !== null) {
-        for (const item19 of node.seed) {
-          walkExprFields(item19.key, walker, skipType);
-          walkExprFields(item19.value, walker, skipType);
+        for (const item20 of node.seed) {
+          walkExprFields(item20.key, walker, skipType);
+          walkExprFields(item20.value, walker, skipType);
         }
       }
       if (!skipType) {
@@ -1177,8 +1258,8 @@ export function walkExprFields(node: IrExpr, walker: IrFieldWalker, skipType: bo
     case "new": {
       walker.string(node.kind);
       walker.string(node.className);
-      for (const item20 of node.args) {
-        walkExprFields(item20, walker, skipType);
+      for (const item21 of node.args) {
+        walkExprFields(item21, walker, skipType);
       }
       if (!skipType) {
         walkTypeFields(node.type, walker, skipType);
@@ -1196,8 +1277,8 @@ export function walkExprFields(node: IrExpr, walker: IrFieldWalker, skipType: bo
     case "newValue": {
       walker.string(node.kind);
       walkExprFields(node.callee, walker, skipType);
-      for (const item21 of node.args) {
-        walkExprFields(item21, walker, skipType);
+      for (const item22 of node.args) {
+        walkExprFields(item22, walker, skipType);
       }
       if (!skipType) {
         walkTypeFields(node.type, walker, skipType);
@@ -1263,9 +1344,9 @@ export function walkExprFields(node: IrExpr, walker: IrFieldWalker, skipType: bo
     case "recordClone": {
       walker.string(node.kind);
       walkExprFields(node.source, walker, skipType);
-      for (const item22 of node.overrides) {
-        walker.string(item22.name);
-        walkExprFields(item22.value, walker, skipType);
+      for (const item23 of node.overrides) {
+        walker.string(item23.name);
+        walkExprFields(item23.value, walker, skipType);
       }
       if (!skipType) {
         walkTypeFields(node.type, walker, skipType);
@@ -1304,9 +1385,9 @@ export function walkExprFields(node: IrExpr, walker: IrFieldWalker, skipType: bo
     }
     case "recordLit": {
       walker.string(node.kind);
-      for (const item23 of node.fields) {
-        walker.string(item23.name);
-        walkExprFields(item23.value, walker, skipType);
+      for (const item24 of node.fields) {
+        walker.string(item24.name);
+        walkExprFields(item24.value, walker, skipType);
       }
       if (!skipType) {
         walkTypeFields(node.type, walker, skipType);
@@ -1345,8 +1426,8 @@ export function walkExprFields(node: IrExpr, walker: IrFieldWalker, skipType: bo
       walker.string(node.kind);
       walker.string(node.method);
       walkExprFields(node.receiver, walker, skipType);
-      for (const item24 of node.args) {
-        walkExprFields(item24, walker, skipType);
+      for (const item25 of node.args) {
+        walkExprFields(item25, walker, skipType);
       }
       if (!skipType) {
         walkTypeFields(node.type, walker, skipType);
@@ -1371,8 +1452,8 @@ export function walkExprFields(node: IrExpr, walker: IrFieldWalker, skipType: bo
     }
     case "seqExpr": {
       walker.string(node.kind);
-      for (const item25 of node.stmts) {
-        walkStmtFields(item25, walker, skipType);
+      for (const item26 of node.stmts) {
+        walkStmtFields(item26, walker, skipType);
       }
       walkExprFields(node.result, walker, skipType);
       if (!skipType) {
@@ -1384,8 +1465,8 @@ export function walkExprFields(node: IrExpr, walker: IrFieldWalker, skipType: bo
       walker.string(node.kind);
       walker.string(node.method);
       walkExprFields(node.receiver, walker, skipType);
-      for (const item26 of node.args) {
-        walkExprFields(item26, walker, skipType);
+      for (const item27 of node.args) {
+        walkExprFields(item27, walker, skipType);
       }
       if (!skipType) {
         walkTypeFields(node.type, walker, skipType);
@@ -1434,8 +1515,8 @@ export function walkExprFields(node: IrExpr, walker: IrFieldWalker, skipType: bo
       walker.string(node.kind);
       walker.string(node.method);
       walkExprFields(node.receiver, walker, skipType);
-      for (const item27 of node.args) {
-        walkExprFields(item27, walker, skipType);
+      for (const item28 of node.args) {
+        walkExprFields(item28, walker, skipType);
       }
       if (!skipType) {
         walkTypeFields(node.type, walker, skipType);
@@ -1453,8 +1534,8 @@ export function walkExprFields(node: IrExpr, walker: IrFieldWalker, skipType: bo
     case "templateStrings": {
       walker.string(node.kind);
       walker.string(node.key);
-      for (const item28 of node.cooked) {
-        walker.string(item28);
+      for (const item29 of node.cooked) {
+        walker.string(item29);
       }
       if (!skipType) {
         walkTypeFields(node.type, walker, skipType);
@@ -1558,7 +1639,7 @@ export function walkExprFields(node: IrExpr, walker: IrFieldWalker, skipType: bo
       walker.string(node.kind);
       walker.string(node.fromId);
       walker.string(node.unionId);
-      for (const item29 of node.tags) {
+      for (const item30 of node.tags) {
       }
       walkExprFields(node.value, walker, skipType);
       if (!skipType) {
@@ -1625,15 +1706,15 @@ export function walkExprFields(node: IrExpr, walker: IrFieldWalker, skipType: bo
       walker.string(node.kind);
       walker.string(node.className);
       walker.string(node.method);
-      for (const item30 of node.args) {
-        walkExprFields(item30, walker, skipType);
+      for (const item31 of node.args) {
+        walkExprFields(item31, walker, skipType);
       }
       if (!skipType) {
         walkTypeFields(node.type, walker, skipType);
       }
       if (node.targets !== undefined && node.targets !== null) {
-        for (const item31 of node.targets) {
-          walker.string(item31);
+        for (const item32 of node.targets) {
+          walker.string(item32);
         }
       }
       return;
@@ -1695,12 +1776,12 @@ export function walkStmtFields(node: IrStmt, walker: IrFieldWalker, skipType: bo
     case "block": {
       walker.string(node.kind);
       if (node.labels !== undefined && node.labels !== null) {
-        for (const item32 of node.labels) {
-          walker.string(item32);
+        for (const item33 of node.labels) {
+          walker.string(item33);
         }
       }
-      for (const item33 of node.body) {
-        walkStmtFields(item33, walker, skipType);
+      for (const item34 of node.body) {
+        walkStmtFields(item34, walker, skipType);
       }
       return;
     }
@@ -1727,13 +1808,13 @@ export function walkStmtFields(node: IrStmt, walker: IrFieldWalker, skipType: bo
     }
     case "doWhile": {
       walker.string(node.kind);
-      for (const item34 of node.body) {
-        walkStmtFields(item34, walker, skipType);
+      for (const item35 of node.body) {
+        walkStmtFields(item35, walker, skipType);
       }
       walkExprFields(node.cond, walker, skipType);
       if (node.labels !== undefined && node.labels !== null) {
-        for (const item35 of node.labels) {
-          walker.string(item35);
+        for (const item36 of node.labels) {
+          walker.string(item36);
         }
       }
       return;
@@ -1762,12 +1843,12 @@ export function walkStmtFields(node: IrStmt, walker: IrFieldWalker, skipType: bo
       if (node.update !== undefined && node.update !== null) {
         walkStmtFields(node.update, walker, skipType);
       }
-      for (const item36 of node.body) {
-        walkStmtFields(item36, walker, skipType);
+      for (const item37 of node.body) {
+        walkStmtFields(item37, walker, skipType);
       }
       if (node.labels !== undefined && node.labels !== null) {
-        for (const item37 of node.labels) {
-          walker.string(item37);
+        for (const item38 of node.labels) {
+          walker.string(item38);
         }
       }
       return;
@@ -1776,12 +1857,12 @@ export function walkStmtFields(node: IrStmt, walker: IrFieldWalker, skipType: bo
       walker.string(node.kind);
       walker.string(node.localId);
       walkExprFields(node.iterable, walker, skipType);
-      for (const item38 of node.body) {
-        walkStmtFields(item38, walker, skipType);
+      for (const item39 of node.body) {
+        walkStmtFields(item39, walker, skipType);
       }
       if (node.labels !== undefined && node.labels !== null) {
-        for (const item39 of node.labels) {
-          walker.string(item39);
+        for (const item40 of node.labels) {
+          walker.string(item40);
         }
       }
       return;
@@ -1793,13 +1874,17 @@ export function walkStmtFields(node: IrStmt, walker: IrFieldWalker, skipType: bo
     case "if": {
       walker.string(node.kind);
       walkExprFields(node.cond, walker, skipType);
-      for (const item40 of node.then) {
-        walkStmtFields(item40, walker, skipType);
+      for (const item41 of node.then) {
+        walkStmtFields(item41, walker, skipType);
       }
       if (node.else_ !== undefined && node.else_ !== null) {
-        for (const item41 of node.else_) {
-          walkStmtFields(item41, walker, skipType);
+        for (const item42 of node.else_) {
+          walkStmtFields(item42, walker, skipType);
         }
+      }
+      if (node.classArm !== undefined && node.classArm !== null) {
+        walker.string(node.classArm.className);
+        walker.string(node.classArm.value);
       }
       return;
     }
@@ -1847,17 +1932,17 @@ export function walkStmtFields(node: IrStmt, walker: IrFieldWalker, skipType: bo
     case "switch": {
       walker.string(node.kind);
       walkExprFields(node.disc, walker, skipType);
-      for (const item42 of node.cases) {
-        if (item42.test !== undefined && item42.test !== null) {
-          walkExprFields(item42.test, walker, skipType);
+      for (const item43 of node.cases) {
+        if (item43.test !== undefined && item43.test !== null) {
+          walkExprFields(item43.test, walker, skipType);
         }
-        for (const item43 of item42.body) {
-          walkStmtFields(item43, walker, skipType);
+        for (const item44 of item43.body) {
+          walkStmtFields(item44, walker, skipType);
         }
       }
       if (node.labels !== undefined && node.labels !== null) {
-        for (const item44 of node.labels) {
-          walker.string(item44);
+        for (const item45 of node.labels) {
+          walker.string(item45);
         }
       }
       return;
@@ -1869,20 +1954,20 @@ export function walkStmtFields(node: IrStmt, walker: IrFieldWalker, skipType: bo
     }
     case "tryCatch": {
       walker.string(node.kind);
-      for (const item45 of node.tryBody) {
-        walkStmtFields(item45, walker, skipType);
+      for (const item46 of node.tryBody) {
+        walkStmtFields(item46, walker, skipType);
       }
       if (node.catchBody !== undefined && node.catchBody !== null) {
-        for (const item46 of node.catchBody) {
-          walkStmtFields(item46, walker, skipType);
+        for (const item47 of node.catchBody) {
+          walkStmtFields(item47, walker, skipType);
         }
       }
       if (node.catchLocalId !== undefined && node.catchLocalId !== null) {
         walker.string(node.catchLocalId);
       }
       if (node.finallyBody !== undefined && node.finallyBody !== null) {
-        for (const item47 of node.finallyBody) {
-          walkStmtFields(item47, walker, skipType);
+        for (const item48 of node.finallyBody) {
+          walkStmtFields(item48, walker, skipType);
         }
       }
       return;
@@ -1898,12 +1983,12 @@ export function walkStmtFields(node: IrStmt, walker: IrFieldWalker, skipType: bo
     case "while": {
       walker.string(node.kind);
       walkExprFields(node.cond, walker, skipType);
-      for (const item48 of node.body) {
-        walkStmtFields(item48, walker, skipType);
+      for (const item49 of node.body) {
+        walkStmtFields(item49, walker, skipType);
       }
       if (node.labels !== undefined && node.labels !== null) {
-        for (const item49 of node.labels) {
-          walker.string(item49);
+        for (const item50 of node.labels) {
+          walker.string(item50);
         }
       }
       return;
@@ -1998,8 +2083,8 @@ export function walkTypeFields(node: IrType, walker: IrFieldWalker, skipType: bo
     }
     case "func": {
       walker.string(node.kind);
-      for (const item50 of node.params) {
-        walkTypeFields(item50, walker, skipType);
+      for (const item51 of node.params) {
+        walkTypeFields(item51, walker, skipType);
       }
       walkTypeFields(node.ret, walker, skipType);
       if (node.restAbi !== undefined && node.restAbi !== null) {
@@ -2035,6 +2120,10 @@ export function walkTypeFields(node: IrType, walker: IrFieldWalker, skipType: bo
       return;
     }
     case "jsval": {
+      walker.string(node.kind);
+      return;
+    }
+    case "jsword": {
       walker.string(node.kind);
       return;
     }
@@ -2159,10 +2248,10 @@ export function replaceChildExpr(node: IrExpr | IrStmt, from: IrExpr, to: IrExpr
         node.receiver = to;
         return true;
       }
-      for (let index54 = 0; index54 < node.args.length; index54++) {
-        const item53 = node.args[index54]!;
-        if (item53 === from) {
-          node.args[index54] = to;
+      for (let index55 = 0; index55 < node.args.length; index55++) {
+        const item54 = node.args[index55]!;
+        if (item54 === from) {
+          node.args[index55] = to;
           return true;
         }
       }
@@ -2202,10 +2291,10 @@ export function replaceChildExpr(node: IrExpr | IrStmt, from: IrExpr, to: IrExpr
       return false;
     }
     case "arrayLit": {
-      for (let index58 = 0; index58 < node.elems.length; index58++) {
-        const item57 = node.elems[index58]!;
-        if (item57 === from) {
-          node.elems[index58] = to;
+      for (let index59 = 0; index59 < node.elems.length; index59++) {
+        const item58 = node.elems[index59]!;
+        if (item58 === from) {
+          node.elems[index59] = to;
           return true;
         }
       }
@@ -2310,10 +2399,10 @@ export function replaceChildExpr(node: IrExpr | IrStmt, from: IrExpr, to: IrExpr
         node.receiver = to;
         return true;
       }
-      for (let index68 = 0; index68 < node.args.length; index68++) {
-        const item67 = node.args[index68]!;
-        if (item67 === from) {
-          node.args[index68] = to;
+      for (let index69 = 0; index69 < node.args.length; index69++) {
+        const item68 = node.args[index69]!;
+        if (item68 === from) {
+          node.args[index69] = to;
           return true;
         }
       }
@@ -2344,10 +2433,10 @@ export function replaceChildExpr(node: IrExpr | IrStmt, from: IrExpr, to: IrExpr
       return false;
     }
     case "call": {
-      for (let index72 = 0; index72 < node.args.length; index72++) {
-        const item71 = node.args[index72]!;
-        if (item71 === from) {
-          node.args[index72] = to;
+      for (let index73 = 0; index73 < node.args.length; index73++) {
+        const item72 = node.args[index73]!;
+        if (item72 === from) {
+          node.args[index73] = to;
           return true;
         }
       }
@@ -2364,10 +2453,10 @@ export function replaceChildExpr(node: IrExpr | IrStmt, from: IrExpr, to: IrExpr
           return true;
         }
       }
-      for (let index76 = 0; index76 < node.args.length; index76++) {
-        const item75 = node.args[index76]!;
-        if (item75 === from) {
-          node.args[index76] = to;
+      for (let index77 = 0; index77 < node.args.length; index77++) {
+        const item76 = node.args[index77]!;
+        if (item76 === from) {
+          node.args[index77] = to;
           return true;
         }
       }
@@ -2423,10 +2512,10 @@ export function replaceChildExpr(node: IrExpr | IrStmt, from: IrExpr, to: IrExpr
       return false;
     }
     case "dynArrLit": {
-      for (let index92 = 0; index92 < node.elems.length; index92++) {
-        const item91 = node.elems[index92]!;
-        if (item91 === from) {
-          node.elems[index92] = to;
+      for (let index93 = 0; index93 < node.elems.length; index93++) {
+        const item92 = node.elems[index93]!;
+        if (item92 === from) {
+          node.elems[index93] = to;
           return true;
         }
       }
@@ -2449,10 +2538,10 @@ export function replaceChildExpr(node: IrExpr | IrStmt, from: IrExpr, to: IrExpr
           return true;
         }
       }
-      for (let index96 = 0; index96 < node.args.length; index96++) {
-        const item95 = node.args[index96]!;
-        if (item95 === from) {
-          node.args[index96] = to;
+      for (let index97 = 0; index97 < node.args.length; index97++) {
+        const item96 = node.args[index97]!;
+        if (item96 === from) {
+          node.args[index97] = to;
           return true;
         }
       }
@@ -2479,6 +2568,13 @@ export function replaceChildExpr(node: IrExpr | IrStmt, from: IrExpr, to: IrExpr
       }
       return false;
     }
+    case "dynFromJsval": {
+      if (node.value === from) {
+        node.value = to;
+        return true;
+      }
+      return false;
+    }
     case "dynHasKey": {
       if (node.value === from) {
         node.value = to;
@@ -2497,10 +2593,10 @@ export function replaceChildExpr(node: IrExpr | IrStmt, from: IrExpr, to: IrExpr
           return true;
         }
       }
-      for (let index102 = 0; index102 < node.args.length; index102++) {
-        const item101 = node.args[index102]!;
-        if (item101 === from) {
-          node.args[index102] = to;
+      for (let index103 = 0; index103 < node.args.length; index103++) {
+        const item102 = node.args[index103]!;
+        if (item102 === from) {
+          node.args[index103] = to;
           return true;
         }
       }
@@ -2526,14 +2622,14 @@ export function replaceChildExpr(node: IrExpr | IrStmt, from: IrExpr, to: IrExpr
     }
     case "dynObjLit": {
       if (node.fields !== undefined && node.fields !== null) {
-        for (let index106 = 0; index106 < node.fields.length; index106++) {
-          const item105 = node.fields[index106]!;
-          if (item105.key === from) {
-            item105.key = to;
+        for (let index107 = 0; index107 < node.fields.length; index107++) {
+          const item106 = node.fields[index107]!;
+          if (item106.key === from) {
+            item106.key = to;
             return true;
           }
-          if (item105.value === from) {
-            item105.value = to;
+          if (item106.value === from) {
+            item106.value = to;
             return true;
           }
         }
@@ -2566,10 +2662,10 @@ export function replaceChildExpr(node: IrExpr | IrStmt, from: IrExpr, to: IrExpr
       return false;
     }
     case "ffiCall": {
-      for (let index110 = 0; index110 < node.args.length; index110++) {
-        const item109 = node.args[index110]!;
-        if (item109 === from) {
-          node.args[index110] = to;
+      for (let index111 = 0; index111 < node.args.length; index111++) {
+        const item110 = node.args[index111]!;
+        if (item110 === from) {
+          node.args[index111] = to;
           return true;
         }
       }
@@ -2655,10 +2751,41 @@ export function replaceChildExpr(node: IrExpr | IrStmt, from: IrExpr, to: IrExpr
       return false;
     }
     case "intrinsic": {
-      for (let index126 = 0; index126 < node.args.length; index126++) {
-        const item125 = node.args[index126]!;
-        if (item125 === from) {
-          node.args[index126] = to;
+      for (let index127 = 0; index127 < node.args.length; index127++) {
+        const item126 = node.args[index127]!;
+        if (item126 === from) {
+          node.args[index127] = to;
+          return true;
+        }
+      }
+      return false;
+    }
+    case "jsBridgePromise": {
+      if (node.value === from) {
+        node.value = to;
+        return true;
+      }
+      return false;
+    }
+    case "jsExit": {
+      if (node.value === from) {
+        node.value = to;
+        return true;
+      }
+      return false;
+    }
+    case "jsMarshal": {
+      if (node.value === from) {
+        node.value = to;
+        return true;
+      }
+      return false;
+    }
+    case "jsOp": {
+      for (let index131 = 0; index131 < node.args.length; index131++) {
+        const item130 = node.args[index131]!;
+        if (item130 === from) {
+          node.args[index131] = to;
           return true;
         }
       }
@@ -2672,10 +2799,10 @@ export function replaceChildExpr(node: IrExpr | IrStmt, from: IrExpr, to: IrExpr
       return false;
     }
     case "libCall": {
-      for (let index130 = 0; index130 < node.args.length; index130++) {
-        const item129 = node.args[index130]!;
-        if (item129 === from) {
-          node.args[index130] = to;
+      for (let index135 = 0; index135 < node.args.length; index135++) {
+        const item134 = node.args[index135]!;
+        if (item134 === from) {
+          node.args[index135] = to;
           return true;
         }
       }
@@ -2697,10 +2824,10 @@ export function replaceChildExpr(node: IrExpr | IrStmt, from: IrExpr, to: IrExpr
         node.receiver = to;
         return true;
       }
-      for (let index134 = 0; index134 < node.args.length; index134++) {
-        const item133 = node.args[index134]!;
-        if (item133 === from) {
-          node.args[index134] = to;
+      for (let index139 = 0; index139 < node.args.length; index139++) {
+        const item138 = node.args[index139]!;
+        if (item138 === from) {
+          node.args[index139] = to;
           return true;
         }
       }
@@ -2708,14 +2835,14 @@ export function replaceChildExpr(node: IrExpr | IrStmt, from: IrExpr, to: IrExpr
     }
     case "mapNew": {
       if (node.seed !== undefined && node.seed !== null) {
-        for (let index138 = 0; index138 < node.seed.length; index138++) {
-          const item137 = node.seed[index138]!;
-          if (item137.key === from) {
-            item137.key = to;
+        for (let index143 = 0; index143 < node.seed.length; index143++) {
+          const item142 = node.seed[index143]!;
+          if (item142.key === from) {
+            item142.key = to;
             return true;
           }
-          if (item137.value === from) {
-            item137.value = to;
+          if (item142.value === from) {
+            item142.value = to;
             return true;
           }
         }
@@ -2723,10 +2850,10 @@ export function replaceChildExpr(node: IrExpr | IrStmt, from: IrExpr, to: IrExpr
       return false;
     }
     case "new": {
-      for (let index142 = 0; index142 < node.args.length; index142++) {
-        const item141 = node.args[index142]!;
-        if (item141 === from) {
-          node.args[index142] = to;
+      for (let index147 = 0; index147 < node.args.length; index147++) {
+        const item146 = node.args[index147]!;
+        if (item146 === from) {
+          node.args[index147] = to;
           return true;
         }
       }
@@ -2744,10 +2871,10 @@ export function replaceChildExpr(node: IrExpr | IrStmt, from: IrExpr, to: IrExpr
         node.callee = to;
         return true;
       }
-      for (let index146 = 0; index146 < node.args.length; index146++) {
-        const item145 = node.args[index146]!;
-        if (item145 === from) {
-          node.args[index146] = to;
+      for (let index151 = 0; index151 < node.args.length; index151++) {
+        const item150 = node.args[index151]!;
+        if (item150 === from) {
+          node.args[index151] = to;
           return true;
         }
       }
@@ -2798,10 +2925,10 @@ export function replaceChildExpr(node: IrExpr | IrStmt, from: IrExpr, to: IrExpr
         node.source = to;
         return true;
       }
-      for (let index150 = 0; index150 < node.overrides.length; index150++) {
-        const item149 = node.overrides[index150]!;
-        if (item149.value === from) {
-          item149.value = to;
+      for (let index155 = 0; index155 < node.overrides.length; index155++) {
+        const item154 = node.overrides[index155]!;
+        if (item154.value === from) {
+          item154.value = to;
           return true;
         }
       }
@@ -2859,10 +2986,10 @@ export function replaceChildExpr(node: IrExpr | IrStmt, from: IrExpr, to: IrExpr
       return false;
     }
     case "recordLit": {
-      for (let index154 = 0; index154 < node.fields.length; index154++) {
-        const item153 = node.fields[index154]!;
-        if (item153.value === from) {
-          item153.value = to;
+      for (let index159 = 0; index159 < node.fields.length; index159++) {
+        const item158 = node.fields[index159]!;
+        if (item158.value === from) {
+          item158.value = to;
           return true;
         }
       }
@@ -2909,10 +3036,10 @@ export function replaceChildExpr(node: IrExpr | IrStmt, from: IrExpr, to: IrExpr
         node.receiver = to;
         return true;
       }
-      for (let index158 = 0; index158 < node.args.length; index158++) {
-        const item157 = node.args[index158]!;
-        if (item157 === from) {
-          node.args[index158] = to;
+      for (let index163 = 0; index163 < node.args.length; index163++) {
+        const item162 = node.args[index163]!;
+        if (item162 === from) {
+          node.args[index163] = to;
           return true;
         }
       }
@@ -2939,10 +3066,10 @@ export function replaceChildExpr(node: IrExpr | IrStmt, from: IrExpr, to: IrExpr
         node.receiver = to;
         return true;
       }
-      for (let index164 = 0; index164 < node.args.length; index164++) {
-        const item163 = node.args[index164]!;
-        if (item163 === from) {
-          node.args[index164] = to;
+      for (let index169 = 0; index169 < node.args.length; index169++) {
+        const item168 = node.args[index169]!;
+        if (item168 === from) {
+          node.args[index169] = to;
           return true;
         }
       }
@@ -2995,10 +3122,10 @@ export function replaceChildExpr(node: IrExpr | IrStmt, from: IrExpr, to: IrExpr
         node.receiver = to;
         return true;
       }
-      for (let index168 = 0; index168 < node.args.length; index168++) {
-        const item167 = node.args[index168]!;
-        if (item167 === from) {
-          node.args[index168] = to;
+      for (let index173 = 0; index173 < node.args.length; index173++) {
+        const item172 = node.args[index173]!;
+        if (item172 === from) {
+          node.args[index173] = to;
           return true;
         }
       }
@@ -3009,11 +3136,11 @@ export function replaceChildExpr(node: IrExpr | IrStmt, from: IrExpr, to: IrExpr
         node.disc = to;
         return true;
       }
-      for (let index174 = 0; index174 < node.cases.length; index174++) {
-        const item173 = node.cases[index174]!;
-        if (item173.test !== undefined && item173.test !== null) {
-          if (item173.test === from) {
-            item173.test = to;
+      for (let index179 = 0; index179 < node.cases.length; index179++) {
+        const item178 = node.cases[index179]!;
+        if (item178.test !== undefined && item178.test !== null) {
+          if (item178.test === from) {
+            item178.test = to;
             return true;
           }
         }
@@ -3162,10 +3289,10 @@ export function replaceChildExpr(node: IrExpr | IrStmt, from: IrExpr, to: IrExpr
       return false;
     }
     case "virtualCall": {
-      for (let index192 = 0; index192 < node.args.length; index192++) {
-        const item191 = node.args[index192]!;
-        if (item191 === from) {
-          node.args[index192] = to;
+      for (let index197 = 0; index197 < node.args.length; index197++) {
+        const item196 = node.args[index197]!;
+        if (item196 === from) {
+          node.args[index197] = to;
           return true;
         }
       }
@@ -3239,8 +3366,9 @@ export type IrFieldsCurrent = [
   Unread<FieldsNotRead<Extract<NonNullable<Extract<NonNullable<Extract<IrExpr, { kind: "dynCall" }>["spreads"]>, readonly unknown[]>[number]>, object>, "arg" | "what">>,
   Unread<ValuesNotRead<Extract<NonNullable<Extract<NonNullable<Extract<IrExpr, { kind: "dynCall" }>["spreads"]>, readonly unknown[]>[number]>, object>["arg"]>>,
   Unread<FieldsNotRead<Extract<IrExpr, { kind: "dynCall" }>, "kind" | "callee" | "receiver" | "calleeName" | "calleeNameValue" | "args" | "spreads" | "type" | "loc">>,
-  Unread<FieldsNotRead<Extract<IrExpr, { kind: "dynCheck" }>, "kind" | "value" | "preserveRefs" | "adopt" | "shared" | "exact" | "partialView" | "inferredSite" | "origin" | "pathIndex" | "type" | "loc">>,
+  Unread<FieldsNotRead<Extract<IrExpr, { kind: "dynCheck" }>, "kind" | "value" | "preserveRefs" | "refOnly" | "adopt" | "shared" | "exact" | "partialView" | "inferredSite" | "origin" | "pathIndex" | "type" | "loc">>,
   Unread<ValuesNotRead<Extract<IrExpr, { kind: "dynCheck" }>["preserveRefs"]>>,
+  Unread<ValuesNotRead<Extract<IrExpr, { kind: "dynCheck" }>["refOnly"]>>,
   Unread<ValuesNotRead<Extract<IrExpr, { kind: "dynCheck" }>["adopt"]>>,
   Unread<ValuesNotRead<Extract<IrExpr, { kind: "dynCheck" }>["shared"]>>,
   Unread<ValuesNotRead<Extract<IrExpr, { kind: "dynCheck" }>["exact"]>>,
@@ -3248,21 +3376,24 @@ export type IrFieldsCurrent = [
   Unread<ValuesNotRead<Extract<IrExpr, { kind: "dynCheck" }>["origin"]>>,
   Unread<ValuesNotRead<Extract<IrExpr, { kind: "dynCheck" }>["pathIndex"]>>,
   Unread<FieldsNotRead<Extract<IrExpr, { kind: "dynDestrCheck" }>, "kind" | "value" | "spelling" | "firstProp" | "type" | "loc">>,
-  Unread<FieldsNotRead<Extract<IrExpr, { kind: "dynFrom" }>, "kind" | "value" | "type" | "loc" | "liveRef" | "fnName" | "fnNameMainThreadOnly" | "fnLength">>,
+  Unread<FieldsNotRead<Extract<IrExpr, { kind: "dynFrom" }>, "kind" | "value" | "type" | "loc" | "liveRef" | "fnName" | "fnNameMainThreadOnly" | "fnLength" | "setterOnlyRead">>,
   Unread<ValuesNotRead<Extract<IrExpr, { kind: "dynFrom" }>["liveRef"]>>,
   Unread<ValuesNotRead<Extract<IrExpr, { kind: "dynFrom" }>["fnNameMainThreadOnly"]>>,
   Unread<ValuesNotRead<Extract<IrExpr, { kind: "dynFrom" }>["fnLength"]>>,
+  Unread<ValuesNotRead<Extract<IrExpr, { kind: "dynFrom" }>["setterOnlyRead"]>>,
+  Unread<FieldsNotRead<Extract<IrExpr, { kind: "dynFromJsval" }>, "kind" | "value" | "type" | "loc">>,
   Unread<FieldsNotRead<Extract<IrExpr, { kind: "dynHasKey" }>, "kind" | "key" | "negated" | "value" | "type" | "loc">>,
   Unread<ValuesNotRead<Extract<IrExpr, { kind: "dynHasKey" }>["negated"]>>,
-  Unread<FieldsNotRead<Extract<IrExpr, { kind: "dynInvoke" }>, "kind" | "recv" | "method" | "calleeName" | "calleeNameValue" | "args" | "type" | "loc">>,
+  Unread<FieldsNotRead<Extract<IrExpr, { kind: "dynInvoke" }>, "kind" | "recv" | "method" | "calleeName" | "calleeNameValue" | "domInterface" | "args" | "type" | "loc">>,
   Unread<FieldsNotRead<Extract<IrExpr, { kind: "dynIterN" }>, "kind" | "value" | "count" | "notIterableMessage" | "type" | "loc">>,
   Unread<ValuesNotRead<Extract<IrExpr, { kind: "dynIterN" }>["count"]>>,
   Unread<FieldsNotRead<Extract<IrExpr, { kind: "dynKeyGet" }>, "kind" | "key" | "optional" | "value" | "type" | "loc">>,
   Unread<ValuesNotRead<Extract<IrExpr, { kind: "dynKeyGet" }>["optional"]>>,
   Unread<FieldsNotRead<Extract<NonNullable<Extract<NonNullable<Extract<IrExpr, { kind: "dynObjLit" }>["fields"]>, readonly unknown[]>[number]>, object>, "key" | "value">>,
   Unread<FieldsNotRead<Extract<IrExpr, { kind: "dynObjLit" }>, "kind" | "fields" | "type" | "loc">>,
-  Unread<FieldsNotRead<Extract<IrExpr, { kind: "dynScalarEq" }>, "kind" | "left" | "right" | "negated" | "type" | "loc">>,
+  Unread<FieldsNotRead<Extract<IrExpr, { kind: "dynScalarEq" }>, "kind" | "left" | "right" | "negated" | "identity" | "type" | "loc">>,
   Unread<ValuesNotRead<Extract<IrExpr, { kind: "dynScalarEq" }>["negated"]>>,
+  Unread<ValuesNotRead<Extract<IrExpr, { kind: "dynScalarEq" }>["identity"]>>,
   Unread<FieldsNotRead<Extract<IrExpr, { kind: "dynTest" }>, "kind" | "test" | "bytesElem" | "negated" | "value" | "type" | "loc">>,
   Unread<ValuesNotRead<Extract<IrExpr, { kind: "dynTest" }>["negated"]>>,
   Unread<FieldsNotRead<Extract<IrExpr, { kind: "ffiCall" }>, "kind" | "import" | "args" | "type" | "loc">>,
@@ -3271,12 +3402,23 @@ export type IrFieldsCurrent = [
   Unread<FieldsNotRead<Extract<IrExpr, { kind: "fieldIncDec" }>, "kind" | "op" | "prefix" | "obj" | "className" | "field" | "fieldDyn" | "type" | "loc">>,
   Unread<ValuesNotRead<Extract<IrExpr, { kind: "fieldIncDec" }>["prefix"]>>,
   Unread<ValuesNotRead<Extract<IrExpr, { kind: "fieldIncDec" }>["fieldDyn"]>>,
-  Unread<FieldsNotRead<Extract<IrExpr, { kind: "genResume" }>, "kind" | "mode" | "gen" | "arg" | "type" | "loc">>,
+  Unread<FieldsNotRead<Extract<IrExpr, { kind: "genResume" }>, "kind" | "mode" | "gen" | "arg" | "prime" | "type" | "loc">>,
+  Unread<ValuesNotRead<Extract<IrExpr, { kind: "genResume" }>["prime"]>>,
   Unread<FieldsNotRead<Extract<IrExpr, { kind: "incDec" }>, "kind" | "op" | "prefix" | "localId" | "type" | "loc">>,
   Unread<ValuesNotRead<Extract<IrExpr, { kind: "incDec" }>["prefix"]>>,
   Unread<FieldsNotRead<Extract<IrExpr, { kind: "instanceOf" }>, "kind" | "value" | "className" | "type" | "loc">>,
   Unread<FieldsNotRead<Extract<IrExpr, { kind: "instanceOfValue" }>, "kind" | "value" | "classValue" | "type" | "loc">>,
   Unread<FieldsNotRead<Extract<IrExpr, { kind: "intrinsic" }>, "kind" | "name" | "args" | "type" | "loc">>,
+  Unread<FieldsNotRead<Extract<IrExpr, { kind: "jsBridgePromise" }>, "kind" | "value" | "type" | "loc">>,
+  Unread<FieldsNotRead<Extract<IrExpr, { kind: "jsExit" }>, "kind" | "value" | "type" | "opaque" | "checkedArray" | "loc">>,
+  Unread<ValuesNotRead<Extract<IrExpr, { kind: "jsExit" }>["opaque"]>>,
+  Unread<ValuesNotRead<Extract<IrExpr, { kind: "jsExit" }>["checkedArray"]>>,
+  Unread<FieldsNotRead<Extract<IrExpr, { kind: "jsMarshal" }>, "kind" | "value" | "type" | "opaque" | "bufferStore" | "unshared" | "loc">>,
+  Unread<ValuesNotRead<Extract<IrExpr, { kind: "jsMarshal" }>["opaque"]>>,
+  Unread<ValuesNotRead<Extract<IrExpr, { kind: "jsMarshal" }>["bufferStore"]>>,
+  Unread<ValuesNotRead<Extract<IrExpr, { kind: "jsMarshal" }>["unshared"]>>,
+  Unread<FieldsNotRead<Extract<IrExpr, { kind: "jsOp" }>, "kind" | "op" | "name" | "calleeName" | "domReceiver" | "domInterface" | "args" | "type" | "loc">>,
+  Unread<ValuesNotRead<Extract<IrExpr, { kind: "jsOp" }>["domReceiver"]>>,
   Unread<FieldsNotRead<Extract<IrExpr, { kind: "jsonStringify" }>, "kind" | "value" | "indent" | "circular" | "type" | "loc">>,
   Unread<ValuesNotRead<Extract<IrExpr, { kind: "jsonStringify" }>["circular"]>>,
   Unread<FieldsNotRead<Extract<NonNullable<Extract<IrExpr, { kind: "libCall" }>["assertOptions"]>, object>, "diff" | "skipPrototype">>,
@@ -3310,8 +3452,9 @@ export type IrFieldsCurrent = [
   Unread<FieldsNotRead<Extract<IrExpr, { kind: "recordKeyGet" }>, "kind" | "obj" | "shapeId" | "key" | "overflowOnly" | "missNaN" | "type" | "loc">>,
   Unread<ValuesNotRead<Extract<IrExpr, { kind: "recordKeyGet" }>["overflowOnly"]>>,
   Unread<ValuesNotRead<Extract<IrExpr, { kind: "recordKeyGet" }>["missNaN"]>>,
-  Unread<FieldsNotRead<Extract<NonNullable<Extract<NonNullable<Extract<IrExpr, { kind: "recordLit" }>["fields"]>, readonly unknown[]>[number]>, object>, "name" | "value" | "overflow">>,
+  Unread<FieldsNotRead<Extract<NonNullable<Extract<NonNullable<Extract<IrExpr, { kind: "recordLit" }>["fields"]>, readonly unknown[]>[number]>, object>, "name" | "value" | "overflow" | "drop">>,
   Unread<ValuesNotRead<Extract<NonNullable<Extract<NonNullable<Extract<IrExpr, { kind: "recordLit" }>["fields"]>, readonly unknown[]>[number]>, object>["overflow"]>>,
+  Unread<ValuesNotRead<Extract<NonNullable<Extract<NonNullable<Extract<IrExpr, { kind: "recordLit" }>["fields"]>, readonly unknown[]>[number]>, object>["drop"]>>,
   Unread<FieldsNotRead<Extract<IrExpr, { kind: "recordLit" }>, "kind" | "fields" | "nullProto" | "type" | "loc">>,
   Unread<ValuesNotRead<Extract<IrExpr, { kind: "recordLit" }>["nullProto"]>>,
   Unread<FieldsNotRead<Extract<IrExpr, { kind: "recordNullProto" }>, "kind" | "obj" | "shapeId" | "type" | "loc">>,
@@ -3325,7 +3468,8 @@ export type IrFieldsCurrent = [
   Unread<ValuesNotRead<Extract<IrExpr, { kind: "seqExpr" }>["diverges"]>>,
   Unread<FieldsNotRead<Extract<IrExpr, { kind: "setIntrinsic" }>, "kind" | "method" | "receiver" | "args" | "type" | "loc">>,
   Unread<FieldsNotRead<Extract<IrExpr, { kind: "setNew" }>, "kind" | "seed" | "type" | "loc">>,
-  Unread<FieldsNotRead<Extract<IrExpr, { kind: "strCmp" }>, "kind" | "op" | "left" | "right" | "type" | "loc">>,
+  Unread<FieldsNotRead<Extract<IrExpr, { kind: "strCmp" }>, "kind" | "op" | "left" | "right" | "utf16" | "type" | "loc">>,
+  Unread<ValuesNotRead<Extract<IrExpr, { kind: "strCmp" }>["utf16"]>>,
   Unread<FieldsNotRead<Extract<IrExpr, { kind: "strConcat" }>, "kind" | "left" | "right" | "type" | "loc">>,
   Unread<FieldsNotRead<Extract<IrExpr, { kind: "strEq" }>, "kind" | "negated" | "left" | "right" | "type" | "loc">>,
   Unread<ValuesNotRead<Extract<IrExpr, { kind: "strEq" }>["negated"]>>,
@@ -3340,8 +3484,9 @@ export type IrFieldsCurrent = [
   Unread<FieldsNotRead<Extract<IrExpr, { kind: "unionEq" }>, "kind" | "unionId" | "negated" | "sameValue" | "left" | "right" | "type" | "loc">>,
   Unread<ValuesNotRead<Extract<IrExpr, { kind: "unionEq" }>["negated"]>>,
   Unread<ValuesNotRead<Extract<IrExpr, { kind: "unionEq" }>["sameValue"]>>,
-  Unread<FieldsNotRead<Extract<IrExpr, { kind: "unionFuncEq" }>, "kind" | "unionId" | "tag" | "union" | "func" | "negated" | "type" | "loc">>,
+  Unread<FieldsNotRead<Extract<IrExpr, { kind: "unionFuncEq" }>, "kind" | "unionId" | "tag" | "union" | "func" | "funcFirst" | "negated" | "type" | "loc">>,
   Unread<ValuesNotRead<Extract<IrExpr, { kind: "unionFuncEq" }>["tag"]>>,
+  Unread<ValuesNotRead<Extract<IrExpr, { kind: "unionFuncEq" }>["funcFirst"]>>,
   Unread<ValuesNotRead<Extract<IrExpr, { kind: "unionFuncEq" }>["negated"]>>,
   Unread<FieldsNotRead<Extract<IrExpr, { kind: "unionIsTag" }>, "kind" | "unionId" | "tag" | "negated" | "value" | "type" | "loc">>,
   Unread<ValuesNotRead<Extract<IrExpr, { kind: "unionIsTag" }>["tag"]>>,
@@ -3383,7 +3528,8 @@ export type IrFieldsCurrent = [
   Unread<FieldsNotRead<Extract<IrStmt, { kind: "for" }>, "kind" | "init" | "cond" | "update" | "body" | "labels" | "loc">>,
   Unread<FieldsNotRead<Extract<IrStmt, { kind: "forOf" }>, "kind" | "localId" | "iterable" | "body" | "labels" | "loc">>,
   Unread<FieldsNotRead<Extract<IrStmt, { kind: "genBindBarrier" }>, "kind" | "loc">>,
-  Unread<FieldsNotRead<Extract<IrStmt, { kind: "if" }>, "kind" | "cond" | "then" | "else_" | "loc">>,
+  Unread<FieldsNotRead<Extract<NonNullable<Extract<IrStmt, { kind: "if" }>["classArm"]>, object>, "className" | "value">>,
+  Unread<FieldsNotRead<Extract<IrStmt, { kind: "if" }>, "kind" | "cond" | "then" | "else_" | "loc" | "classArm">>,
   Unread<FieldsNotRead<Extract<IrStmt, { kind: "recordKeyDelete" }>, "kind" | "obj" | "shapeId" | "key" | "loc">>,
   Unread<FieldsNotRead<Extract<IrStmt, { kind: "recordKeySet" }>, "kind" | "obj" | "shapeId" | "key" | "value" | "overflowOnly" | "loc">>,
   Unread<ValuesNotRead<Extract<IrStmt, { kind: "recordKeySet" }>["overflowOnly"]>>,
@@ -3433,6 +3579,7 @@ export type IrFieldsCurrent = [
   Unread<FieldsNotRead<Extract<IrType, { kind: "httpReq" }>, "kind">>,
   Unread<FieldsNotRead<Extract<IrType, { kind: "httpRes" }>, "kind">>,
   Unread<FieldsNotRead<Extract<IrType, { kind: "jsval" }>, "kind">>,
+  Unread<FieldsNotRead<Extract<IrType, { kind: "jsword" }>, "kind">>,
   Unread<FieldsNotRead<Extract<IrType, { kind: "map" }>, "kind" | "key" | "value">>,
   Unread<FieldsNotRead<Extract<IrType, { kind: "mkdtempResult" }>, "kind">>,
   Unread<FieldsNotRead<Extract<IrType, { kind: "moduleNs" }>, "kind" | "moduleId">>,

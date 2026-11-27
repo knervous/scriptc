@@ -1,3 +1,4 @@
+// This file was modified from scriptc (Apache-2.0); see MODIFICATIONS.md.
 import {
   isRefCounted,
   type IrClassDef,
@@ -137,7 +138,7 @@ const INERT_LIB_CALLS = new Set<IrLibFn>([
   "cp.spawnSyncExtEnv",
 ]);
 
-/** jsval conversions (ir/jsval.ts): no user code, no stores. */
+/** jsword conversions (ir/jsword.ts): no user code, no stores. */
 const JS_CONVERSIONS = new Set<IrLibFn>([
   "js.fromDyn",
   "js.toDyn",
@@ -148,7 +149,7 @@ const JS_CONVERSIONS = new Set<IrLibFn>([
   "js.toF64",
 ]);
 
-/** jsval conversions of static primitives. */
+/** jsword conversions of static primitives. */
 const JS_PRIMITIVE_SOURCES = new Set<IrLibFn>([
   "js.fromF64",
   "js.fromBool",
@@ -676,13 +677,13 @@ export class ReferenceWrites {
    * accessors) or absent. */
   private inertLibCall(e: IrExpr & { kind: "libCall" }): boolean {
     if (e.fn === "error.nodeThrow" || isStableReceiverOperand(e, "")) return true;
-    // jsval conversions run no user code: they move a value between its
-    // dyn and jsval forms, and js.toF64 is dynCheck's number check. A
+    // jsword conversions run no user code: they move a value between its
+    // dyn and jsword forms, and js.toF64 is dynCheck's number check. A
     // comparison is inert exactly when its dyn twin is: every operand a
     // wrapped primitive.
     if (JS_CONVERSIONS.has(e.fn)) return true;
     if (e.fn === "js.compare")
-      return e.args.every((arg) => arg.type.kind !== "jsval" || this.jsPrimitive(arg));
+      return e.args.every((arg) => arg.type.kind !== "jsword" || this.jsPrimitive(arg));
     if (e.fn === "error.newOptions")
       return e.args.every(
         (arg) =>
@@ -702,7 +703,7 @@ export class ReferenceWrites {
     );
   }
 
-  /** A jsval operand made from a primitive: it has no methods to call
+  /** A jsword operand made from a primitive: it has no methods to call
    * back into. */
   private jsPrimitive(e: IrExpr): boolean {
     if (e.kind !== "libCall") return false;

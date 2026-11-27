@@ -1,6 +1,0 @@
-{
- "order": [
-  "<repo>/tests/corpus/stdin-readable-stream.ts"
- ],
- "diags": []
-}

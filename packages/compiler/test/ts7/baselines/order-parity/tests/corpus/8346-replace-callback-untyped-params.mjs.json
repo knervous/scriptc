@@ -1,6 +1,0 @@
-{
- "order": [
-  "<repo>/tests/corpus/8346-replace-callback-untyped-params.mjs"
- ],
- "diags": []
-}

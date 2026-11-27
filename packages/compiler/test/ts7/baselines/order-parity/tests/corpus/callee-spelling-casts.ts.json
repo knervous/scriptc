@@ -1,6 +1,0 @@
-{
- "order": [
-  "<repo>/tests/corpus/callee-spelling-casts.ts"
- ],
- "diags": []
-}

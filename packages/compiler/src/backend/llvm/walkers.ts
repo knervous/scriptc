@@ -1,3 +1,4 @@
+// This file was modified from scriptc (Apache-2.0); see MODIFICATIONS.md.
 import { emitPerKeyOrder } from "./key-orders.js";
 import { recordViewFieldPtr } from "./record-views.js";
 import { f64Lit } from "./common.js";
@@ -60,6 +61,10 @@ export interface WalkerHost extends ShapeHost {
   cstr(text: string): string;
   /** Request the shared invalid-union-tag abort helper (@sc_bad_tag). */
   needBadTag(): void;
+  /** The static-to-dyn converter for `t` (dyn.ts toDynHelper): a class instance's JSON serializes its dyn view. */
+  toDynHelper(t: IrType): string;
+  /** Whether a class or one of its bases declares the method `name` (JSON.stringify's toJSON). */
+  classHasMethod(className: string, name: string): boolean;
   /** i1: a value loaded from an undefined-armed record field slot is the
    * slot's ABSENT state. */
   fieldAbsentTestIn(B: BlockBuilder, value: string, unionId: string): string;
@@ -265,6 +270,24 @@ export class LlWalkers {
       case "record":
         this.emitRecordWriter(B, t.shapeId);
         break;
+      // A function in an array position serializes as null (record writers leave function-valued fields out, and a
+      // function root is undefined: emitSerializationExpr boxes it).
+      case "func":
+        this.puts(B, "%b", "null");
+        break;
+      // A class instance (the browser frontend's JSON.stringify of one): its own enumerable data properties, the
+      // dyn view the runtime's tree writer serializes. A class with a toJSON method would be called first: no
+      // lowering for that yet.
+      case "object": {
+        if (this.host.classHasMethod(t.className, "toJSON")) throw new LlvmUnsupportedError(`jsonStringify:object:toJSON`);
+        this.host.declare(`declare void @scr_jb_put_dyn(ptr, ptr)`);
+        this.host.declare(`declare void @scr_dyn_release(ptr)`);
+        const view = B.tmp();
+        B.line(`${view} = call ptr @${this.host.toDynHelper(t)}(ptr %v)`);
+        B.line(`call void @scr_jb_put_dyn(ptr %b, ptr ${view})`);
+        B.line(`call void @scr_dyn_release(ptr ${view})`);
+        break;
+      }
       case "array":
         this.emitArrayWriter(B, t.elem, traceAdapter(this.host, t) !== null);
         break;

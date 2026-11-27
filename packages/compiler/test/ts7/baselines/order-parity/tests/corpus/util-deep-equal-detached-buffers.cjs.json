@@ -1,6 +1,0 @@
-{
- "order": [
-  "<repo>/tests/corpus/util-deep-equal-detached-buffers.cjs"
- ],
- "diags": []
-}

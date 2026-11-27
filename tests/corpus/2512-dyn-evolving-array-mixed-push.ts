@@ -1,3 +1,4 @@
+// @dynamic
 // Mixed push sites on an evolving-`any` closure array: the SECOND push
 // happens after tsc's flow analysis evolved the receiver past `any[]` to
 // the pushed element type, so the push argument marshals into the handle

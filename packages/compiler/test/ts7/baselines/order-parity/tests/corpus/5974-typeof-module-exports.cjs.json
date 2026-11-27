@@ -1,6 +1,0 @@
-{
- "order": [
-  "<repo>/tests/corpus/5974-typeof-module-exports.cjs"
- ],
- "diags": []
-}

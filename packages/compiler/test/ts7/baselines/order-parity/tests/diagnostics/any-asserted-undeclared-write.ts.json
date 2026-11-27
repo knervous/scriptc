@@ -1,6 +1,0 @@
-{
- "order": [
-  "<repo>/tests/diagnostics/any-asserted-undeclared-write.ts"
- ],
- "diags": []
-}

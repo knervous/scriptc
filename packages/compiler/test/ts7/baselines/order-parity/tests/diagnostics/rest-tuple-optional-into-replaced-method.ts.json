@@ -1,6 +1,0 @@
-{
- "order": [
-  "<repo>/tests/diagnostics/rest-tuple-optional-into-replaced-method.ts"
- ],
- "diags": []
-}

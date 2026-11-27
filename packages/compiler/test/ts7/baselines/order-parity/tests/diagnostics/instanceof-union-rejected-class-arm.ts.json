@@ -1,6 +1,0 @@
-{
- "order": [
-  "<repo>/tests/diagnostics/instanceof-union-rejected-class-arm.ts"
- ],
- "diags": []
-}

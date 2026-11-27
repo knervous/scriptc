@@ -1,6 +1,0 @@
-{
- "order": [
-  "<repo>/tests/corpus/2408-loop-terminality-reopen.ts"
- ],
- "diags": []
-}

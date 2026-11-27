@@ -1,6 +1,0 @@
-{
- "order": [
-  "<repo>/tests/corpus/5876-readline-dispose-instanceof.ts"
- ],
- "diags": []
-}

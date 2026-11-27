@@ -1,3 +1,4 @@
+// This file was modified from scriptc (Apache-2.0); see MODIFICATIONS.md.
 /* Counted lifetime regions (@scriptc/experimental LifetimeRegion): the
  * emitted half of scr_region.c, for programs that construct a region
  * (IrModule.lifetimeRegions).
@@ -131,7 +132,7 @@ export class LifetimeRegions {
       // Closures capture anything, and dyn values box class instances.
       case "func":
       case "dyn":
-      case "jsval":
+      case "jsword":
         return true;
       default:
         return false;

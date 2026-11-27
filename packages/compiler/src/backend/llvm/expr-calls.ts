@@ -1,3 +1,4 @@
+// This file was modified from scriptc (Apache-2.0); see MODIFICATIONS.md.
 /* Focused LLVM expression emission extracted from emitter.ts. */
 import { arrayClassDescriptor } from "./classes.js";
 import { InternalCompilerError } from "../../errors.js";
@@ -71,6 +72,7 @@ import {
   inputSuffixWrites,
 } from "./borrowed-inputs.js";
 import type { Writes } from "./reference-writes.js";
+import { emitRetainedBytesPin, emitSharedBytesCall } from "./native-spans.js";
 import { capsuleCallSite, emitCapsuleCall, emitJsIcCall, jsIcSiteOf } from "./js-ic.js";
 import { emitClassMembership, emitDowncastGuard } from "./narrow-guards.js";
 import { registerContentReplay } from "./emit-journal.js";
@@ -124,10 +126,7 @@ export function emitCallExpr(
         const indexed = emitNumericIndexRead(host, e, callee);
         if (indexed) return indexed;
       }
-      if (callee.captures !== undefined)
-        throw new InternalCompilerError(
-          `llvm emitter bug: direct call to lifted function ${e.callee}`,
-        );
+      if (callee.captures !== undefined && callee.captures.length > 0) throw new InternalCompilerError(`llvm emitter bug: direct call to lifted function ${e.callee}`);
       const borrowed = host.callLifetimes.borrowed.get(e.callee);
       const projected = host.callLifetimes.parameters.get(e.callee);
       const inputs = borrowed
@@ -218,13 +217,26 @@ export function emitCallExpr(
       args.forEach((a, index) => {
         if (!borrowed?.has(index)) host.toFrame(a);
       });
+      // A lifted function without captures (%hostbytes.*, %promise.nsRecord.*) called directly: its environment
+      // parameter gets an empty closure, released once the call returns (an async spawn retains its own).
+      let env: string | null = null;
+      if (callee.captures !== undefined) {
+        env = B.tmp();
+        host.declare(`declare ptr @scr_closure_new(ptr, ${host.sizeType})`);
+        B.line(`${env} = call ptr @scr_closure_new(ptr @${host.callTarget(e.callee)}, ${host.sizeType} 0)`);
+      }
+      const releaseEnv = (): void => {
+        if (env === null) return;
+        host.declare(`declare void @scr_closure_release(ptr)`);
+        B.line(`call void @scr_closure_release(ptr ${env})`);
+      };
       const abi = awaitEntry ? undefined : host.int32Abis.get(e.callee);
-      const argList = args
+      const argList = [...(env !== null ? [`ptr ${env}`] : []), ...args
         .map((a, i) =>
           abi?.params[i]
             ? `i32 ${host.int32Argument(a, e.args[i]!)}`
             : `${host.llType(callee.params[i]!.type)} ${a.name}`,
-        )
+        )]
         .join(", ");
       if (awaitEntry === "direct") {
         // A stackless coroutine's await of a stackless callee: the spawn
@@ -284,6 +296,7 @@ export function emitCallExpr(
       // its landing pad unwinds, so no pending check follows it.
       if (e.type.kind === "void") {
         const invoked = host.emitDirectCall(`call void ${target}(${argList})`, e.callee);
+        releaseEnv();
         if (!invoked && host.mayThrow.has(e.callee)) host.emitPendingCheck();
         if (borrowed) host.releaseTemps(host.frames.pop()!);
         return { name: "", type: e.type };
@@ -310,6 +323,7 @@ export function emitCallExpr(
         `${t} = call ${host.llType(e.type)} ${target}(${argList})`,
         e.callee,
       );
+      releaseEnv();
       let out: LlValue;
       if (borrowed && host.borrowedReturns.has(e.callee)) {
         // A borrowed-return body hands back +0 (a null dummy when it threw):
@@ -676,8 +690,10 @@ export function emitCallExpr(
             nativeArgs.push(`ptr ${data}`, `i64 ${len}`);
             break;
           }
+          case "retained-bytes":
           case "bytes":
           case "mutable-bytes": {
+            if (param === "retained-bytes") emitRetainedBytesPin(host, arg.name);
             if (host.mod.workers) {
               host.declare(`declare void @scr_bytes_require_unshared(ptr)`);
               B.line(`call void @scr_bytes_require_unshared(ptr ${arg.name})`);
@@ -697,9 +713,11 @@ export function emitCallExpr(
           }
         }
       });
-      const retTy = ffiNativeTypeLl(entry.returns);
-      const retAbi = ffiNativeReturnLl(entry.returns, host.ffiExtendNarrowIntegers);
-      host.declare(`declare ${retAbi} @${entry.symbol}(${nativeParamTypes.join(", ")})`);
+      // A shared-bytes return calls the native twin instead (native-spans.ts).
+      const shared = entry.returns === "shared-bytes";
+      const retTy = shared ? "ptr" : ffiNativeTypeLl(entry.returns);
+      const retAbi = shared ? "ptr" : ffiNativeReturnLl(entry.returns, host.ffiExtendNarrowIntegers);
+      if (!shared) host.declare(`declare ${retAbi} @${entry.symbol}(${nativeParamTypes.join(", ")})`);
       const call = `call ${retAbi} @${entry.symbol}(${nativeArgs.join(", ")})`;
       const restoreRawContexts = (): void => {
         for (let i = rawContexts.length - 1; i >= 0; i--) {
@@ -731,6 +749,13 @@ export function emitCallExpr(
         }
       };
       const callbacksMayThrow = callbackArgs.size > 0 || host.ffiHasRetainedCallback;
+      if (shared) {
+        const view = emitSharedBytesCall(host, entry.symbol, nativeParamTypes, nativeArgs, e.type);
+        restoreRawContexts();
+        finishRetainedReleases();
+        if (callbacksMayThrow) host.emitPendingCheck();
+        return view;
+      }
       if (entry.returns === "void") {
         B.line(call);
         restoreRawContexts();
@@ -1755,7 +1780,7 @@ export function emitConstruction(
  * answers 0 for every other kind), and the index is compared with the
  * array's dense length as an integer. The call site calls only dyn.arrAt,
  * which the helper calls, so it links no runtime function the helper does
- * not link. The helper may answer a checked value or its jsval word. Both
+ * not link. The helper may answer a checked value or its jsword word. Both
  * operands must be variables or literals, since the read and the slow path
  * evaluate them again. Null when the call does not have that shape. */
 function emitArrayElementRead(
@@ -1768,7 +1793,7 @@ function emitArrayElementRead(
   if (callee.params[1]?.type.kind !== "f64" || index.type.kind !== "f64") return null;
   if (index.kind !== "varRef" && index.kind !== "numLit") return null;
   if (value.type.kind !== "dyn") return null;
-  const word = callee.returnType.kind === "jsval";
+  const word = callee.returnType.kind === "jsword";
   if ((callee.returnType.kind !== "dyn" && !word) || host.int32Abis.has(e.callee)) return null;
   const B = host.B;
   const loc = e.loc;

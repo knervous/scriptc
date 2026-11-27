@@ -1,6 +1,0 @@
-{
- "order": [
-  "<repo>/tests/corpus/string-lifetimes-evaluation.ts"
- ],
- "diags": []
-}

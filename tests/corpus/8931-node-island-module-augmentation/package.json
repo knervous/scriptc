@@ -1,1 +1,0 @@
-{ "name": "node-island-module-augmentation", "private": true, "type": "module", "scriptc": { "packages": { "paint-kit": "node" } } }

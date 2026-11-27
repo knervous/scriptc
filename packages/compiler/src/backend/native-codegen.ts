@@ -1,3 +1,5 @@
+// This file was modified from scriptc (Apache-2.0); see MODIFICATIONS.md.
+import { resolveCompanionPackageJson } from "./scriptw-packages.js";
 import { execFile } from "node:child_process";
 import { createHash, type Hash } from "node:crypto";
 import { closeSync, constants, openSync, readSync } from "node:fs";
@@ -190,7 +192,7 @@ async function resolveHelper(
     resolver ?? ((specifier: string) => createRequire(import.meta.url).resolve(specifier));
   let packageJsonPath: string;
   try {
-    packageJsonPath = resolvePackageJson(`${helper.packageName}/package.json`);
+    packageJsonPath = resolveCompanionPackageJson(helper.packageName, resolvePackageJson, process.env["SCRIPTW_LLVM_PACK"], join);
   } catch {
     throw new NativeCodegenError(
       "SC3003",

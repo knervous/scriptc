@@ -1,3 +1,4 @@
+// This file was modified from scriptc (Apache-2.0); see MODIFICATIONS.md.
 import { createHash } from "node:crypto";
 import { chmod, mkdir, readFile, rename, rm, writeFile } from "node:fs/promises";
 import { basename, dirname, join, resolve } from "node:path";
@@ -21,12 +22,13 @@ export function digest(bytes: Uint8Array): string {
   return createHash("sha256").update(bytes).digest("hex");
 }
 
-export function cacheKey(namespace: string, parts: readonly (string | Uint8Array)[]): string {
+export function cacheKey(
+  namespace: string,
+  parts: readonly (string | Uint8Array)[],
+): string {
   const hash = createHash("sha256")
-    .update(namespace)
-    .update("\0")
-    .update(compilerReleaseVersion())
-    .update("\0");
+    .update(namespace).update("\0")
+    .update(compilerReleaseVersion()).update("\0");
   for (const [index, part] of parts.entries()) {
     hash.update(part);
     if (index + 1 < parts.length) hash.update("\0");
@@ -40,8 +42,7 @@ export function stampPath(root: string, namespace: string, key: string): string 
 
 export function stampIntegrity(namespace: string, stamp: object): string {
   return createHash("sha256")
-    .update(namespace)
-    .update("\0")
+    .update(namespace).update("\0")
     .update(JSON.stringify(stamp))
     .digest("hex");
 }
@@ -65,9 +66,11 @@ export function frontendOutputExclusions(
   additionalPaths: readonly string[],
 ): FrontendInputExclusions {
   const paths = outputPaths(options, backend, stemSuffix);
-  const outputArtifacts = [paths.llvmPath, paths.irPath, ...additionalPaths].map((path) =>
-    resolve(path),
-  );
+  const outputArtifacts = [
+    paths.llvmPath,
+    paths.irPath,
+    ...additionalPaths,
+  ].map((path) => resolve(path));
   const outputDirectories = new Set<string>();
   for (const artifact of outputArtifacts) {
     for (let directory = dirname(artifact); ; directory = dirname(directory)) {
@@ -109,9 +112,7 @@ export function validNativeFeatures<T extends { backend: CacheBackend }>(
 ): value is T {
   if (value === null || typeof value !== "object") return false;
   const native = value as Partial<T>;
-  return (
-    native.backend === "llvm" &&
+  return native.backend === "llvm" &&
     booleanKeys.every((key) => typeof native[key] === "boolean") &&
-    validAdditional(native)
-  );
+    validAdditional(native);
 }

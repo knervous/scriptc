@@ -1,6 +1,0 @@
-{
- "order": [
-  "<repo>/tests/corpus/instanceof-untyped-chosen-prototypes.ts"
- ],
- "diags": []
-}

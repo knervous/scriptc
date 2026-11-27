@@ -1,6 +1,0 @@
-{
- "order": [
-  "<repo>/tests/corpus/class-statics-in-an-argument-after-the-callee.ts"
- ],
- "diags": []
-}

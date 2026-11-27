@@ -1,1 +1,0 @@
-{ "name": "island-builtin-handles", "private": true, "type": "module", "scriptc": { "packages": { "urlkit": "node" } } }

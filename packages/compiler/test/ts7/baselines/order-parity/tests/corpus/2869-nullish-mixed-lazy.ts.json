@@ -1,6 +1,0 @@
-{
- "order": [
-  "<repo>/tests/corpus/2869-nullish-mixed-lazy.ts"
- ],
- "diags": []
-}

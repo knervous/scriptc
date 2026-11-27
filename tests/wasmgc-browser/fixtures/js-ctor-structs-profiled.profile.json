@@ -1,0 +1,687 @@
+{
+ "schema": "scriptc-pgo-site-profile/1",
+ "key": "hand-made by make-fixture-profile.mjs: every o.<field> access monomorphic on {tag,key,mode,flags,lanes,child}",
+ "pathsRelativeTo": "this file",
+ "files": {
+  "js-ctor-structs-profiled-helper.js": {
+   "sha256": "73d34fa970dcfdb9e71ad277a7ca81488112dd22099b4cbd9054538b5612449c"
+  }
+ },
+ "sites": [
+  {
+   "kind": "load",
+   "property": "tag",
+   "file": "js-ctor-structs-profiled-helper.js",
+   "span": {
+    "start": 610,
+    "end": 615
+   },
+   "state": "monomorphic",
+   "receivers": [
+    {
+     "kind": "plain-object",
+     "fields": [
+      "tag",
+      "key",
+      "mode",
+      "flags",
+      "lanes",
+      "child"
+     ],
+     "own": {
+      "index": 0,
+      "how": "field:s"
+     }
+    }
+   ]
+  },
+  {
+   "kind": "load",
+   "property": "tag",
+   "file": "js-ctor-structs-profiled-helper.js",
+   "span": {
+    "start": 852,
+    "end": 857
+   },
+   "state": "monomorphic",
+   "receivers": [
+    {
+     "kind": "plain-object",
+     "fields": [
+      "tag",
+      "key",
+      "mode",
+      "flags",
+      "lanes",
+      "child"
+     ],
+     "own": {
+      "index": 0,
+      "how": "field:s"
+     }
+    }
+   ]
+  },
+  {
+   "kind": "load",
+   "property": "mode",
+   "file": "js-ctor-structs-profiled-helper.js",
+   "span": {
+    "start": 902,
+    "end": 908
+   },
+   "state": "monomorphic",
+   "receivers": [
+    {
+     "kind": "plain-object",
+     "fields": [
+      "tag",
+      "key",
+      "mode",
+      "flags",
+      "lanes",
+      "child"
+     ],
+     "own": {
+      "index": 2,
+      "how": "field:s"
+     }
+    }
+   ]
+  },
+  {
+   "kind": "load",
+   "property": "flags",
+   "file": "js-ctor-structs-profiled-helper.js",
+   "span": {
+    "start": 1044,
+    "end": 1051
+   },
+   "state": "monomorphic",
+   "receivers": [
+    {
+     "kind": "plain-object",
+     "fields": [
+      "tag",
+      "key",
+      "mode",
+      "flags",
+      "lanes",
+      "child"
+     ],
+     "own": {
+      "index": 3,
+      "how": "field:s"
+     }
+    }
+   ]
+  },
+  {
+   "kind": "load",
+   "property": "tag",
+   "file": "js-ctor-structs-profiled-helper.js",
+   "span": {
+    "start": 1251,
+    "end": 1256
+   },
+   "state": "monomorphic",
+   "receivers": [
+    {
+     "kind": "plain-object",
+     "fields": [
+      "tag",
+      "key",
+      "mode",
+      "flags",
+      "lanes",
+      "child"
+     ],
+     "own": {
+      "index": 0,
+      "how": "field:s"
+     }
+    }
+   ]
+  },
+  {
+   "kind": "load",
+   "property": "tag",
+   "file": "js-ctor-structs-profiled-helper.js",
+   "span": {
+    "start": 1260,
+    "end": 1265
+   },
+   "state": "monomorphic",
+   "receivers": [
+    {
+     "kind": "plain-object",
+     "fields": [
+      "tag",
+      "key",
+      "mode",
+      "flags",
+      "lanes",
+      "child"
+     ],
+     "own": {
+      "index": 0,
+      "how": "field:s"
+     }
+    }
+   ]
+  },
+  {
+   "kind": "load",
+   "property": "tag",
+   "file": "js-ctor-structs-profiled-helper.js",
+   "span": {
+    "start": 1283,
+    "end": 1288
+   },
+   "state": "monomorphic",
+   "receivers": [
+    {
+     "kind": "plain-object",
+     "fields": [
+      "tag",
+      "key",
+      "mode",
+      "flags",
+      "lanes",
+      "child"
+     ],
+     "own": {
+      "index": 0,
+      "how": "field:s"
+     }
+    }
+   ]
+  },
+  {
+   "kind": "store",
+   "property": "lanes",
+   "file": "js-ctor-structs-profiled-helper.js",
+   "span": {
+    "start": 1345,
+    "end": 1352
+   },
+   "state": "monomorphic",
+   "receivers": [
+    {
+     "kind": "plain-object",
+     "fields": [
+      "tag",
+      "key",
+      "mode",
+      "flags",
+      "lanes",
+      "child"
+     ],
+     "own": {
+      "index": 4,
+      "how": "field:s"
+     }
+    }
+   ]
+  },
+  {
+   "kind": "store",
+   "property": "flags",
+   "file": "js-ctor-structs-profiled-helper.js",
+   "span": {
+    "start": 1364,
+    "end": 1371
+   },
+   "state": "monomorphic",
+   "receivers": [
+    {
+     "kind": "plain-object",
+     "fields": [
+      "tag",
+      "key",
+      "mode",
+      "flags",
+      "lanes",
+      "child"
+     ],
+     "own": {
+      "index": 3,
+      "how": "field:s"
+     }
+    }
+   ]
+  },
+  {
+   "kind": "store",
+   "property": "mode",
+   "file": "js-ctor-structs-profiled-helper.js",
+   "span": {
+    "start": 1388,
+    "end": 1394
+   },
+   "state": "monomorphic",
+   "receivers": [
+    {
+     "kind": "plain-object",
+     "fields": [
+      "tag",
+      "key",
+      "mode",
+      "flags",
+      "lanes",
+      "child"
+     ],
+     "own": {
+      "index": 2,
+      "how": "field:s"
+     }
+    }
+   ]
+  },
+  {
+   "kind": "store",
+   "property": "tag",
+   "file": "js-ctor-structs-profiled-helper.js",
+   "span": {
+    "start": 1405,
+    "end": 1410
+   },
+   "state": "monomorphic",
+   "receivers": [
+    {
+     "kind": "plain-object",
+     "fields": [
+      "tag",
+      "key",
+      "mode",
+      "flags",
+      "lanes",
+      "child"
+     ],
+     "own": {
+      "index": 0,
+      "how": "field:s"
+     }
+    }
+   ]
+  },
+  {
+   "kind": "load",
+   "property": "lanes",
+   "file": "js-ctor-structs-profiled-helper.js",
+   "span": {
+    "start": 1425,
+    "end": 1432
+   },
+   "state": "monomorphic",
+   "receivers": [
+    {
+     "kind": "plain-object",
+     "fields": [
+      "tag",
+      "key",
+      "mode",
+      "flags",
+      "lanes",
+      "child"
+     ],
+     "own": {
+      "index": 4,
+      "how": "field:s"
+     }
+    }
+   ]
+  },
+  {
+   "kind": "load",
+   "property": "flags",
+   "file": "js-ctor-structs-profiled-helper.js",
+   "span": {
+    "start": 1441,
+    "end": 1448
+   },
+   "state": "monomorphic",
+   "receivers": [
+    {
+     "kind": "plain-object",
+     "fields": [
+      "tag",
+      "key",
+      "mode",
+      "flags",
+      "lanes",
+      "child"
+     ],
+     "own": {
+      "index": 3,
+      "how": "field:s"
+     }
+    }
+   ]
+  },
+  {
+   "kind": "load",
+   "property": "mode",
+   "file": "js-ctor-structs-profiled-helper.js",
+   "span": {
+    "start": 1457,
+    "end": 1463
+   },
+   "state": "monomorphic",
+   "receivers": [
+    {
+     "kind": "plain-object",
+     "fields": [
+      "tag",
+      "key",
+      "mode",
+      "flags",
+      "lanes",
+      "child"
+     ],
+     "own": {
+      "index": 2,
+      "how": "field:s"
+     }
+    }
+   ]
+  },
+  {
+   "kind": "load",
+   "property": "tag",
+   "file": "js-ctor-structs-profiled-helper.js",
+   "span": {
+    "start": 1472,
+    "end": 1477
+   },
+   "state": "monomorphic",
+   "receivers": [
+    {
+     "kind": "plain-object",
+     "fields": [
+      "tag",
+      "key",
+      "mode",
+      "flags",
+      "lanes",
+      "child"
+     ],
+     "own": {
+      "index": 0,
+      "how": "field:s"
+     }
+    }
+   ]
+  },
+  {
+   "kind": "load",
+   "property": "lanes",
+   "file": "js-ctor-structs-profiled-helper.js",
+   "span": {
+    "start": 1521,
+    "end": 1528
+   },
+   "state": "monomorphic",
+   "receivers": [
+    {
+     "kind": "plain-object",
+     "fields": [
+      "tag",
+      "key",
+      "mode",
+      "flags",
+      "lanes",
+      "child"
+     ],
+     "own": {
+      "index": 4,
+      "how": "field:s"
+     }
+    }
+   ]
+  },
+  {
+   "kind": "load",
+   "property": "lanes",
+   "file": "js-ctor-structs-profiled-helper.js",
+   "span": {
+    "start": 1549,
+    "end": 1556
+   },
+   "state": "monomorphic",
+   "receivers": [
+    {
+     "kind": "plain-object",
+     "fields": [
+      "tag",
+      "key",
+      "mode",
+      "flags",
+      "lanes",
+      "child"
+     ],
+     "own": {
+      "index": 4,
+      "how": "field:s"
+     }
+    }
+   ]
+  },
+  {
+   "kind": "store",
+   "property": "flags",
+   "file": "js-ctor-structs-profiled-helper.js",
+   "span": {
+    "start": 1569,
+    "end": 1576
+   },
+   "state": "monomorphic",
+   "receivers": [
+    {
+     "kind": "plain-object",
+     "fields": [
+      "tag",
+      "key",
+      "mode",
+      "flags",
+      "lanes",
+      "child"
+     ],
+     "own": {
+      "index": 3,
+      "how": "field:s"
+     }
+    }
+   ]
+  },
+  {
+   "kind": "load",
+   "property": "flags",
+   "file": "js-ctor-structs-profiled-helper.js",
+   "span": {
+    "start": 1579,
+    "end": 1586
+   },
+   "state": "monomorphic",
+   "receivers": [
+    {
+     "kind": "plain-object",
+     "fields": [
+      "tag",
+      "key",
+      "mode",
+      "flags",
+      "lanes",
+      "child"
+     ],
+     "own": {
+      "index": 3,
+      "how": "field:s"
+     }
+    }
+   ]
+  },
+  {
+   "kind": "load",
+   "property": "lanes",
+   "file": "js-ctor-structs-profiled-helper.js",
+   "span": {
+    "start": 1601,
+    "end": 1608
+   },
+   "state": "monomorphic",
+   "receivers": [
+    {
+     "kind": "plain-object",
+     "fields": [
+      "tag",
+      "key",
+      "mode",
+      "flags",
+      "lanes",
+      "child"
+     ],
+     "own": {
+      "index": 4,
+      "how": "field:s"
+     }
+    }
+   ]
+  },
+  {
+   "kind": "load",
+   "property": "flags",
+   "file": "js-ctor-structs-profiled-helper.js",
+   "span": {
+    "start": 1617,
+    "end": 1624
+   },
+   "state": "monomorphic",
+   "receivers": [
+    {
+     "kind": "plain-object",
+     "fields": [
+      "tag",
+      "key",
+      "mode",
+      "flags",
+      "lanes",
+      "child"
+     ],
+     "own": {
+      "index": 3,
+      "how": "field:s"
+     }
+    }
+   ]
+  },
+  {
+   "kind": "store",
+   "property": "tag",
+   "file": "js-ctor-structs-profiled-helper.js",
+   "span": {
+    "start": 1659,
+    "end": 1664
+   },
+   "state": "monomorphic",
+   "receivers": [
+    {
+     "kind": "plain-object",
+     "fields": [
+      "tag",
+      "key",
+      "mode",
+      "flags",
+      "lanes",
+      "child"
+     ],
+     "own": {
+      "index": 0,
+      "how": "field:s"
+     }
+    }
+   ]
+  },
+  {
+   "kind": "load",
+   "property": "tag",
+   "file": "js-ctor-structs-profiled-helper.js",
+   "span": {
+    "start": 1677,
+    "end": 1682
+   },
+   "state": "monomorphic",
+   "receivers": [
+    {
+     "kind": "plain-object",
+     "fields": [
+      "tag",
+      "key",
+      "mode",
+      "flags",
+      "lanes",
+      "child"
+     ],
+     "own": {
+      "index": 0,
+      "how": "field:s"
+     }
+    }
+   ]
+  },
+  {
+   "kind": "store",
+   "property": "mode",
+   "file": "js-ctor-structs-profiled-helper.js",
+   "span": {
+    "start": 1718,
+    "end": 1724
+   },
+   "state": "monomorphic",
+   "receivers": [
+    {
+     "kind": "plain-object",
+     "fields": [
+      "tag",
+      "key",
+      "mode",
+      "flags",
+      "lanes",
+      "child"
+     ],
+     "own": {
+      "index": 2,
+      "how": "field:s"
+     }
+    }
+   ]
+  },
+  {
+   "kind": "load",
+   "property": "mode",
+   "file": "js-ctor-structs-profiled-helper.js",
+   "span": {
+    "start": 1737,
+    "end": 1743
+   },
+   "state": "monomorphic",
+   "receivers": [
+    {
+     "kind": "plain-object",
+     "fields": [
+      "tag",
+      "key",
+      "mode",
+      "flags",
+      "lanes",
+      "child"
+     ],
+     "own": {
+      "index": 2,
+      "how": "field:s"
+     }
+    }
+   ]
+  }
+ ]
+}

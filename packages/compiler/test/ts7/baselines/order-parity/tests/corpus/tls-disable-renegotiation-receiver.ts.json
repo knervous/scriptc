@@ -1,6 +1,0 @@
-{
- "order": [
-  "<repo>/tests/corpus/tls-disable-renegotiation-receiver.ts"
- ],
- "diags": []
-}

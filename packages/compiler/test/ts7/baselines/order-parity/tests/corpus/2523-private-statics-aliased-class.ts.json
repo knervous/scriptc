@@ -1,6 +1,0 @@
-{
- "order": [
-  "<repo>/tests/corpus/2523-private-statics-aliased-class.ts"
- ],
- "diags": []
-}

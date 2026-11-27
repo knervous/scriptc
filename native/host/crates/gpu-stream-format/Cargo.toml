@@ -1,0 +1,10 @@
+[package]
+name = "gpu-stream-format"
+version = "0.1.0"
+description = "The WebGPU command stream's format: opcodes, handle kinds, tickets, limits, refusal codes and enum tables, shared by its encoders and executors"
+edition = "2024"
+license = "Apache-2.0"
+publish = false
+
+# No dependencies: an encoder compiled for wasm32 and an executor on wgpu both depend on this.
+[dependencies]

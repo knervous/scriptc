@@ -1,0 +1,28 @@
+[package]
+name = "scriptc-host"
+description = "The native host for scriptc's LLVM-native programs, linked as the host island's default (scriptc-host-core and its default layer)"
+version = "0.1.0"
+edition = "2024"
+license = "Apache-2.0"
+publish = false
+
+[lib]
+crate-type = ["staticlib", "rlib"]
+
+[features]
+default = ["default-entry", "webrtc", "window", "audio", "net", "gpu"]
+# The generic host with no layer of its own: the default link (an embedder turns it off and calls `export_host!`).
+default-entry = []
+webrtc = ["scriptc-host-core/webrtc"]
+# The services (scriptc-host-core's features). The host pack's headless archive leaves out the window, the GPU,
+# Web Audio and WebRTC: --no-default-features --features default-entry,net; default-entry alone leaves out the
+# network too.
+window = ["scriptc-host-core/window"]
+audio = ["scriptc-host-core/audio"]
+net = ["scriptc-host-core/net"]
+gpu = ["scriptc-host-core/gpu"]
+rtc = ["webrtc"]
+release-hardening = ["scriptc-host-core/release-hardening"]
+
+[dependencies]
+scriptc-host-core = { path = "../scriptc-host-core", default-features = false }

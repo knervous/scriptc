@@ -1,6 +1,0 @@
-{
- "order": [
-  "<repo>/tests/diagnostics/destructure-empty-fallback-kinds.ts"
- ],
- "diags": []
-}

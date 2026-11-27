@@ -1,6 +1,0 @@
-{
- "order": [
-  "<repo>/tests/corpus/8766-variadic-fn-into-fixed-slot.ts"
- ],
- "diags": []
-}

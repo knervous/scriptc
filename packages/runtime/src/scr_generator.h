@@ -1,3 +1,4 @@
+// This file was modified from scriptc (Apache-2.0); see MODIFICATIONS.md.
 /* scriptc runtime — sync and async generators (scr_async.c). Included by
  * scr_runtime.h, which says where new declarations go. */
 #ifndef SCR_GENERATOR_H
@@ -197,7 +198,39 @@ ScrGen *scr_gen_of_fiber(ScrFiber *f);
 long scr_promise_live_count(void);
 #endif
 
+/* ── fetch (scr_fetch.c) ──────────────────────────────────────────────
+ * The native bridge over scr_net + scr_tls + scr_http's client parser.
+ * Static fetch(url) resolves at the response head with native Response
+ * and ReadableStream handles; Response.json consumes that same stream.
+ * AbortSignal and streaming request bodies stay native too. Under
+ * --dynamic the same TU boots the broader engine web surface. The
+ * emitted main calls scr_fetch_install in either form. */
 void scr_fetch_install(void);
+/* A host transport (scr_fetch.c "host transport"): the embedding
+ * application carries each request. start() takes it; the host answers on
+ * the loop thread, exactly once per token, through the settle (status, its
+ * reason phrase, the final URL, the response's headers one "name: value"
+ * line each, the decoded body) or fail function it was given. The token
+ * stays valid until then. An application offers one by defining
+ * scr_host_fetch_transport (weak here: without it, the socket units). */
+typedef void (*ScrFetchHostSettle)(void *token, int status,
+                                   const char *status_text,
+                                   size_t status_text_len, const char *url,
+                                   size_t url_len, const char *headers,
+                                   size_t headers_len, const uint8_t *body,
+                                   size_t body_len);
+typedef void (*ScrFetchHostFail)(void *token, const char *message,
+                                 size_t len);
+typedef struct ScrFetchHostTransport {
+  void (*start)(void *token, const char *method, size_t method_len,
+                const char *url, size_t url_len, const char *headers,
+                size_t headers_len, const uint8_t *body, size_t body_len);
+} ScrFetchHostTransport;
+#if defined(__GNUC__) || defined(__clang__)
+__attribute__((weak))
+#endif
+const ScrFetchHostTransport *scr_host_fetch_transport(ScrFetchHostSettle settle,
+                                                      ScrFetchHostFail fail);
 ScrPromise *scr_fetch_input(ScrDyn *input, ScrDyn *init);
 ScrDyn *scr_fetch_function(void);
 void scr_global_fetch_install(ScrDyn *(*get)(void));

@@ -1,6 +1,0 @@
-{
- "order": [
-  "<repo>/tests/corpus/destructure-untyped-source-null.js"
- ],
- "diags": []
-}

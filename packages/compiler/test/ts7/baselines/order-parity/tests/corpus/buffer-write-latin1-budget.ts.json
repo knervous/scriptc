@@ -1,6 +1,0 @@
-{
- "order": [
-  "<repo>/tests/corpus/buffer-write-latin1-budget.ts"
- ],
- "diags": []
-}

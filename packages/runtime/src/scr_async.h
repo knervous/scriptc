@@ -1,3 +1,4 @@
+// This file was modified from scriptc (Apache-2.0); see MODIFICATIONS.md.
 /* scriptc runtime — promises, fibers, the event loop, AsyncLocalStorage,
  * promise combinators and timers (scr_async.c, scr_async_dyn.c). Included by
  * scr_runtime.h, which says where new declarations go. */
@@ -276,7 +277,9 @@ typedef struct ScrAlsCtx {
 } ScrAlsCtx;
 /* Runtime-internal (the fiber machinery's always-linked core). */
 extern SCR_TL ScrAlsCtx **scr_als_active;
-#ifdef SCR_WORKERS
+#if defined(SCR_THREAD_INSTANCES) || defined(SCR_WORKERS)
+/* NULL stands for &scr_als_main_slot (a thread-local's address is not a
+ * constant initializer); scr_als_slot() resolves it. */
 ScrAlsCtx **scr_als_slot(void);
 #define SCR_ALS_SLOT() scr_als_slot()
 #else
@@ -595,6 +598,10 @@ void scr_promise_fulfill_ref(ScrPromise *p, void *v, void *(*retain)(void *), vo
 void scr_promise_fulfill_like(ScrPromise *p, const ScrPromise *src);
 void scr_promise_fulfill_void(ScrPromise *p);
 
+/* Reject `p` with the exception pending in the active cell (moved out —
+ * the cell resets); wakes waiters, enters the unhandled ledger. No-op
+ * with a clean cell; an already-settled `p` just clears the cell. The
+ * island promise bridge's rejection half (scr_island.c). */
 void scr_promise_reject_pending(ScrPromise *p);
 
 /* Mint an ALREADY-SETTLED promise from a just-run synchronous operation:
@@ -712,7 +719,10 @@ double scr_set_interval(ScrClosure *cb, double ms); /* cb ownership moves in */
  * fulfills with the undefined dyn value (+1). */
 ScrPromise *scr_immediate_promise(void);
 void scr_clear_interval(double handle);
-
+/* The island timer bridge (scr_web.c): a one-shot entry WITH a clear
+ * handle (island clearTimeout cancels; ids share the interval space so
+ * scr_clear_interval serves both), and the teardown sweep that releases
+ * every armed closure before the engine dies. */
 double scr_set_timeout_handle(ScrClosure *cb, double ms); /* cb ownership moves in */
 /* A setTimeout/setInterval delay as given (after ToNumber): emits the
  * warning Node's Timeout constructor emits when it sets the delay to 1

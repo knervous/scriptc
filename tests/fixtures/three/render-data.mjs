@@ -64,7 +64,6 @@ import { AmbientLight, ArrowHelper, AxesHelper, Box3Helper, BoxGeometry, BoxHelp
     console.log('delta', timer.getDelta().toFixed(6), timer.getDelta().toFixed(6));
     timer.setTimescale(2);
     timer.update(1500);
-    // Match the delta output precision across independently sampled clock origins.
-    console.log('scale', timer.getDelta().toFixed(6), timer.getTimescale(), Number.isFinite(timer.getElapsed()));
+    console.log('scale', timer.getDelta(), timer.getTimescale(), Number.isFinite(timer.getElapsed()));
     timer.dispose();
 }

@@ -1,3 +1,4 @@
+// This file was modified from scriptc (Apache-2.0); see MODIFICATIONS.md.
 /* Record views: one object across record layouts (decision D3).
  *
  * A checked conversion of a capsule of a native record A into another
@@ -130,6 +131,8 @@ interface ViewOptions {
   /** Shapes that can be no view target at all: an arm of a shape union,
    * and a type whose values can be published to other threads. */
   readonly excluded: (shapeId: string) => boolean;
+  /** Shapes the fork's frozen-records analysis marks freezable (beside the IR's `freezable` flag). */
+  readonly freezable?: (shapeId: string) => boolean;
   /** The program starts worker threads: it plans partial views only. */
   readonly workers?: boolean;
 }
@@ -288,14 +291,14 @@ export function planRecordViews(mod: IrModule, options: ViewOptions): RecordView
   if (reachable.size === 0) return NO_RECORD_VIEWS;
   for (const id of reachable) {
     const target = shapes.get(id);
-    if (!target || !plainShape(target) || target.freezable === true) continue;
+    if (!target || !plainShape(target) || target.freezable === true || options.freezable?.(id) === true) continue;
     if (options.traced(id) || options.excluded(id) || options.workers === true) continue;
     const found: string[] = [];
     for (const source of shapes.values()) {
       if (source.id === id || !live.has(source.id) || !plainShape(source)) continue;
       // A view writes the source's slots through the target type, which has
       // no frozen-write guard, so a source that may be frozen keeps the copy.
-      if (source.freezable === true) continue;
+      if (source.freezable === true || options.freezable?.(source.id) === true) continue;
       if (covers(source, target)) found.push(source.id);
     }
     if (found.length > 0) sources.set(id, found);
@@ -429,7 +432,7 @@ export function planRecordViews(mod: IrModule, options: ViewOptions): RecordView
 function admitsUndefined(type: IrType, unions: ReadonlyMap<string, IrUnionDef>): boolean {
   switch (type.kind) {
     case "dyn":
-    case "jsval":
+    case "jsword":
     case "undefinedT":
     case "void":
       return true;

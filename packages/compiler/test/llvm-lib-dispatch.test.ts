@@ -19,25 +19,21 @@ const dyn = (): IrExpr => ({ kind: "dynFrom", value: str("value"), type: DYN, lo
 
 function libCallModule(fn: IrLibFn, args: IrExpr[], type: IrType): IrModule {
   return {
-    irVersion: 17,
+    irVersion: 15,
     sourceFile: loc.file,
     entry: "__main",
-    functions: [
-      {
-        name: "__main",
-        params: [],
-        returnType: VOID,
-        locals: [],
-        body: [
-          {
-            kind: "exprStmt",
-            expr: { kind: "libCall", fn, args, type, loc },
-            loc,
-          },
-        ],
+    functions: [{
+      name: "__main",
+      params: [],
+      returnType: VOID,
+      locals: [],
+      body: [{
+        kind: "exprStmt",
+        expr: { kind: "libCall", fn, args, type, loc },
         loc,
-      },
-    ],
+      }],
+      loc,
+    }],
   };
 }
 
@@ -55,8 +51,8 @@ test.each([
   expect(emitLlvmModule(mod)).toContain(`call void @${sym}(`);
 });
 
-test("LLVM routes net.connectDyn through network validation emission", () => {
-  const mod = libCallModule("net.connectDyn", [dyn(), dyn(), dyn(), str("fence")], NETSOCKET_T);
+test("LLVM routes net.connectOptsChk through network validation emission", () => {
+  const mod = libCallModule("net.connectOptsChk", [dyn(), str("fence")], NETSOCKET_T);
   expect(validateModule(mod)).toEqual([]);
-  expect(emitLlvmModule(mod)).toContain("call ptr @scr_net_connect_dyn(");
+  expect(emitLlvmModule(mod)).toContain("call void @scr_net_connect_opts_chk(");
 });

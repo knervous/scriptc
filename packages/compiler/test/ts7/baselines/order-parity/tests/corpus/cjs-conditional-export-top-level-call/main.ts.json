@@ -1,6 +1,0 @@
-{
- "order": [
-  "<repo>/tests/corpus/cjs-conditional-export-top-level-call/main.ts"
- ],
- "diags": []
-}

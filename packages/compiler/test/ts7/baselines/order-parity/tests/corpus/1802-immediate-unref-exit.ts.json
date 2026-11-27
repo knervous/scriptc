@@ -1,6 +1,0 @@
-{
- "order": [
-  "<repo>/tests/corpus/1802-immediate-unref-exit.ts"
- ],
- "diags": []
-}

@@ -1,6 +1,0 @@
-{
- "order": [
-  "<repo>/tests/corpus/stack-depth-async-bodies.ts"
- ],
- "diags": []
-}

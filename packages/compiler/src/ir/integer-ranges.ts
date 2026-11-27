@@ -1,3 +1,4 @@
+// This file was modified from scriptc (Apache-2.0); see MODIFICATIONS.md.
 import type { IrExpr, IrFunction, IrStmt } from "./ir.js";
 import { everyExprChild, everyStmtChild, everyStmtList } from "./traverse.js";
 import { byteNumberAccess, byteNumberRange } from "./byte-numbers.js";
@@ -306,15 +307,22 @@ function unionLocalWrites(
  * results, exact `+ - * %` over in-range operands such as
  * `v = (v * 31 + n) % 1000003`, literals and slots in range), keeps the
  * range those writes and its entry value span across the region.
- * Suspensions and captured bindings deliberately remain outside the proof. */
-export function analyzeIntegerRanges(fn: IrFunction, slots: IntegerSlotFacts = {}): IntegerRanges {
-  return analyzeIntegerRangeFacts(fn, slots).ranges;
+ * Suspensions and captured bindings deliberately remain outside the proof.
+ * `inBounds`: the typed-array element reads already proved to have their
+ * element (findBytesBounds), the only reads given their kind's range. */
+export function analyzeIntegerRanges(
+  fn: IrFunction,
+  slots: IntegerSlotFacts = {},
+  inBounds: ReadonlySet<unknown> = new Set(),
+): IntegerRanges {
+  return analyzeIntegerRangeFacts(fn, slots, inBounds).ranges;
 }
 
 /** analyzeIntegerRanges with the loop ranges of the function's for loops. */
 export function analyzeIntegerRangeFacts(
   fn: IrFunction,
   slots: IntegerSlotFacts = {},
+  inBounds: ReadonlySet<unknown> = new Set(),
   entries?: LoopEntryAssumptions,
 ): IntegerRangeFacts {
   const ranges = new Map<IrExpr, IntegerRange | null>();
@@ -833,7 +841,9 @@ export function analyzeIntegerRangeFacts(
         if (numeric && !numeric.write) range = byteNumberRange(numeric);
         else if (e.method === "length" || e.method === "byteLength" || e.method === "byteOffset")
           range = BYTES_LENGTH_RANGE;
-        else if (e.method === "get" && e.invalidNaN !== true && e.receiver.type.kind === "bytes") {
+        // An element read is its kind's integer only at an index the array has: a missing element reads undefined
+        // (NaN as a number), no integer. So the range holds for the reads `inBounds` names (proved in bounds).
+        else if (e.method === "get" && e.invalidNaN !== true && e.receiver.type.kind === "bytes" && inBounds.has(e)) {
           const elem = e.receiver.type.elem;
           if (elem === "u8" || elem === "u8c") range = { min: 0, max: 255 };
           else if (elem === "i8") range = { min: -128, max: 127 };

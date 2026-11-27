@@ -1,7 +1,10 @@
+// This file was modified from scriptc (Apache-2.0); see MODIFICATIONS.md.
 import { emitBorrowedInput } from "./borrowed-inputs.js";
 /* Focused LLVM expression emission extracted from emitter.ts. */
 import { InternalCompilerError } from "../../errors.js";
 import {
+  F64,
+  STRING,
   type IrExpr,
   type IrType,
   isDynTypedRefType,
@@ -257,12 +260,37 @@ export function emitIntrinsicExpr(host: LlvmEmitterContext, e: ExprOf<"intrinsic
         });
       }
       const usesParts = plan.length !== e.args.length;
-      const args = usesParts
-        ? emitStringInputs(
-            host,
-            plan.map((p) => p.expr),
-          )
-        : e.args.map((a) => host.emitExpr(a));
+      // A checked-dynamic argument (the browser frontend leaves it for the page's console to format; the native
+      // host island has no page console): Node's formatter rule the node targets lower to, a string verbatim and
+      // everything else through inspect at the rest-args depth 2 (insp.dynS).
+      const logExpr = (a: IrExpr): IrExpr =>
+        a.type.kind !== "dyn"
+          ? a
+          : {
+              kind: "libCall",
+              fn: "insp.dynS",
+              args: [a, { kind: "numLit", value: 2, type: F64, loc: a.loc }],
+              type: STRING,
+              loc: a.loc,
+            };
+      // A host value prints as the island renders it for console.log (util.inspect's shape for objects).
+      const hostValueText = (v: LlValue): LlValue => {
+        if (v.type.kind !== "jsval") return v;
+        host.declare(`declare ptr @scr_jsval_inspect(ptr)`);
+        const text = B.tmp();
+        B.line(`${text} = call ptr @scr_jsval_inspect(ptr ${v.name})`);
+        const out = host.own({ name: text, type: STRING });
+        host.emitPendingCheck();
+        return out;
+      };
+      const args = (
+        usesParts
+          ? emitStringInputs(
+              host,
+              plan.map((p) => logExpr(p.expr)),
+            )
+          : e.args.map((a) => host.emitExpr(logExpr(a)))
+      ).map(hostValueText);
       host.logArgSlots = Math.max(host.logArgSlots, Math.max(args.length, 1));
       args.forEach((a, i) => {
         const tagOf: Record<string, number> = { f64: 0, string: 1, bool: 2 };
@@ -311,9 +339,22 @@ export function emitSerializationExpr(
       // The value temp is BORROWED (released with this statement's
       // frame); the result string is owned (+1). Never throws — except
       // the dyn root below.
-      const v = emitBorrowedInput(host, e.value);
+      // A function root is JSON.stringify's undefined, spelled as the dyn root spells it ("undefined"), once the
+      // operand has been evaluated.
+      if (e.value.type.kind === "func") {
+        host.emitExpr(e.value);
+        return host.emitExpr({ kind: "strLit", value: "undefined", type: e.type, loc: e.loc });
+      }
+      // A class instance root serializes through its dyn form (the runtime's tree writer): its own enumerable data
+      // properties. A class with a toJSON method would be called first: no lowering for that yet.
+      const boxedRoot = e.value.type.kind === "object";
+      if (e.value.type.kind === "object" && host.shapeHost.classHasMethod(e.value.type.className, "toJSON"))
+        throw new LlvmUnsupportedError("jsonStringify:object:toJSON", e.loc);
+      const v = boxedRoot
+        ? host.emitExpr({ kind: "dynFrom", value: e.value, type: { kind: "dyn" }, loc: e.loc })
+        : emitBorrowedInput(host, e.value);
       let compact: { name: string; type: IrType };
-      if (e.value.type.kind === "dyn") {
+      if (v.type.kind === "dyn") {
         // A dyn root: the runtime's dyn walker (scr_dyn_format_j): number/string/bool/null/array/
         // object exact, dropped members omitted, and a dropped ROOT
         // becomes the TEXT "undefined" (JSON.stringify(undefined) is

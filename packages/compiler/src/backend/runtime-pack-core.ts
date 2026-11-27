@@ -1,5 +1,7 @@
+// This file was modified from scriptc (Apache-2.0); see MODIFICATIONS.md.
 /** Runtime-pack schema and selection shared by compiler hosts. Filesystem
  * discovery, artifact verification and staging belong to the calling host. */
+import { isCompanionPackage } from "./scriptw-packages.js";
 import { optimizationClass, type NativeOptimization } from "./optimization.js";
 import type { NativeLinkFeatures } from "./native-link-info.js";
 import { jsObjectModelFact } from "../ir/runtime-features.js";
@@ -33,7 +35,7 @@ interface RuntimePackUnit {
 }
 
 interface RuntimePackArchive extends RuntimePackArtifact {
-  id: "libregexp" | "zlib" | "brotli" | "zstd" | "mbedtls" | "icu" | "mlkem";
+  id: "quickjs" | "libregexp" | "zlib" | "brotli" | "zstd" | "mbedtls" | "icu" | "mlkem";
   predicate: RuntimePredicate;
 }
 
@@ -65,6 +67,10 @@ export interface RuntimePackManifest {
     minimum_os: NativeTargetSpec["minimumOs"];
   };
   runtime_abi: { version: number; marker: string };
+  /** The SCR_HOST_ABI (scr_host_island.h) the pack's host-island units were
+   * compiled against. Absent from a pack without them: such a pack cannot
+   * link a host-island program. */
+  host_abi?: number;
   compiler: { command: string; identity: string; target: string };
   macros: {
     executable: string[];
@@ -189,6 +195,11 @@ export interface RuntimeFeatureSet extends NativeLinkFeatures {
   primitiveWrapper: boolean;
   iteratorProto: boolean;
   nativeFetch: boolean;
+  /** The host island links in place of the engine island (NativeLinkFeatures.hostIsland). */
+  hostIsland: boolean;
+  /** The engine (QuickJS) island and its bridges: `dynamic` without the host island. */
+  engineIsland: boolean;
+  netIslandEffective: boolean;
   /** The program links scr_async_dyn.c, the one unit that makes a promise
    * adapter: it selects the scr_map.c build whose checked-dynamic key of a
    * boxed promise is the identity cell the adapters share. */
@@ -333,6 +344,8 @@ export function parseRuntimePackManifest(value: unknown): RuntimePackManifest {
     }) ||
     (manifest.data !== undefined &&
       (!Array.isArray(manifest.data) || !manifest.data.every(validArtifact))) ||
+    (manifest.host_abi !== undefined &&
+      (typeof manifest.host_abi !== "number" || !Number.isInteger(manifest.host_abi) || manifest.host_abi < 1)) ||
     (manifest.headers !== undefined &&
       (!Array.isArray(manifest.headers) || !manifest.headers.every(validArtifact))) ||
     !Array.isArray(manifest.system_libraries) ||
@@ -371,12 +384,24 @@ function isRuntimePackTarget(target: Record<string, unknown> | null): boolean {
 
 export function effectiveRuntimeFeatures(
   features: NativeLinkFeatures,
-  _env: NodeJS.ProcessEnv = process.env,
+  env: NodeJS.ProcessEnv = process.env,
 ): RuntimeFeatureSet {
+  const curlFetch = features.dynamic && features.fetch && env["SCRIPTC_FETCH_CURL"] === "1";
+  if (curlFetch) {
+    throw new RuntimePackError(
+      "SCRIPTC_FETCH_CURL=1 is an external developer-toolchain comparison mode and is not available with precompiled runtime packs",
+      "unsupported",
+    );
+  }
   const nativeFetch = features.fetch;
-  const netEffective = features.net || nativeFetch;
-  const httpEffective = features.http || nativeFetch;
-  const tlsEffective = features.tls || nativeFetch;
+  // The host island answers the page (its own fetch and sockets included), so
+  // the engine island's bridges stay out of its link.
+  const hostIsland = features.dynamic && features.hostIsland === true;
+  const engineIsland = features.dynamic && !hostIsland;
+  const netIslandEffective = engineIsland && (features.netIsland || nativeFetch);
+  const netEffective = features.net || nativeFetch || netIslandEffective;
+  const httpEffective = features.http || nativeFetch || netIslandEffective;
+  const tlsEffective = features.tls || nativeFetch || netIslandEffective;
   const tlsCaEffective = features.tlsCa || tlsEffective;
   // The JavaScript object model build (t262-da §J): the features reached only
   // from JavaScript sources OR into one define and one runtime feature, so
@@ -470,6 +495,9 @@ export function effectiveRuntimeFeatures(
     primitiveWrapper: features.primitiveWrapper === true,
     iteratorProto: features.iteratorProto === true,
     nativeFetch,
+    hostIsland,
+    engineIsland,
+    netIslandEffective,
     // The predicate of scr_async_dyn.c in runtime-pack-matrix.mjs.
     dynPromiseKeys:
       features.dynAsync ||
@@ -533,9 +561,11 @@ export function validateRuntimePackIdentity(
   target: NativeTargetSpec,
   compilerVersion: string,
 ): void {
+  // The fork's @scriptw/runtime-* alias carries the same pack under its own
+  // name (scriptw-packages.ts); its manifest names the package it ships in.
   if (
-    packageName !== target.runtimePackPackage ||
-    manifest.package !== target.runtimePackPackage ||
+    !isCompanionPackage(packageName, target.runtimePackPackage) ||
+    manifest.package !== packageName ||
     packageVersion !== compilerVersion ||
     manifest.version !== compilerVersion
   ) {
@@ -639,7 +669,10 @@ export function selectRuntimePackArtifacts(
   mode: RuntimePackMode = "executable",
 ): RuntimePackArtifacts {
   const features = effectiveRuntimeFeatures(requested, env);
-  if (features.workers && (mode !== "executable" || manifest.target.object_format === "wasm"))
+  if (
+    features.workers &&
+    (mode !== "executable" || features.dynamic || manifest.target.object_format === "wasm")
+  )
     throw new RuntimePackError("worker threads require a native static executable", "unsupported");
   const key = runtimePackFlavorKey(manifest, flavor, mode);
   const selectedFlavor = manifest.flavors[key];
@@ -647,6 +680,11 @@ export function selectRuntimePackArtifacts(
     throw new RuntimePackError(
       `runtime pack has no ${key} flavor; reinstall the matching runtime package`,
       "invalid",
+    );
+  if (mode !== "executable" && requested.dynamic)
+    throw new RuntimePackError(
+      "library runtime packs do not support dynamic execution",
+      "unsupported",
     );
   // Intl needs the ICU objects only the host-flavored packs carry (ICU is
   // C++, so a pack builds it with Zig's C++ driver for its own glibc target);

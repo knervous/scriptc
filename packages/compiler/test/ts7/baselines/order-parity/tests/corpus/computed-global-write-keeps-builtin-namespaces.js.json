@@ -1,6 +1,0 @@
-{
- "order": [
-  "<repo>/tests/corpus/computed-global-write-keeps-builtin-namespaces.js"
- ],
- "diags": []
-}

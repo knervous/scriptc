@@ -1,4 +1,5 @@
-import { everyModuleNode, everyStmtList } from "../ir/traverse.js";
+// This file was modified from scriptc (Apache-2.0); see MODIFICATIONS.md.
+import { everyModuleNode, everyStmtList, transformStmtList } from "../ir/traverse.js";
 import type { LlvmUnsupportedError } from "./llvm/emitter.js";
 import { SingleOwnerError } from "./llvm/single-owner.js";
 import { iceDiag, type ScrDiagnostic } from "../diagnostics/diagnostic.js";
@@ -7,6 +8,7 @@ import type { IrLibFn } from "../ir/builtin-signatures.js";
 import {
   DH_LIB_FNS,
   PKI_LIB_FNS,
+  moduleEmbedsBuiltin,
   moduleUsesFetch,
   moduleUsesWebCryptoAsymmetric,
 } from "../ir/runtime-features.js";
@@ -16,6 +18,24 @@ import {
  * calls, escaped callables, constructors, and exported roots still retain
  * the ordinary target diagnostic. ABI types remain checked by the gate. */
 export function fenceSpeculativeWasiFunctions(mod: IrModule): void {
+  for (const fn of mod.functions)
+    fn.body = transformStmtList(fn.body, {
+      stmt: (statement) => statement,
+      expr: (expr) => {
+        if (expr.kind !== "libCall") return expr;
+        const portable =
+          expr.fn === "fetch.abortControllerNew"
+            ? "abort.controllerNew"
+            : expr.fn === "fetch.abortTimeout"
+              ? "abort.timeout"
+              : expr.fn === "fetch.abortNow"
+                ? "abort.now"
+                : expr.fn === "fetch.abortAny"
+                  ? "abort.any"
+                  : null;
+        return portable ? { ...expr, fn: portable } : expr;
+      },
+    });
   if (!mod.functions.some((fn) => fn.speculativeDispatch)) return;
   const functions = new Map(mod.functions.map((fn) => [fn.name, fn]));
   const classes = new Map((mod.classes ?? []).map((info) => [info.name, info]));
@@ -145,6 +165,11 @@ const WASI_UNAVAILABLE_HOST_FACTS: ReadonlyMap<IrLibFn, string> = new Map([
   ["process.ppid", "the parent process id (WASI Preview 1 has no process API)"],
 ]);
 
+/** APIs that require host capabilities absent from portable WASI Preview 1.
+ * These are target diagnostics, not backend-tier gaps: the same language IR
+ * (including async, generators, and the dynamic island) is otherwise valid.
+ * Keep the fine-grained walk first so diagnostics point at the API use; the
+ * embedded-module checks are the entry-anchored safety net for island code. */
 export function moduleWasiUnavailableSurface(
   mod: IrModule,
 ): { surface: string; loc: SrcLoc } | null {
@@ -281,6 +306,11 @@ export function moduleWasiUnavailableSurface(
 
   if (moduleUsesFetch(mod)) {
     return { surface: "network-backed fetch (WASI Preview 1 has no socket API)", loc: entryLoc };
+  }
+  for (const builtin of ["node:http", "node:https", "node:net", "node:tls"]) {
+    if (moduleEmbedsBuiltin(mod, builtin)) {
+      return { surface: `${builtin} networking (WASI Preview 1 has no socket API)`, loc: entryLoc };
+    }
   }
   if (moduleUsesWebCryptoAsymmetric(mod)) {
     return {

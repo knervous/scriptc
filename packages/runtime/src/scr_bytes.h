@@ -1,3 +1,4 @@
+// This file was modified from scriptc (Apache-2.0); see MODIFICATIONS.md.
 /* scriptc runtime — typed arrays and Buffer (scr_bytes.c). Included by
  * scr_runtime.h, which says where new declarations go. */
 #ifndef SCR_BYTES_H
@@ -146,7 +147,7 @@ void scr_bytes_require_unshared(const ScrBytes *);
 /* Snapshot before reading shared bytes in bulk or passing byte pointers to
  * I/O or callback-capable consumers. The copy is local and read with
  * scr_shared_load, so no shared raw memory escapes. */
-#if defined(SCR_WORKERS) || (defined(SCR_LIB) && defined(SCR_THREAD_INSTANCES))
+#if defined(SCR_WORKERS) || defined(SCR_THREAD_INSTANCES)
 #define SCR_BYTES_SNAPSHOT(name) \
   ScrBytes *scr_snapshot_##name __attribute__((cleanup(scr_bytes_snapshot_release))) = scr_bytes_snapshot(name); \
   if (scr_snapshot_##name) name = scr_snapshot_##name
@@ -249,6 +250,13 @@ ScrStr *scr_bytes_normalize_encoding_empty_utf8(const ScrStr *raw);
 /* Buffer.byteLength's encoding read: an unknown name counts as utf8. Never
  * throws. */
 ScrStr *scr_bytes_normalize_encoding_or_utf8(const ScrStr *raw);
+
+#ifdef SCR_DYNAMIC
+/* Static → island typed-array marshal (scr_island.c; --dynamic builds
+ * only): an engine typed array of the same element kind — a COPY, the
+ * boundary's copy stance. Borrows; +1 cell, or NULL bridged. */
+ScrJsval *scr_jsval_from_bytes(const ScrBytes *b);
+#endif
 
 /* `new Uint8Array(n)` / Buffer.alloc(n): zero-filled. n goes through
  * ToIndex like JS (NaN → 0, truncate toward zero; negative or > 2^53-1

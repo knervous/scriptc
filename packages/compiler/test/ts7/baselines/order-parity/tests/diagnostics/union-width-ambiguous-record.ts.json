@@ -1,6 +1,0 @@
-{
- "order": [
-  "<repo>/tests/diagnostics/union-width-ambiguous-record.ts"
- ],
- "diags": []
-}

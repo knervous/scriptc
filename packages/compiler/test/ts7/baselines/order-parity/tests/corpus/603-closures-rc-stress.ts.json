@@ -1,6 +1,0 @@
-{
- "order": [
-  "<repo>/tests/corpus/603-closures-rc-stress.ts"
- ],
- "diags": []
-}

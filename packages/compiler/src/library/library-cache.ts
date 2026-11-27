@@ -1,3 +1,4 @@
+// This file was modified from scriptc (Apache-2.0); see MODIFICATIONS.md.
 import { chmod, copyFile, mkdir, readFile, rename, rm, utimes, writeFile } from "node:fs/promises";
 import { basename, dirname, join, resolve } from "node:path";
 import { promisify } from "node:util";
@@ -5,14 +6,8 @@ import { deserialize as deserializeV8, serialize as serializeV8 } from "node:v8"
 import { gzip, gunzip } from "node:zlib";
 import type { IrModule } from "../ir/ir.js";
 import { IR_VERSION } from "../ir/serialize.js";
-import {
-  frontendInputsSemanticallyMatch,
-  frontendInputsStillMatch,
-  validFrontendInputSnapshot,
-  type FrontendInputSnapshot,
-} from "../frontend/input-tracker.js";
+import { frontendInputsSemanticallyMatch, frontendInputsStillMatch, validFrontendInputSnapshot, type FrontendInputSnapshot } from "../frontend/input-tracker.js";
 import { rebaseSourceLocations, semanticallyEqualSource } from "./semantic-source.js";
-import { tokenPositionEquivalentSource } from "../frontend/token-equivalence.js";
 import { compilerImplementationIdentity } from "./compiler-self-identity.js";
 import {
   cacheKey as sharedCacheKey,
@@ -55,10 +50,8 @@ interface EarlyLibraryCacheStamp {
     searchParams: boolean;
     emitter: boolean;
     zlib: boolean;
-    x509: boolean;
     copying: boolean;
     textDecoderLegacy: boolean;
-    bigintBytes: boolean;
   };
   integrity: string;
 }
@@ -66,9 +59,6 @@ interface EarlyLibraryCacheStamp {
 export interface EarlyLibraryNativeFeatures {
   backend: "llvm";
   dynInvoke: boolean;
-  /** Buffer.prototype methods on checked-dynamic values (scr_bytes_dyn.c). */
-  dynBuffer?: boolean;
-  dynTier?: boolean;
   regex: boolean;
   assert: boolean;
   inspect: boolean;
@@ -77,25 +67,8 @@ export interface EarlyLibraryNativeFeatures {
   searchParams: boolean;
   emitter: boolean;
   zlib: boolean;
-  x509: boolean;
   copying: boolean;
   textDecoderLegacy: boolean;
-  bigintBytes: boolean;
-  /** The kept-source read of a record-to-record conversion
-   * (scr_record_source_get.c). Absent (false) otherwise. */
-  recordSourceGet?: boolean;
-  /** A join of an array of strings (scr_arr_join_str.c). Absent (false)
-   * otherwise. */
-  arrJoinStr?: boolean;
-  /** The buffer views registry (scr_js_buffers.c) and the archive's
-   * JavaScript object model build of its bytes and json units. */
-  mutableBuffers: boolean;
-  /** A function's own call/apply/bind and the other inherited members a
-   * data property shadows (SCR_FN_MEMBER_PROPS, the scr_json.c and
-   * scr_dyn_invoke.c builds). An exported function that defines one runs it
-   * inside the archive, so the library selects the same build the
-   * executable lane does. */
-  fnMemberProps: boolean;
   /** Volatile exact-source build identity emitted from the tiny identity TU. */
   buildId?: string;
 }
@@ -152,12 +125,8 @@ const BOOLEAN_NATIVE_KEYS = [
   "searchParams",
   "emitter",
   "zlib",
-  "x509",
   "copying",
   "textDecoderLegacy",
-  "bigintBytes",
-  "mutableBuffers",
-  "fnMemberProps",
 ] as const satisfies readonly (keyof EarlyLibraryNativeFeatures)[];
 
 function validNativeFeatures(value: unknown): value is EarlyLibraryNativeFeatures {
@@ -209,18 +178,13 @@ function outputPaths(options: EarlyLibraryCacheOptions, backend: "llvm") {
 
 function sidecarOutputPath(options: EarlyLibraryCacheOptions, configured: string | null): string {
   const archivePath = archiveOutputPath(options);
-  return configured !== null
-    ? resolve(dirname(archivePath), configured)
-    : `${archivePath}.contract.json`;
+  return configured !== null ? resolve(dirname(archivePath), configured) : `${archivePath}.contract.json`;
 }
 
 function archiveOutputPath(options: EarlyLibraryCacheOptions): string {
-  return (
-    options.outPath ??
-    join(
-      options.outDir,
-      `${basename(options.entryPath).replace(/\.(ts|mts|cts|js|mjs|cjs)$/, "")}.lib.a`,
-    )
+  return options.outPath ?? join(
+    options.outDir,
+    `${basename(options.entryPath).replace(/\.(ts|mts|cts|js|mjs|cjs)$/, "")}.lib.a`,
   );
 }
 
@@ -252,18 +216,18 @@ export async function readEarlyLibraryCache(
       !validNativeFeatures(stamp.native) ||
       stamp.files?.translationUnit?.name !== "program.tu" ||
       !/^[0-9a-f]{64}$/.test(stamp.files.translationUnit.digest) ||
-      (stamp.files.ir !== null &&
-        (stamp.files.ir?.name !== "program.ir.json" ||
-          !/^[0-9a-f]{64}$/.test(stamp.files.ir.digest))) ||
-      (stamp.files.sidecar !== null &&
-        (stamp.files.sidecar?.name !== "contract.json" ||
-          !/^[0-9a-f]{64}$/.test(stamp.files.sidecar.digest))) ||
-      (stamp.files.semanticIr !== null &&
-        (stamp.files.semanticIr?.name !== "semantic.ir.json.gz" ||
-          !/^[0-9a-f]{64}$/.test(stamp.files.semanticIr.digest))) ||
-      (stamp.files.sources !== null &&
-        (stamp.files.sources?.name !== "sources.json.gz" ||
-          !/^[0-9a-f]{64}$/.test(stamp.files.sources.digest))) ||
+      (stamp.files.ir !== null && (
+        stamp.files.ir?.name !== "program.ir.json" || !/^[0-9a-f]{64}$/.test(stamp.files.ir.digest)
+      )) ||
+      (stamp.files.sidecar !== null && (
+        stamp.files.sidecar?.name !== "contract.json" || !/^[0-9a-f]{64}$/.test(stamp.files.sidecar.digest)
+      )) ||
+      (stamp.files.semanticIr !== null && (
+        stamp.files.semanticIr?.name !== "semantic.ir.json.gz" || !/^[0-9a-f]{64}$/.test(stamp.files.semanticIr.digest)
+      )) ||
+      (stamp.files.sources !== null && (
+        stamp.files.sources?.name !== "sources.json.gz" || !/^[0-9a-f]{64}$/.test(stamp.files.sources.digest)
+      )) ||
       (stamp.files.semanticIr === null) !== (stamp.files.sources === null) ||
       stampIntegrity(unsigned) !== integrity ||
       !frontendInputsStillMatch(
@@ -278,15 +242,11 @@ export async function readEarlyLibraryCache(
       ) ||
       (stamp.files.ir !== null) !== options.emitIr ||
       (stamp.files.sidecar !== null) !== (sidecarConfiguredPath !== undefined)
-    )
-      return null;
+    ) return null;
 
     const directory = dirname(path);
     const [translationUnit, ir, sidecar] = await Promise.all([
-      readCachedFile(
-        join(directory, stamp.files.translationUnit.name),
-        stamp.files.translationUnit.digest,
-      ),
+      readCachedFile(join(directory, stamp.files.translationUnit.name), stamp.files.translationUnit.digest),
       stamp.files.ir === null
         ? Promise.resolve(null)
         : readCachedFile(join(directory, stamp.files.ir.name), stamp.files.ir.digest),
@@ -296,10 +256,9 @@ export async function readEarlyLibraryCache(
     ]);
     if (
       translationUnit === null ||
-      (stamp.files.ir !== null && ir === null) ||
-      (stamp.files.sidecar !== null && sidecar === null)
-    )
-      return null;
+      stamp.files.ir !== null && ir === null ||
+      stamp.files.sidecar !== null && sidecar === null
+    ) return null;
 
     const paths = outputPaths(options, stamp.native.backend);
     await installBytes(translationUnit, paths.llvmPath);
@@ -310,14 +269,12 @@ export async function readEarlyLibraryCache(
       await installBytes(sidecar, sidecarPath);
     }
     const now = new Date();
-    await Promise.all(
-      [
-        path,
-        join(directory, stamp.files.translationUnit.name),
-        ...(stamp.files.ir === null ? [] : [join(directory, stamp.files.ir.name)]),
-        ...(stamp.files.sidecar === null ? [] : [join(directory, stamp.files.sidecar.name)]),
-      ].map((cachePath) => utimes(cachePath, now, now).catch(() => undefined)),
-    );
+    await Promise.all([
+      path,
+      join(directory, stamp.files.translationUnit.name),
+      ...(stamp.files.ir === null ? [] : [join(directory, stamp.files.ir.name)]),
+      ...(stamp.files.sidecar === null ? [] : [join(directory, stamp.files.sidecar.name)]),
+    ].map((cachePath) => utimes(cachePath, now, now).catch(() => undefined)));
     return {
       llvmPath: paths.llvmPath,
       native: stamp.native,
@@ -335,12 +292,9 @@ function decodeSources(bytes: Uint8Array): Map<string, string> {
   const sources = new Map<string, string>();
   for (const entry of entries) {
     if (
-      !Array.isArray(entry) ||
-      entry.length !== 2 ||
-      typeof entry[0] !== "string" ||
-      typeof entry[1] !== "string"
-    )
-      throw new Error("semantic source payload has an invalid entry");
+      !Array.isArray(entry) || entry.length !== 2 ||
+      typeof entry[0] !== "string" || typeof entry[1] !== "string"
+    ) throw new Error("semantic source payload has an invalid entry");
     sources.set(entry[0], entry[1]);
   }
   return sources;
@@ -350,10 +304,6 @@ export async function readSemanticLibraryCache(
   root: string | null,
   options: EarlyLibraryCacheOptions,
   sidecarConfiguredPath: string | null | undefined,
-  /** The build carries debug sources, so the cached translation unit's
-   * debugger locations are part of the answer: an edit that moves a source
-   * position the frontend read rules the cached text out. */
-  carriesPositions = false,
 ): Promise<SemanticLibraryCacheHit | null> {
   if (root === null) return null;
   const path = stampPath(root, options);
@@ -361,10 +311,8 @@ export async function readSemanticLibraryCache(
     const stamp = JSON.parse(await readFile(path, "utf8")) as EarlyLibraryCacheStamp;
     const { integrity, ...unsigned } = stamp;
     if (
-      stamp.version !== 2 ||
-      stamp.key !== cacheKey(options) ||
-      !validFrontendInputSnapshot(stamp.frontend) ||
-      !validNativeFeatures(stamp.native) ||
+      stamp.version !== 2 || stamp.key !== cacheKey(options) ||
+      !validFrontendInputSnapshot(stamp.frontend) || !validNativeFeatures(stamp.native) ||
       stamp.files?.translationUnit?.name !== "program.tu" ||
       stamp.files?.semanticIr?.name !== "semantic.ir.json.gz" ||
       stamp.files?.sources?.name !== "sources.json.gz" ||
@@ -373,14 +321,10 @@ export async function readSemanticLibraryCache(
       !/^[0-9a-f]{64}$/.test(stamp.files.sources.digest) ||
       (stamp.files.sidecar !== null) !== (sidecarConfiguredPath !== undefined) ||
       stampIntegrity(unsigned) !== integrity
-    )
-      return null;
+    ) return null;
     const directory = dirname(path);
     const [translationUnit, irCompressed, sourcesCompressed, sidecar] = await Promise.all([
-      readCachedFile(
-        join(directory, stamp.files.translationUnit.name),
-        stamp.files.translationUnit.digest,
-      ),
+      readCachedFile(join(directory, stamp.files.translationUnit.name), stamp.files.translationUnit.digest),
       readCachedFile(join(directory, stamp.files.semanticIr.name), stamp.files.semanticIr.digest),
       readCachedFile(join(directory, stamp.files.sources.name), stamp.files.sources.digest),
       stamp.files.sidecar === null
@@ -388,9 +332,7 @@ export async function readSemanticLibraryCache(
         : readCachedFile(join(directory, stamp.files.sidecar.name), stamp.files.sidecar.digest),
     ]);
     if (
-      translationUnit === null ||
-      irCompressed === null ||
-      sourcesCompressed === null ||
+      translationUnit === null || irCompressed === null || sourcesCompressed === null ||
       (stamp.files.sidecar !== null && sidecar === null)
     ) {
       return null;
@@ -403,7 +345,7 @@ export async function readSemanticLibraryCache(
     const semantic = frontendInputsSemanticallyMatch(
       stamp.frontend,
       previousSources,
-      carriesPositions ? tokenPositionEquivalentSource : semanticallyEqualSource,
+      semanticallyEqualSource,
       frontendOutputExclusions(
         options,
         stamp.native.backend,
@@ -411,27 +353,19 @@ export async function readSemanticLibraryCache(
           ? undefined
           : sidecarOutputPath(options, sidecarConfiguredPath ?? null),
       ),
-      undefined,
-      carriesPositions,
     );
     if (semantic === null || semantic.changed.length === 0) return null;
-    // The locations of the cached IR are moved to the edited text below. A
-    // location in what a rewrite appended to a file (import-elision.ts) is
-    // past the end of the text that says where it moves: built again.
-    if (semantic.changed.some((change) => change.appended === true)) return null;
     const mod = deserializeV8(irJson) as IrModule;
     if (mod.irVersion !== IR_VERSION) return null;
     rebaseSourceLocations(mod, previousSources, semantic.currentSources);
     const now = new Date();
-    await Promise.all(
-      [
-        path,
-        join(directory, stamp.files.translationUnit.name),
-        join(directory, stamp.files.semanticIr.name),
-        join(directory, stamp.files.sources.name),
-        ...(stamp.files.sidecar === null ? [] : [join(directory, stamp.files.sidecar.name)]),
-      ].map((cachePath) => utimes(cachePath, now, now).catch(() => undefined)),
-    );
+    await Promise.all([
+      path,
+      join(directory, stamp.files.translationUnit.name),
+      join(directory, stamp.files.semanticIr.name),
+      join(directory, stamp.files.sources.name),
+      ...(stamp.files.sidecar === null ? [] : [join(directory, stamp.files.sidecar.name)]),
+    ].map((cachePath) => utimes(cachePath, now, now).catch(() => undefined)));
     return {
       mod,
       translationUnit: translationUnit.toString("utf8"),
@@ -455,10 +389,7 @@ export async function publishEarlyLibraryCache(
   if (root === null || !result.frontend.stable) return;
   const destination = dirname(stampPath(root, options));
   const parent = dirname(destination);
-  const stage = join(
-    parent,
-    `.tmp-${basename(destination).slice(0, 12)}-${process.pid}-${Math.random().toString(36).slice(2)}`,
-  );
+  const stage = join(parent, `.tmp-${basename(destination).slice(0, 12)}-${process.pid}-${Math.random().toString(36).slice(2)}`);
   try {
     await mkdir(stage, { recursive: true, mode: 0o700 });
     const publishFile = async (source: string, name: string): Promise<CachedLibraryFile> => {
@@ -469,12 +400,8 @@ export async function publishEarlyLibraryCache(
     };
     const [translationUnit, ir, sidecar, semanticIr, sources] = await Promise.all([
       publishFile(result.llvmPath, "program.tu"),
-      result.irPath === undefined
-        ? Promise.resolve(null)
-        : publishFile(result.irPath, "program.ir.json"),
-      result.sidecarPath === undefined
-        ? Promise.resolve(null)
-        : publishFile(result.sidecarPath, "contract.json"),
+      result.irPath === undefined ? Promise.resolve(null) : publishFile(result.irPath, "program.ir.json"),
+      result.sidecarPath === undefined ? Promise.resolve(null) : publishFile(result.sidecarPath, "contract.json"),
       result.semantic === undefined
         ? Promise.resolve(null)
         : gzipAsync(serializeV8(result.semantic.mod), { level: 1 }).then(async (bytes) => {
@@ -484,21 +411,16 @@ export async function publishEarlyLibraryCache(
           }),
       result.semantic === undefined
         ? Promise.resolve(null)
-        : gzipAsync(Buffer.from(JSON.stringify([...result.semantic.sources]), "utf8"), {
-            level: 1,
-          }).then(async (bytes) => {
+        : gzipAsync(Buffer.from(JSON.stringify([...result.semantic.sources]), "utf8"), { level: 1 }).then(async (bytes) => {
             const target = join(stage, "sources.json.gz");
             await writeFile(target, bytes, { mode: 0o600 });
             return { name: "sources.json.gz", digest: digest(bytes) };
           }),
     ]);
-    if (
-      !frontendInputsStillMatch(
-        result.frontend,
-        frontendOutputExclusions(options, result.native.backend, result.sidecarPath),
-      )
-    )
-      return;
+    if (!frontendInputsStillMatch(
+      result.frontend,
+      frontendOutputExclusions(options, result.native.backend, result.sidecarPath),
+    )) return;
     const unsigned: Omit<EarlyLibraryCacheStamp, "integrity"> = {
       version: 2,
       key: cacheKey(options),

@@ -1,6 +1,0 @@
-{
- "order": [
-  "<repo>/tests/corpus/contract-inline-array-ordinary-fallback.ts"
- ],
- "diags": []
-}

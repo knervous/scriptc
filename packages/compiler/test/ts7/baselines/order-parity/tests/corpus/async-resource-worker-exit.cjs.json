@@ -1,6 +1,0 @@
-{
- "order": [
-  "<repo>/tests/corpus/async-resource-worker-exit.cjs"
- ],
- "diags": []
-}

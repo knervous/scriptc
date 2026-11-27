@@ -1,3 +1,4 @@
+// This file was modified from scriptc (Apache-2.0); see MODIFICATIONS.md.
 import { loadEnvFile } from "node:process";
 import { fileURLToPath } from "node:url";
 
@@ -25,11 +26,7 @@ export function sandboxRunnerConfig(env) {
   const duration = /^(\d+)\s*(ms|s|m|h)$/.exec(sandboxTimeout.trim());
   const units = { ms: 1, s: 1000, m: 60_000, h: 3_600_000 };
   const sandboxTimeoutMs = duration ? Number(duration[1]) * units[duration[2]] : 0;
-  if (
-    !Number.isSafeInteger(sandboxTimeoutMs) ||
-    sandboxTimeoutMs <= 0 ||
-    sandboxTimeoutMs > 2_147_483_647
-  ) {
+  if (!Number.isSafeInteger(sandboxTimeoutMs) || sandboxTimeoutMs <= 0 || sandboxTimeoutMs > 2_147_483_647) {
     throw new Error("SCRIPTC_SANDBOX_TIMEOUT must be a positive duration such as 45m or 2h");
   }
   return {
@@ -112,7 +109,9 @@ export function sandboxVcrConfig(config, env) {
   const childEnv = { ...(env ?? process.env) };
   delete childEnv.VERCEL_AUTH_TOKEN;
   let authSource = "Vercel CLI login";
-  const vcrAccessToken = /^\w+$/.test(config.accessToken ?? "") ? config.accessToken : undefined;
+  const vcrAccessToken = /^\w+$/.test(config.accessToken ?? "")
+    ? config.accessToken
+    : undefined;
   if (config.accessToken && !vcrAccessToken && !config.oidc) {
     throw new Error(
       `${config.accessTokenSource} is not a VCR-compatible access token; ` +
@@ -157,7 +156,9 @@ export function sandboxVcrConfig(config, env) {
   const team = typeof claims.owner_id === "string" ? claims.owner_id.trim() : "";
   const project = typeof claims.project_id === "string" ? claims.project_id.trim() : "";
   if (!team || !project) {
-    throw new Error("VERCEL_OIDC_TOKEN must contain owner_id and project_id claims for VCR access");
+    throw new Error(
+      "VERCEL_OIDC_TOKEN must contain owner_id and project_id claims for VCR access",
+    );
   }
   return {
     authSource,
@@ -176,7 +177,10 @@ export function sandboxBootstrapCommand(customImage) {
       workdir: "/workspace",
     },
     prepareWorkspace: {
-      args: ["-c", 'sudo mkdir -p /workspace && sudo chown "$(id -u):$(id -g)" /workspace'],
+      args: [
+        "-c",
+        "sudo mkdir -p /workspace && sudo chown \"$(id -u):$(id -g)\" /workspace",
+      ],
       command: "sh",
       workdir: "/vercel",
     },
@@ -211,10 +215,7 @@ export function sandboxEffectWorkerAllocation(workerCount, sideTaskCount, vcpus)
   );
   if (effectConcurrency === 2) {
     // Both Effect files may occupy a Vitest worker at the same time.
-    while (
-      allocation.caseWorkers + Math.min(2, allocation.caseWorkers) + allocation.sideConcurrency >
-      workerCount
-    ) {
+    while (allocation.caseWorkers + Math.min(2, allocation.caseWorkers) + allocation.sideConcurrency > workerCount) {
       allocation.caseWorkers--;
     }
   }
@@ -233,7 +234,9 @@ export function sandboxImageConfig(env) {
     };
   }
 
-  const match = /^vcr\.vercel\.com\/([^/]+)\/([^/]+)\/([^/:]+):([^/:]+)$/.exec(configuredReference);
+  const match = /^vcr\.vercel\.com\/([^/]+)\/([^/]+)\/([^/:]+):([^/:]+)$/.exec(
+    configuredReference,
+  );
   if (!match) {
     throw new Error(
       `SCRIPTC_SANDBOX_IMAGE must be a fully qualified VCR image (${customImageExample})`,
@@ -276,12 +279,7 @@ export function sandboxTestSourceConfig(env) {
     if (!/^snap_[A-Za-z0-9]+$/.test(snapshot)) {
       throw new Error("SCRIPTC_SANDBOX_SNAPSHOT must be a Sandbox snapshot ID (snap_...)");
     }
-    return {
-      prepared: true,
-      reference: snapshot,
-      description: "prepared snapshot",
-      createArgs: ["--snapshot", snapshot],
-    };
+    return { prepared: true, reference: snapshot, description: "prepared snapshot", createArgs: ["--snapshot", snapshot] };
   }
   const image = sandboxImageConfig(source);
   return {
@@ -290,23 +288,4 @@ export function sandboxTestSourceConfig(env) {
     description: image.custom ? "custom VCR image" : "managed fallback image",
     createArgs: ["--image", image.sandboxImage],
   };
-}
-
-/** A built checkout inside a prepared snapshot whose native artifacts a
- * lane may reuse when their inputs match (SCRIPTC_SANDBOX_NATIVE_REFERENCE).
- * It needs the snapshot's tools, so it is ignored for the managed image. */
-export function sandboxNativeReference(env) {
-  loadLocalEnv();
-  const source = env ?? process.env;
-  const reference = source.SCRIPTC_SANDBOX_NATIVE_REFERENCE?.trim();
-  if (!reference) return undefined;
-  if (!sandboxTestSourceConfig(source).prepared) {
-    throw new Error(
-      "SCRIPTC_SANDBOX_NATIVE_REFERENCE needs SCRIPTC_SANDBOX_SNAPSHOT or SCRIPTC_SANDBOX_IMAGE",
-    );
-  }
-  if (!/^\/[\w./-]+$/.test(reference) || reference.split("/").includes("..")) {
-    throw new Error("SCRIPTC_SANDBOX_NATIVE_REFERENCE must be an absolute path without '..'");
-  }
-  return reference.replace(/\/+$/, "");
 }

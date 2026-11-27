@@ -1,6 +1,0 @@
-{
- "order": [
-  "<repo>/tests/corpus/5070-optional-read-bindings.ts"
- ],
- "diags": []
-}

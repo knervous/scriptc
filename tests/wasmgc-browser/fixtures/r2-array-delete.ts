@@ -1,0 +1,1 @@
+const h:any=globalThis;const a=[1,2];h.auditDeleteArray(a);

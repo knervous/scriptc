@@ -1,6 +1,0 @@
-{
- "order": [
-  "<repo>/tests/corpus/519-promise-union-await-values.ts"
- ],
- "diags": []
-}

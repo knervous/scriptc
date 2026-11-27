@@ -1,6 +1,0 @@
-{
- "order": [
-  "<repo>/tests/corpus/1851-overload-return-narrowing.ts"
- ],
- "diags": []
-}

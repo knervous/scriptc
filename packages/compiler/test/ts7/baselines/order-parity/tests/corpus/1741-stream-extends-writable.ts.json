@@ -1,6 +1,0 @@
-{
- "order": [
-  "<repo>/tests/corpus/1741-stream-extends-writable.ts"
- ],
- "diags": []
-}

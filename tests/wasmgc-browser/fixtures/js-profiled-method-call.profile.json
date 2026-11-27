@@ -1,0 +1,127 @@
+{
+ "schema": "scriptc-pgo-site-profile/1",
+ "key": "hand-made: method call sites monomorphic on one function literal (js-profiled-method-call fixture)",
+ "pathsRelativeTo": "this file",
+ "files": {
+  "js-profiled-method-call-helper.js": {
+   "sha256": "3643c2007038046ba96037ee85b1c01f68117b87f36e17dfca74cff7407dc78c"
+  }
+ },
+ "sites": [
+  {
+   "kind": "call",
+   "file": "js-profiled-method-call-helper.js",
+   "span": {
+    "start": 547,
+    "end": 556
+   },
+   "state": "monomorphic",
+   "call": {
+    "state": "monomorphic",
+    "count": 100,
+    "targets": [
+     {
+      "kind": "function",
+      "file": "js-profiled-method-call-helper.js",
+      "fn": {
+       "start": 104,
+       "end": 239
+      }
+     }
+    ]
+   }
+  },
+  {
+   "kind": "call",
+   "file": "js-profiled-method-call-helper.js",
+   "span": {
+    "start": 599,
+    "end": 607
+   },
+   "state": "monomorphic",
+   "call": {
+    "state": "closure-site",
+    "count": 100,
+    "targets": [
+     {
+      "kind": "closure-site",
+      "file": "js-profiled-method-call-helper.js",
+      "fn": {
+       "start": 322,
+       "end": 383
+      }
+     }
+    ]
+   }
+  },
+  {
+   "kind": "call",
+   "file": "js-profiled-method-call-helper.js",
+   "span": {
+    "start": 649,
+    "end": 664
+   },
+   "state": "monomorphic",
+   "call": {
+    "state": "monomorphic",
+    "count": 100,
+    "targets": [
+     {
+      "kind": "function",
+      "file": "js-profiled-method-call-helper.js",
+      "fn": {
+       "start": 104,
+       "end": 239
+      }
+     }
+    ]
+   }
+  },
+  {
+   "kind": "call",
+   "file": "js-profiled-method-call-helper.js",
+   "span": {
+    "start": 708,
+    "end": 716
+   },
+   "state": "monomorphic",
+   "call": {
+    "state": "monomorphic",
+    "count": 100,
+    "targets": [
+     {
+      "kind": "function",
+      "file": "js-profiled-method-call-helper.js",
+      "fn": {
+       "start": 104,
+       "end": 239
+      }
+     }
+    ]
+   }
+  },
+  {
+   "kind": "call",
+   "file": "js-profiled-method-call-helper.js",
+   "span": {
+    "start": 800,
+    "end": 835
+   },
+   "state": "monomorphic",
+   "call": {
+    "state": "monomorphic",
+    "count": 100,
+    "targets": [
+     {
+      "kind": "function",
+      "file": "js-profiled-method-call-helper.js",
+      "fn": {
+       "start": 104,
+       "end": 239
+      }
+     }
+    ]
+   }
+  }
+ ]
+}

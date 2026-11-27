@@ -1,3 +1,4 @@
+// This file was modified from scriptc (Apache-2.0); see MODIFICATIONS.md.
 import { arrayOf, BOOL, BYTES_U8, DYN, F64, STRING, VOID } from "../ir.js";
 import { defineLibFnSignatures } from "./shared.js";
 
@@ -32,4 +33,8 @@ export const fetchSignatures = defineLibFnSignatures({
   /** Readable.fromWeb (scr_stream_from_web.c): the stream, objectMode,
    * highWaterMark (< 0: the mode's default) and encoding ("": none). */
   "fetch.readableFromWeb": { argTypes: [DYN, BOOL, F64, STRING], result: VOID },
+"fetch.abortControllerNew": { argTypes: [], result: DYN },
+"fetch.abortTimeout": { argTypes: [DYN], result: DYN },
+"fetch.abortNow": { argTypes: [DYN], result: DYN },
+"fetch.abortAny": { argTypes: [DYN], result: DYN },
 });

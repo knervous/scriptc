@@ -1,6 +1,0 @@
-{
- "order": [
-  "<repo>/tests/fixtures/npm/cases/hono-zod-validator/main.ts"
- ],
- "diags": []
-}

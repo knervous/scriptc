@@ -1,14 +1,17 @@
+// This file was modified from scriptc (Apache-2.0); see MODIFICATIONS.md.
 import type { NativeOptimization } from "./optimization.js";
 import { createHash } from "node:crypto";
 import { createRequire } from "node:module";
 import { mkdir, mkdtemp, readFile, rm, writeFile } from "node:fs/promises";
 import { tmpdir } from "node:os";
-import { dirname, join } from "node:path";
+import { existsSync } from "node:fs";
+import { dirname, join, resolve } from "node:path";
 import { compilerReleaseVersion } from "../library/sidecar.js";
 import type { NativeLinkFeatures } from "./native-link-info.js";
 import { nativeArtifactDependenciesStillMatch } from "./native/artifact-stamps.js";
 import { type NativeArtifactDependency } from "./native/contracts.js";
 import type { NativeTargetSpec } from "./targets.js";
+import { resolveCompanionPackageJson, scriptwPackageAlias } from "./scriptw-packages.js";
 
 import {
   RuntimePackError,
@@ -170,14 +173,33 @@ export async function loadRuntimePack(options: {
   resolver?: (specifier: string) => string;
 }): Promise<RuntimePackSelection> {
   const packageName = options.target.runtimePackPackage;
+  // SCRIPTC_RUNTIME_PACK names the pack's directory (its package.json and runtime-pack.json) in place of the package
+  // resolved beside the compiler, as the native driver reads it (native/toolchain.ts). A resolver (a test seam) wins.
+  const explicitPack =
+    options.resolver === undefined ? (options.env ?? process.env)["SCRIPTC_RUNTIME_PACK"] : undefined;
+  if (explicitPack !== undefined && explicitPack !== "" && !existsSync(join(explicitPack, "package.json"))) {
+    throw new RuntimePackError(
+      `SCRIPTC_RUNTIME_PACK names ${explicitPack}, which holds no runtime pack (no package.json)`,
+      "missing",
+    );
+  }
   const resolvePackageJson =
-    options.resolver ?? ((specifier: string) => createRequire(import.meta.url).resolve(specifier));
+    options.resolver ??
+    (explicitPack !== undefined && explicitPack !== ""
+      ? () => join(resolve(explicitPack), "package.json")
+      : (specifier: string) => createRequire(import.meta.url).resolve(specifier));
   let packagePath: string;
   try {
-    packagePath = resolvePackageJson(`${packageName}/package.json`);
+    packagePath = resolveCompanionPackageJson(
+      packageName,
+      resolvePackageJson,
+      (options.env ?? process.env)["SCRIPTW_RUNTIME_PACK"],
+      join,
+    );
   } catch {
+    const alias = scriptwPackageAlias(packageName);
     throw new RuntimePackError(
-      `precompiled runtime package ${packageName} is not installed; reinstall scriptc with optional dependencies enabled for ${options.target.name}`,
+      `precompiled runtime package ${alias ?? packageName} is not installed; reinstall scriptc with optional dependencies enabled for ${options.target.name}`,
       "missing",
     );
   }

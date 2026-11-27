@@ -1,6 +1,0 @@
-{
- "order": [
-  "<repo>/tests/corpus/6242-maybe-promise-rejections.ts"
- ],
- "diags": []
-}

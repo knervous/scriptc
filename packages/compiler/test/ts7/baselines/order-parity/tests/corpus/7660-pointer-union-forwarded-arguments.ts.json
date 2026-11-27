@@ -1,6 +1,0 @@
-{
- "order": [
-  "<repo>/tests/corpus/7660-pointer-union-forwarded-arguments.ts"
- ],
- "diags": []
-}

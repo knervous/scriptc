@@ -1,6 +1,0 @@
-{
- "order": [
-  "<repo>/tests/diagnostics/function-namespace-dotted-member.ts"
- ],
- "diags": []
-}

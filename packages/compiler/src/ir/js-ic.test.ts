@@ -75,7 +75,7 @@ function getHelper(name: string, key: string, prefix: IrStmt[] = [], bag?: IrExp
             loc,
           },
         ],
-        type: { kind: "jsval" },
+        type: { kind: "jsword" },
         loc,
       }),
     ],
@@ -161,8 +161,8 @@ test("a class table's indexed dispatch reads as the branches it selects", () => 
   expect(sites.site("%dyn.class.property.1")).toEqual({ kind: "get", key: "x" });
 });
 
-test("bags converted between dyn and jsval are still the receiver", () => {
-  // A program that declares a class returns its bags as jsvals, and the
+test("bags converted between dyn and jsword are still the receiver", () => {
+  // A program that declares a class returns its bags as jswords, and the
   // helpers read them through js.toDyn.
   const toDyn = (value: IrExpr): IrExpr => ({
     kind: "libCall",
@@ -175,10 +175,10 @@ test("bags converted between dyn and jsval are still the receiver", () => {
     kind: "libCall",
     fn: "js.fromDyn",
     args: [value],
-    type: { kind: "jsval" },
+    type: { kind: "jsword" },
     loc,
   });
-  const jsvalBag = helper(
+  const jswordBag = helper(
     "%dyn.class.readPropertiesOrEmpty.js",
     ["v"],
     [capsuleBranch("v"), ret(fromDyn(ref("v")))],
@@ -188,12 +188,12 @@ test("bags converted between dyn and jsval are still the receiver", () => {
     "%dyn.class.property.0",
     "x",
     [capsuleBranch("p.0")],
-    call(staticBag.name, toDyn(call(jsvalBag.name, ref("p.0")))),
+    call(staticBag.name, toDyn(call(jswordBag.name, ref("p.0")))),
   );
   const setter = setHelper("%dyn.class.property.1", "y");
   const write = setter.body[0] as Extract<IrStmt, { kind: "exprStmt" }>;
   const keySet = write.expr as Extract<IrExpr, { kind: "libCall" }>;
-  keySet.args[0] = toDyn(call(jsvalBag.name, ref("p.0")));
+  keySet.args[0] = toDyn(call(jswordBag.name, ref("p.0")));
   // A converted value that is not the receiver stays a helper call.
   const foreign = getHelper(
     "%dyn.class.property.2",
@@ -201,7 +201,7 @@ test("bags converted between dyn and jsval are still the receiver", () => {
     [],
     toDyn(fromDyn({ kind: "dynObjLit", type: DYN, loc } as IrExpr)),
   );
-  const sites = sitesOf(jsvalBag, staticBag, getter, setter, foreign);
+  const sites = sitesOf(jswordBag, staticBag, getter, setter, foreign);
   expect(sites.site("%dyn.class.property.0")).toEqual({ kind: "get", key: "x" });
   expect(sites.site("%dyn.class.property.1")).toEqual({ kind: "set", key: "y" });
   expect(sites.site("%dyn.class.property.2")).toBeNull();
@@ -243,7 +243,7 @@ test("keyed helpers may test capsules between the key's coercion and the read", 
     kind: "libCall",
     fn: "js.fromDyn",
     args: [{ kind: "dynKeyGet", value: object, key: ref(key), type: DYN, loc }],
-    type: { kind: "jsval" },
+    type: { kind: "jsword" },
     loc,
   });
   const guard = (test: "symbol" | "nullish", tested: string, object: IrExpr): IrStmt => ({

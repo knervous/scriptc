@@ -1,6 +1,0 @@
-{
- "order": [
-  "<repo>/tests/corpus/7053-private-fields-untyped-receivers.mjs"
- ],
- "diags": []
-}

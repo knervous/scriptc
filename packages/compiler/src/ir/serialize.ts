@@ -1,3 +1,4 @@
+// This file was modified from scriptc (Apache-2.0); see MODIFICATIONS.md.
 /* IR ↔ JSON. Numeric literals preserve JavaScript's complete number domain:
  * JSON's null/zero spellings must not erase NaN, infinities or negative zero.
  *
@@ -9,8 +10,10 @@
 import type { IrExpr, IrFunction, IrModule, IrStmt } from "./ir.js";
 import { decodeModuleBinary, isIrEncoding } from "./codec.js";
 
-// Version 17 adds the dynamic tier's jsval type and js.* builtins (two-tier
-// design stage S3) and serializes each function's execution tier.
+// Version 17 adds the dynamic tier's jsword type and js.* builtins (two-tier
+// design stage S3) and serializes each function's execution tier. This fork
+// keeps the island's types, operations and module metadata under the same
+// number (upstream's 16 removed them).
 export const IR_VERSION = 17 as const;
 
 /** IR artifacts are plain data. Scan each function once before deciding
@@ -140,6 +143,35 @@ function checkedVersion(mod: IrModule): IrModule {
     );
   }
   return mod;
+}
+
+const numberSentinels = (_key: string, value: unknown): unknown => {
+  if (typeof value !== "number") return value;
+  if (Number.isNaN(value)) return { $nonfinite: "nan" };
+  if (value === Infinity) return { $nonfinite: "inf" };
+  if (value === -Infinity) return { $nonfinite: "-inf" };
+  if (Object.is(value, -0)) return { $nonfinite: "-0" };
+  return value;
+};
+
+/** One IR definition (a function, class, global, record or union) as JSON with the module serializer's number
+ * sentinels: NaN, infinities and -0 survive, unlike plain JSON. The object store's blob encoding (link/store.ts). */
+export function encodeIrValue(value: unknown): string {
+  return ordinaryNumbers(value) ? JSON.stringify(value) : JSON.stringify(value, numberSentinels);
+}
+
+export function decodeIrValue<T>(json: string): T {
+  return JSON.parse(json, (_key, value: unknown) => {
+    if (typeof value === "object" && value !== null && "$nonfinite" in value) {
+      const tag = (value as { $nonfinite: string }).$nonfinite;
+      if (tag === "inf") return Infinity;
+      if (tag === "-inf") return -Infinity;
+      if (tag === "-0") return -0;
+      if (tag === "nan") return NaN;
+      throw new Error(`Invalid IR number sentinel: ${String(tag)}`);
+    }
+    return value;
+  }) as T;
 }
 
 /** A function from its compact encoding (encodeFunction). */

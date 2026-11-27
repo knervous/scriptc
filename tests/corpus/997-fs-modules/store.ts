@@ -17,7 +17,7 @@ export function scratchDir(tag: string): string {
   while (i >= 0 && script.charAt(i) !== "/" && script.charAt(i) !== "\\") {
     i = i - 1;
   }
-  const dir = tag + script.slice(i + 1) + "-" + process.pid;
+  const dir = tag + script.slice(i + 1);
   if (existsSync(dir)) {
     for (const name of readdirSync(dir)) {
       rmSync(dir + "/" + name);

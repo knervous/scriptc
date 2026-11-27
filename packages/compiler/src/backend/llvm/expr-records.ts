@@ -1,3 +1,4 @@
+// This file was modified from scriptc (Apache-2.0); see MODIFICATIONS.md.
 /* Focused LLVM expression emission extracted from emitter.ts. */
 import { InternalCompilerError } from "../../errors.js";
 import { undefinedArmTag, unionWideningTags } from "../../ir/analysis.js";
@@ -295,6 +296,18 @@ function emitRegexOperation(
     return out;
   };
   switch (method) {
+    case "matchHasIndex": case "matchIndex": case "matchInput": case "matchHasGroups": case "matchGroups":
+      throw new InternalCompilerError("llvm emitter bug: match result properties are a browser-target form");
+    // A function replacement (native dyn): the callback, a callable dyn value, called per match by the runtime
+    // (scr_dyn_native_regex.c); it may throw, and replaceAllFn without /g throws Node's TypeError.
+    case "replaceFn": case "replaceAllFn": {
+      host.declare(`declare ptr @scr_dyn_native_regex_replace_fn(ptr, ptr, ptr, i1 zeroext)`);
+      const t = B.tmp();
+      B.line(`${t} = call ptr @scr_dyn_native_regex_replace_fn(ptr ${r.name}, ptr ${args[0]!.name}, ptr ${args[1]!.name}, i1 ${method === "replaceAllFn"})`);
+      const out = host.own({ name: t, type: e.type });
+      host.emitPendingCheck();
+      return out;
+    }
     case "matchAll":
       // Every match drained eagerly into a fresh +1 string[][]; throws
       // Node's TypeError on a non-global regex (catchable).

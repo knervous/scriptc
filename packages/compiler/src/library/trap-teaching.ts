@@ -1,3 +1,4 @@
+// This file was modified from scriptc (Apache-2.0); see MODIFICATIONS.md.
 /* The structured trap-teaching encoding (ratified 2026-07-23). A library-mode
  * sink message that carries a diagnostic code and/or the trapping symbol is
  * assembled as
@@ -42,11 +43,7 @@ export function assembleTrapTeaching(
   symbol: string,
   remediation?: string,
 ): string {
-  const fields: [string, string][] = [
-    ["text", text],
-    ["code", code],
-    ["symbol", symbol],
-  ];
+  const fields: [string, string][] = [["text", text], ["code", code], ["symbol", symbol]];
   if (remediation !== undefined) fields.push(["remediation", remediation]);
   for (const [name, value] of fields) {
     if (value.includes(TRAP_TEACHING_MARKER) || value.includes(TRAP_TEACHING_SEP)) {
@@ -54,12 +51,7 @@ export function assembleTrapTeaching(
     }
   }
   return (
-    TRAP_TEACHING_MARKER +
-    text +
-    TRAP_TEACHING_SEP +
-    code +
-    TRAP_TEACHING_SEP +
-    symbol +
+    TRAP_TEACHING_MARKER + text + TRAP_TEACHING_SEP + code + TRAP_TEACHING_SEP + symbol +
     (remediation !== undefined ? TRAP_TEACHING_SEP + remediation : "")
   );
 }

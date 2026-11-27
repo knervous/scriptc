@@ -1,6 +1,0 @@
-{
- "order": [
-  "<repo>/tests/corpus/fs-lchmod-typed.ts"
- ],
- "diags": []
-}

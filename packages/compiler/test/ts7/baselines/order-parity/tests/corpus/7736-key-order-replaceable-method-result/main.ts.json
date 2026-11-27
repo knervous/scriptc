@@ -1,7 +1,0 @@
-{
- "order": [
-  "<repo>/tests/corpus/7736-key-order-replaceable-method-result/registry.js",
-  "<repo>/tests/corpus/7736-key-order-replaceable-method-result/main.ts"
- ],
- "diags": []
-}

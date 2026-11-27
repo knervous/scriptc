@@ -1,6 +1,0 @@
-{
- "order": [
-  "<repo>/tests/corpus/8818-receiverless-method-dynamic-operands.ts"
- ],
- "diags": []
-}

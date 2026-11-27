@@ -1,7 +1,0 @@
-{
- "order": [
-  "<repo>/tests/corpus/checked-proxy-callback/operations.mjs",
-  "<repo>/tests/corpus/checked-proxy-callback/main.ts"
- ],
- "diags": []
-}

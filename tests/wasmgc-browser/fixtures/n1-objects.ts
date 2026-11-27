@@ -1,0 +1,35 @@
+// Shaped objects: shared shapes and inline caches, transitions, delete
+// (dictionary mode), key order, the dictionary limit, computed keys.
+import { make, makeOther, empty, getTag, getFlags, get, setFlags, setKey, del, delFlags, has, hasTag, keys, nest } from "./n1-objects-helper.js";
+const ks = (o: unknown): string => { const k: string[] = keys(o); return k.join(","); };
+const a = make(1), b = make(2), c = makeOther(9);
+const t1: number = getTag(a), t2: number = getTag(b), t3: number = getTag(c), t4: number = getTag(a);
+console.log(t1, t2, t3, t4, ks(a), ks(c));
+setFlags(a, 7); setFlags(c, 8);
+const f1: number = getFlags(a), f2: number = getFlags(b), f3: number = getFlags(c);
+console.log(f1, f2, f3);
+setKey(a, "extra", 5);
+console.log(ks(a), ks(b));
+delFlags(a);
+const h1: boolean = has(a, "flags"), h2: boolean = hasTag(a), h3: boolean = has(b, "flags");
+const t5: number = getTag(a), x1: number = get(a, "extra");
+console.log(h1, h2, h3, t5, x1, ks(a));
+setKey(a, "flags", 3);
+del(a, "nope");
+const f4: number = getFlags(a);
+console.log(f4, ks(a));
+const o = empty();
+setKey(o, "b", 1); setKey(o, "2", 1); setKey(o, "a", 1); setKey(o, "1", 1); setKey(o, "10", 1);
+console.log(ks(o));
+const big = empty();
+for (let i = 0; i < 70; i++) setKey(big, "k" + i, i);
+const k69: number = get(big, "k69"), k0: number = get(big, "k0");
+const bigKeys: string[] = keys(big);
+console.log(k69, k0, bigKeys.length, bigKeys[64]);
+del(big, "k3");
+const k4: number = get(big, "k4");
+console.log(k4, (keys(big) as string[]).length);
+const u = get(a, "missing");
+console.log(u === undefined, get(a, "child") === null);
+const child: number = nest(b, make(42));
+console.log(child);

@@ -1,3 +1,4 @@
+// This file was modified from scriptc (Apache-2.0); see MODIFICATIONS.md.
 /* scriptc runtime — libc shims, runtime instance state, process entry, the
  * trap funnel, library mode and host-callback channels (scr_console.c,
  * scr_library.c, scr_context.c). Included by scr_runtime.h, which says where
@@ -41,10 +42,15 @@ void arc4random_buf(void *buf, size_t n);
  * registration, poison flag, and program state. The instance's lifetime is
  * the thread's; the one-thread-per-instance contract (an instance is never
  * entered from two threads) is unchanged — this mode adds instances, not
- * thread awareness. Worker executables use the same isolation for their
- * collectors, caches and scheduler state. Expands to nothing for ordinary
+ * thread awareness. Thread-instanced executables (SCR_THREAD_INSTANCES
+ * without SCR_LIB) and worker executables (SCR_WORKERS) use the same
+ * isolation for their collectors, caches and scheduler state; the two are
+ * separate build modes and never combine. Expands to nothing for ordinary
  * executables and classic libraries. Immutable tables stay shared. */
-#if (defined(SCR_LIB) && defined(SCR_THREAD_INSTANCES)) || defined(SCR_WORKERS)
+#if defined(SCR_THREAD_INSTANCES) && defined(SCR_WORKERS) && !defined(SCR_LIB)
+#error "SCR_THREAD_INSTANCES and SCR_WORKERS are separate executable modes"
+#endif
+#if defined(SCR_THREAD_INSTANCES) || defined(SCR_WORKERS)
 #define SCR_TL _Thread_local
 #else
 #define SCR_TL
@@ -314,6 +320,18 @@ const char *scr_library_cstr_arg(const ScrStr *s);
  * itself never fails there, and callers that test the result compare it
  * with 0. */
 #define scr_atexit(fn) ((void)scr_library_register_reset(fn), 0)
+#elif defined(SCR_THREAD_INSTANCES)
+/* Thread-instanced executables (scr_console.c): each instance keeps its own
+ * exit list. The process's exit runs the exiting thread's list; any other
+ * thread runs its own in scr_thread_leave. Registration is idempotent per
+ * instance. */
+void scr_instance_atexit(void (*fn)(void));
+#define scr_atexit(fn) (scr_instance_atexit(fn), 0)
+/* Leaves the calling thread's instance: runs its exit list (LIFO: cycle
+ * collection, fiber stacks, interned values...) and empties it. Called by
+ * the embedder on a thread that entered compiled code, before the thread
+ * ends; never on the thread that will run the process's exit. */
+void scr_thread_leave(void);
 #elif defined(SCR_WORKERS)
 /* Executable workers drain their own cleanup stack before their TLS dies.
  * Registering their callbacks with libc would execute them on the process

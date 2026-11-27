@@ -1,1 +1,0 @@
-{ "name": "island-reexport", "private": true, "type": "module", "scriptc": { "packages": { "schemakit": "node" } } }

@@ -1,6 +1,0 @@
-{
- "order": [
-  "<repo>/tests/corpus/8419-iterable-never-array-arm.ts"
- ],
- "diags": []
-}

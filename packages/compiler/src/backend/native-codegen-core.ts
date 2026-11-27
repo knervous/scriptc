@@ -1,3 +1,4 @@
+// This file was modified from scriptc (Apache-2.0); see MODIFICATIONS.md.
 /** Native codegen helper protocol shared by compiler hosts. */
 import { availableParallelism } from "node:os";
 
@@ -319,8 +320,11 @@ export function validateNativeCodegenVersion(
   if (value["scriptc_package_version"] !== expectedPackageVersion) {
     mismatch("scriptc_package_version", expectedPackageVersion);
   }
-  if (value["llvm_version"] !== NATIVE_CODEGEN_LLVM_VERSION) {
-    mismatch("llvm_version", NATIVE_CODEGEN_LLVM_VERSION);
+  // Experiments on a host without the pinned bottle name the LLVM release
+  // they deliberately built against; the helper's own report must match it.
+  const expectedLlvm = process.env["SCRIPTC_EXPERIMENT_LLVM_VERSION"] ?? NATIVE_CODEGEN_LLVM_VERSION;
+  if (value["llvm_version"] !== expectedLlvm) {
+    mismatch("llvm_version", expectedLlvm);
   }
   if (value["default_target"] !== helper.defaultTarget) {
     mismatch("default_target", helper.defaultTarget);

@@ -8,11 +8,7 @@ export const config = defineConfig({
   siteUrl,
   defaultLanguage: "en",
   translations: { en: { displayName: "English" } },
-  logo: (
-    <span className="translate-y-[-0.5px] flex items-center font-[family-name:var(--font-geist-sans)] text-[24.4px] font-semibold tracking-[-0.05em] text-black dark:text-white">
-      {siteName}
-    </span>
-  ),
+  logo: <span className="font-[family-name:var(--font-geist-pixel-square)] text-lg">{siteName}</span>,
   navbarBrand: "labs",
   navbarActiveProduct: siteName,
   github: { owner, repo, branch: "main", editPath: "docs/content/docs/{path}" },

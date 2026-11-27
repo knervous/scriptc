@@ -1,9 +1,11 @@
+// This file was modified from scriptc (Apache-2.0); see MODIFICATIONS.md.
 /** Type-directed reference counting, tracing, boxes and record layouts.
  * Containers store erased adapters; shape helpers retain, release and trace
  * their fields. Every allocation has a size_t reference count at offset zero
  * and participates in the runtime allocation audit. */
 import type { HeapCensus } from "./heap-census.js";
 import type { IrClassDef, IrModule, IrRecordLink, IrRecordShape, IrType } from "../../ir/ir.js";
+import { recordNotFrozen } from "./frozen-records.js";
 import {
   isIdentityCollectionKey,
   isRefCounted,
@@ -65,7 +67,7 @@ import {
   stackUnionBox,
   type InlineUnionFields,
 } from "./inline-unions.js";
-import { JS_BITS, JS_TAGS } from "./jsval-encoding.js";
+import { JS_BITS, JS_TAGS } from "./jsword-encoding.js";
 import {
   ARENA_RC,
   arenaDisposeLines,
@@ -150,6 +152,8 @@ export interface ShapeHost {
   readonly rcMode?: InlineRcMode;
   readonly recordCloneShapes: ReadonlySet<string>;
   readonly recordsById: Map<string, IrRecordShape>;
+  /** Record shapes the program may freeze (frozen-records.ts): their release counts without the frozen bit. */
+  readonly freezableShapes: ReadonlySet<string>;
   /** The alias tag of a runtime word that lifetime-region code reads and
    * writes outside every field: the chunk count, the chunk owner, the class
    * cursors and scr_region_counting (", !tbaa !N", or "" in debug builds). */
@@ -346,7 +350,7 @@ export function vAdapters(host: ShapeHost, t: IrType): { retain: string; release
  * table above; the split exists so call sites read type-directedly.
  * Families with a mirrored fast path call the inline helper instead. */
 export function retainSym(host: ShapeHost, t: IrType): string {
-  if (t.kind === "jsval") return jsvalRcSym(host, "retain");
+  if (t.kind === "jsword") return jswordRcSym(host, "retain");
   const nullable = host.nullableUnions.of(t);
   if (nullable?.repr === "shapes") return shapeUnionRc(host, nullable).retain;
   if (nullable?.repr === "classes") return classUnionRc(host, nullable).retain;
@@ -500,6 +504,7 @@ export function emitShapeUnionHelpers(host: ShapeHost): string[] {
     const frozen = union.arms.some(
       (arm) =>
         host.recordsById.get(arm.shapeId)?.freezable === true ||
+        host.freezableShapes.has(arm.shapeId) ||
         host.recordViews?.targets.has(arm.shapeId) === true,
     );
     const notFrozen = ~recordFrozenBit(S);
@@ -592,7 +597,7 @@ export function emitNullableRetainWrappers(host: ShapeHost): string[] {
  * points serve where one exists; records use their emitted helper.
  * Families with a mirrored fast path call the inline helper instead. */
 export function releaseSym(host: ShapeHost, t: IrType): string {
-  if (t.kind === "jsval") return jsvalRcSym(host, "release");
+  if (t.kind === "jsword") return jswordRcSym(host, "release");
   const nullable = host.nullableUnions.of(t);
   if (nullable?.repr === "shapes") return shapeUnionRc(host, nullable).release;
   if (nullable?.repr === "classes") return classUnionRc(host, nullable).release;
@@ -622,12 +627,12 @@ export function releaseSym(host: ShapeHost, t: IrType): string {
   }
 }
 
-/** jsval retain/release (llvm/jsval.ts). On 32-bit targets a jsval is a
+/** jsword retain/release (llvm/jsword.ts). On 32-bit targets a jsword is a
  * dyn cell and uses dyn's entry points. Otherwise the inline helper skips
  * immediates and forwards a cell to dyn's own entry point (requested here,
  * so it is emitted with the other helpers) and a string or BigInt to the
  * runtime; without inline RC every retain/release is a runtime call. */
-function jsvalRcSym(host: ShapeHost, op: RcOp): string {
+function jswordRcSym(host: ShapeHost, op: RcOp): string {
   if (host.sizeType === "i32")
     return op === "retain" ? retainSym(host, DYN) : releaseSym(host, DYN);
   if (host.rcHelpers === null || mirroredFamily(host, "js", op) === null) {
@@ -640,10 +645,10 @@ function jsvalRcSym(host: ShapeHost, op: RcOp): string {
   return requestRcHelper(host, "js", op);
 }
 
-/** The inline retain/release helpers of jsval (64-bit targets). A cell
+/** The inline retain/release helpers of jsword (64-bit targets). A cell
  * goes through dyn's own retain/release entry point (inline or runtime);
  * a string or BigInt through the runtime; immediates do nothing. */
-function jsvalRcHelper(host: ShapeHost, op: RcOp, attrs: string): string[] {
+function jswordRcHelper(host: ShapeHost, op: RcOp, attrs: string): string[] {
   const dynOp = op === "retain" ? retainSym(host, DYN) : releaseSym(host, DYN);
   const runtime = op === "retain" ? "@scr_js_retain" : "@scr_js_release";
   // Always inlined (the helper is a tag dispatch): LLVM would otherwise
@@ -651,7 +656,7 @@ function jsvalRcHelper(host: ShapeHost, op: RcOp, attrs: string): string[] {
   // line. dyn's release tolerates NULL; its retain does not.
   const inline = host.rcHelpersNoinline === true ? attrs : `alwaysinline ${attrs}`;
   return [
-    `define internal ${op === "retain" ? "ptr" : "void"} @sc_rc_${op}_js(ptr %o) ${inline} { ; jsval ${op}: cells, strings and BigInts`,
+    `define internal ${op === "retain" ? "ptr" : "void"} @sc_rc_${op}_js(ptr %o) ${inline} { ; jsword ${op}: cells, strings and BigInts`,
     `entry:`,
     `  %b = ptrtoint ptr %o to i64`,
     `  %tag = lshr i64 %b, 48`,
@@ -765,7 +770,7 @@ const RELEASE_RC_OPS = new Set([
   "js:release",
 ]);
 
-/** The jsval helpers' row: their bodies are custom (jsvalRcHelper), and
+/** The jsword helpers' row: their bodies are custom (jswordRcHelper), and
  * they call the runtime themselves. */
 const JS_RC_ROW: InlineRcFamily = { cycle: "none", retainNull: true, release: null };
 
@@ -821,7 +826,7 @@ function requestRcHelper(host: ShapeHost, family: string, op: RcOp): string {
   // Its body is written last (emitInlineRcHelpers), after the requests are
   // collected: a release that can buffer a candidate requests the append
   // helper now. The dyn release buffers through scr_dyn_release_survivor
-  // instead. The jsval row (JS_RC_ROW) has no collector header; its cells
+  // instead. The jsword row (JS_RC_ROW) has no collector header; its cells
   // release through dyn's helper.
   if (op === "release" && row.cycle === "always" && family !== "dyn") requestCycleAppend(host);
   return `@${inlineRcName(family, op)}`;
@@ -1139,7 +1144,7 @@ export function emitInlineRcHelpers(host: ShapeHost): string[] {
     }
     const [family, op] = key.split(":") as [string, RcOp];
     if (family === "js") {
-      out.push(...jsvalRcHelper(host, op, rcHelperAttrs(host)));
+      out.push(...jswordRcHelper(host, op, rcHelperAttrs(host)));
       continue;
     }
     const row = INLINE_RC_FAMILIES[family]!;
@@ -1367,7 +1372,8 @@ function arrUsesRef(host: ShapeHost, elem: IrType): boolean {
     elem.kind === "classval" || // local class objects own traced capture boxes
     elem.kind === "promise" || // promise entries (Promise.all inputs): full REF story
     elem.kind === "child" || // spawned child handles: scr_child_* adapters, no trace
-    elem.kind === "netServer" ||
+    elem.kind === "netServer" || // server handles ([...set] drains): REF, no trace
+    elem.kind === "jsval" || // island handles (`any[]` under --dynamic): REF, no trace
     elem.kind === "stats" || // fs.Stats snapshots: scr_stats_* adapters, no trace
     elem.kind === "bigintStats" || // the same snapshot handle, BigIntStats reads
     elem.kind === "dyn" || // native collection seeds/drains: traced REF
@@ -2360,7 +2366,8 @@ export function releaseBody(
  * possible-root step. Immortal references return; NULL and last references
  * call `slow`, which
  * holds the complete release: inlining it everywhere would copy teardowns
- * (and their destroy calls) into every caller. */
+ * (and their destroy calls) into every caller. A freezable record's count is
+ * the word without its frozen bit, so its fast path masks first. */
 export function releaseFastPath(
   host: ShapeHost,
   fnName: string,
@@ -2631,7 +2638,11 @@ export function emitRecordShapes(
     // no collector header and no frozen bit in its count, tears down in one
     // loop (iterativeTeardownDefinitions).
     const iterative =
-      segmented && !traced && shape.freezable !== true && ownType.length === refMembers.length;
+      segmented &&
+      !traced &&
+      shape.freezable !== true &&
+      !host.freezableShapes.has(shape.id) &&
+      ownType.length === refMembers.length;
     defs.push(
       ...releaseBody(
         host,
@@ -2644,8 +2655,9 @@ export function emitRecordShapes(
         chained,
         segmented,
         // A record view's word carries the frozen bit as its view mark
-        // (record-views.ts), so view targets release like freezable shapes.
-        shape.freezable === true || host.recordViews?.targets.has(shape.id) === true,
+        // (record-views.ts), so view targets release like freezable shapes. Upstream marks freezable shapes in its
+        // frontend; this fork's analysis (frozen-records.ts) marks them here.
+        shape.freezable === true || host.freezableShapes.has(shape.id) || host.recordViews?.targets.has(shape.id) === true,
         iterative
           ? iterativeTeardownDefinitions(
               host,

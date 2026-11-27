@@ -1,6 +1,0 @@
-{
- "order": [
-  "<repo>/tests/corpus/5469-typed-array-loop-initializer-rebinding.ts"
- ],
- "diags": []
-}

@@ -1,3 +1,4 @@
+// This file was modified from scriptc (Apache-2.0); see MODIFICATIONS.md.
 /* Mixin heritage: `class D extends Serializable(Base)` and the
  * `Constructor<T>`-parameterized mixin-function pattern, monomorphized per
  * call site.
@@ -26,7 +27,7 @@
  * inside functions or class members would mint a distinct class per
  * evaluation and are named fences.
  *
- * Named fences (a diagnostic instead of divergence from Node): mixin functions whose base
+ * Named fences (never silent divergence): mixin functions whose base
  * parameter flow isn't traceable (the parameter referenced anywhere but
  * the extends clause, extra statements in the body), mixins over builtin
  * or decorated or generic-family classes, calls whose argument isn't
@@ -34,20 +35,11 @@
  * statics-bearing mixin classes outside a plain top-level statement
  * (their declaration-time code must run exactly where the call
  * evaluates). */
-import { positionTag } from "./structural-positions.js";
 import * as ts from "../ts7/adapter.js";
-import { withoutParentheses } from "../outer-expressions.js";
 import type { Lowerer } from "./lowerer.js";
 import { PoisonError } from "./lowerer.js";
 import { type IrType } from "../../ir/ir.js";
-import { staticsArmStatementOf, staticsEvaluationStatementOf } from "../class-statics-position.js";
-import { inertReadOf } from "./inert-reads.js";
-import {
-  type ClassInfo,
-  builtinStreamInfoOf,
-  exactClassOfReceiver,
-  propertyAssignedClassInfoOf,
-} from "./lower-classes.js";
+import { type ClassInfo, builtinStreamInfoOf, exactClassOfReceiver, propertyAssignedClassInfoOf } from "./lower-classes.js";
 
 /** A recognized mixin function: one base-class parameter, a body that
  * defines and returns exactly one class extending that parameter, and no
@@ -90,11 +82,12 @@ export interface MixinInstanceInfo {
    * in this file's init, at the top-level statement containing the call —
    * exactly when JS evaluates them (lowerFileInit's merge). */
   statics?: { sf: ts.SourceFile; pos: number };
-  /** Static fields/blocks exist and the call sits in a conditional's arm
-   * of a top-level statement: they run only when the arm is selected, so
-   * they lower with the call's own value (mixinCallValue) instead of at the
-   * statement's position. */
-  staticsInArm?: boolean;
+}
+
+/** Strips parentheses. */
+function unparen(e: ts.Expression): ts.Expression {
+  while (ts.isParenthesizedExpression(e)) e = e.expression;
+  return e;
 }
 
 /** The class a mixin FUNCTION's body defines and returns, with every
@@ -119,8 +112,8 @@ function mixinFnShapeInner(
 ): MixinFnShape | null {
   if (fn.asteriskToken) return null;
   if (ts.getModifiers(fn)?.some((m) => m.kind === ts.SyntaxKind.AsyncKeyword)) return null;
-  if (fn.parameters.nodes.length !== 1) return null;
-  const p = fn.parameters.nodes[0]!;
+  if (fn.parameters.length !== 1) return null;
+  const p = fn.parameters[0]!;
   if (!ts.isIdentifier(p.name) || p.dotDotDotToken || p.questionToken || p.initializer) return null;
   const paramSym = lowerer.checker.getSymbolAtLocation(p.name);
   if (!paramSym || !fn.body) return null;
@@ -131,12 +124,12 @@ function mixinFnShapeInner(
   // not execute) disqualifies.
   let classNode: ts.ClassLikeDeclaration | null = null;
   if (!ts.isBlock(fn.body)) {
-    const e = withoutParentheses(fn.body);
+    const e = unparen(fn.body);
     if (ts.isClassExpression(e)) classNode = e;
   } else {
-    const stmts = fn.body.statements.nodes;
+    const stmts = fn.body.statements;
     if (stmts.length === 1 && ts.isReturnStatement(stmts[0]!) && stmts[0]!.expression) {
-      const e = withoutParentheses(stmts[0]!.expression!);
+      const e = unparen(stmts[0]!.expression!);
       if (ts.isClassExpression(e)) classNode = e;
     } else if (
       stmts.length === 2 &&
@@ -145,7 +138,7 @@ function mixinFnShapeInner(
       ts.isReturnStatement(stmts[1]!) &&
       stmts[1]!.expression !== undefined
     ) {
-      const ret = withoutParentheses(stmts[1]!.expression!);
+      const ret = unparen(stmts[1]!.expression!);
       if (ts.isIdentifier(ret)) {
         const clsSym = lowerer.checker.getSymbolAtLocation(stmts[0]!.name!);
         if (clsSym && lowerer.checker.getSymbolAtLocation(ret) === clsSym) classNode = stmts[0]!;
@@ -156,17 +149,17 @@ function mixinFnShapeInner(
   // A generic class would mint a FAMILY per call; decorators are
   // declaration-time calls with per-evaluation semantics — both
   // disqualify (decorator-composed mixins are a named non-goal).
-  if (classNode.typeParameters?.nodes) return null;
-  const mods = (classNode as { modifiers?: ts.NodeArray<ts.Node> }).modifiers?.nodes ?? [];
+  if (classNode.typeParameters) return null;
+  const mods = (classNode as { modifiers?: readonly ts.Node[] }).modifiers ?? [];
   if (mods.some((m) => m.kind === ts.SyntaxKind.Decorator)) return null;
 
   // Heritage: exactly `extends <the parameter>`.
-  const clauses = classNode.heritageClauses?.nodes ?? [];
+  const clauses = classNode.heritageClauses ?? [];
   if (clauses.length !== 1 || clauses[0]!.token !== ts.SyntaxKind.ExtendsKeyword) return null;
-  const types = clauses[0]!.types.nodes;
+  const types = clauses[0]!.types;
   if (types.length !== 1) return null;
   const t = types[0]!;
-  if (t.typeArguments?.nodes || !ts.isIdentifier(t.expression)) return null;
+  if (t.typeArguments || !ts.isIdentifier(t.expression)) return null;
   if (lowerer.checker.getSymbolAtLocation(t.expression) !== paramSym) return null;
 
   // The parameter's flow must be fully traceable: the extends clause is
@@ -175,11 +168,7 @@ function mixinFnShapeInner(
   let extraRef = false;
   ts.walkPreorder(fn.body, (n) => {
     if (n === t.expression) return undefined;
-    if (
-      ts.isIdentifier(n) &&
-      n.text === ts.getTextOfNode(p.name) &&
-      lowerer.checker.getSymbolAtLocation(n) === paramSym
-    ) {
+    if (ts.isIdentifier(n) && n.text === p.name.getText() && lowerer.checker.getSymbolAtLocation(n) === paramSym) {
       extraRef = true;
       return "stop";
     }
@@ -194,14 +183,13 @@ function mixinFnShapeInner(
     const refSym = lowerer.checker.getSymbolAtLocation(p.type.typeName);
     if (
       refSym &&
-      fn.typeParameters?.nodes.some((tp) => lowerer.checker.getSymbolAtLocation(tp.name) === refSym)
+      fn.typeParameters?.some((tp) => lowerer.checker.getSymbolAtLocation(tp.name) === refSym)
     ) {
       paramTypeParam = refSym;
     }
   }
 
-  const name =
-    (ts.isFunctionDeclaration(fn) ? fn.name?.text : undefined) ??
+  const name = (ts.isFunctionDeclaration(fn) ? fn.name?.text : undefined) ??
     (ts.isVariableDeclaration(fn.parent) && ts.isIdentifier(fn.parent.name)
       ? fn.parent.name.text
       : "%anon");
@@ -226,7 +214,7 @@ export function mixinFnOfCallee(lowerer: Lowerer, callee: ts.Expression): MixinF
   let sym = lowerer.checker.getSymbolAtLocation(callee) ?? null;
   if (sym && sym.flags & ts.SymbolFlags.Alias) sym = lowerer.checker.getAliasedSymbol(sym);
   if (!sym) return null;
-  const decls = sym.declarations;
+  const decls = lowerer.checker.declarationsOf(sym);
   if (decls.length !== 1 || decls[0] === undefined) return null; // overloads / merged declarations
   const d = decls[0];
   if (ts.isFunctionDeclaration(d)) return mixinFnShapeOf(lowerer, d);
@@ -249,7 +237,7 @@ function mixinFnNodeOfBinding(
   ) {
     return null;
   }
-  const init = withoutParentheses(decl.initializer);
+  const init = unparen(decl.initializer);
   return ts.isArrowFunction(init) || ts.isFunctionExpression(init) ? init : null;
 }
 
@@ -268,7 +256,7 @@ export function isMixinFnBinding(lowerer: Lowerer, decl: ts.VariableDeclaration)
  * is a mixin call — from here failures are honest diagnostics, never a
  * fallthrough to a wronger message). */
 function mixinBaseClassOf(lowerer: Lowerer, arg: ts.Expression): ClassInfo {
-  const e = withoutParentheses(arg);
+  const e = unparen(arg);
   // A nested mixin call: `Tagged(Printable(Derived))` — the inner
   // instantiation is the outer's base (instantiated first, exactly JS's
   // argument-before-call order).
@@ -283,14 +271,10 @@ function mixinBaseClassOf(lowerer: Lowerer, arg: ts.Expression): ClassInfo {
   }
   // A class expression argument: `Tagged(class { … })` — collected like
   // any expression class (its own position fences apply).
-  if (ts.isClassExpression(e))
-    return checkedMixinBase(lowerer, arg, lowerer.lowerClassExpressionInfo(e));
+  if (ts.isClassExpression(e)) return checkedMixinBase(lowerer, arg, lowerer.lowerClassExpressionInfo(e));
   if (ts.isIdentifier(e)) {
     const sym = lowerer.resolveValueSymbol(e);
-    const builtin =
-      lowerer.builtinErrorInfoOf(sym) ??
-      lowerer.builtinEmitterInfoOf(sym) ??
-      builtinStreamInfoOf(lowerer, sym);
+    const builtin = lowerer.builtinErrorInfoOf(sym) ?? lowerer.builtinEmitterInfoOf(sym) ?? builtinStreamInfoOf(lowerer, sym);
     if (builtin) {
       lowerer.unsupported(
         "SC1090",
@@ -298,8 +282,7 @@ function mixinBaseClassOf(lowerer: Lowerer, arg: ts.Expression): ClassInfo {
         `mixins over the builtin class '${e.text}' (its construction is libCall-shaped — only program classes compose)`,
       );
     }
-    const direct =
-      (sym ? lowerer.classBySymbol.get(sym) : undefined) ??
+    const direct = (sym ? lowerer.classBySymbol.get(sym) : undefined) ??
       propertyAssignedClassInfoOf(lowerer, sym) ??
       exactClassOfReceiver(lowerer, e) ??
       // A const holding a mixin RESULT declared earlier (`const A = M(B);
@@ -351,45 +334,21 @@ export function mixinResultBindingClassOf(
   sym: ts.Symbol | null | undefined,
 ): ClassInfo | null {
   if (!sym) return null;
-  const decls = sym.declarations;
-  if (decls.length !== 1 || decls[0] === undefined || !ts.isVariableDeclaration(decls[0]))
-    return null;
+  const decls = lowerer.checker.declarationsOf(sym);
+  if (decls.length !== 1 || decls[0] === undefined || !ts.isVariableDeclaration(decls[0])) return null;
   const decl = decls[0];
   if (
-    !ts.isIdentifier(decl.name) ||
-    decl.initializer === undefined ||
+    !ts.isIdentifier(decl.name) || decl.initializer === undefined ||
     !ts.isVariableDeclarationList(decl.parent) ||
     (decl.parent.flags & ts.NodeFlags.Const) === 0
   ) {
     return null;
   }
-  const init = withoutParentheses(decl.initializer);
+  const init = unparen(decl.initializer);
   if (!ts.isCallExpression(init)) return null;
   const info = mixinCallClassInfoOf(lowerer, init);
   if (info) lowerer.classBySymbol.set(sym, info);
   return info;
-}
-
-/** The instance type a declaration holds when its initializer constructs
- * a mixin RESULT binding (`const V = wrap(Base); const made = new V()`).
- * The checker types the value by the class expression the mixin body
- * returns — the un-instantiated local class, a different class from every
- * call site's — while the constructed value IS that call site's
- * instantiation (V's class object). A binding of such a construction keeps
- * the instantiation's layout: coercing the value into the local class
- * would reinterpret one class's instance as another's. Null for every
- * other declaration. */
-export function mixinInstantiationNewType(
-  lowerer: Lowerer,
-  decl: ts.VariableDeclaration,
-): IrType | null {
-  if (decl.type !== undefined || !ts.isIdentifier(decl.name) || decl.initializer === undefined)
-    return null;
-  const init = withoutParentheses(decl.initializer);
-  if (!ts.isNewExpression(init) || !ts.isIdentifier(init.expression)) return null;
-  const symbol = lowerer.resolveValueSymbol(init.expression);
-  const info = symbol ? lowerer.classBySymbol.get(symbol) : undefined;
-  return info?.mixinInstance ? { kind: "object", className: info.def.name } : null;
 }
 
 /** The heart: the ClassInfo a mixin CALL mints — one instantiation per
@@ -424,28 +383,16 @@ export function mixinCallClassInfoOf(lowerer: Lowerer, call: ts.CallExpression):
   }
 }
 
-function instantiateMixinCall(
-  lowerer: Lowerer,
-  call: ts.CallExpression,
-  shape: MixinFnShape,
-): ClassInfo {
+function instantiateMixinCall(lowerer: Lowerer, call: ts.CallExpression, shape: MixinFnShape): ClassInfo {
   // Reentrancy backstop: a cyclic base chain through const bindings would
   // re-enter its own instantiation (the tsc gate rejects the cycles it
   // sees; this turns anything it misses into a diagnostic, the
   // class-expression rule).
   if (lowerer.mixinCollectingCalls.has(call)) {
-    lowerer.unsupported(
-      "SC1090",
-      call,
-      "mixin calls whose base chain re-enters their own instantiation (a cyclic extends)",
-    );
+    lowerer.unsupported("SC1090", call, "mixin calls whose base chain re-enters their own instantiation (a cyclic extends)");
   }
-  if (call.arguments.nodes.length !== 1 || ts.isSpreadElement(call.arguments.nodes[0]!)) {
-    lowerer.unsupported(
-      "SC1090",
-      call,
-      "mixin calls with anything but exactly one direct class argument",
-    );
+  if (call.arguments.length !== 1 || ts.isSpreadElement(call.arguments[0]!)) {
+    lowerer.unsupported("SC1090", call, "mixin calls with anything but exactly one direct class argument");
   }
   // Evaluation-position fence: one immortal class object is exact only
   // for once-evaluated calls. Function bodies (and class members) may run
@@ -453,11 +400,7 @@ function instantiateMixinCall(
   // enters through its heritage clause (the extends expression of a
   // once-evaluated declaration).
   let prev: ts.Node = call;
-  for (
-    let p: ts.Node | undefined = call.parent;
-    p !== undefined && !ts.isSourceFile(p);
-    prev = p, p = p.parent
-  ) {
+  for (let p: ts.Node | undefined = call.parent; p !== undefined && !ts.isSourceFile(p); prev = p, p = p.parent) {
     if (ts.isFunctionLike(p) || ts.isClassStaticBlockDeclaration(p)) {
       lowerer.unsupported(
         "SC1090",
@@ -474,10 +417,10 @@ function instantiateMixinCall(
     }
   }
 
-  const base = mixinBaseClassOf(lowerer, call.arguments.nodes[0]!);
+  const base = mixinBaseClassOf(lowerer, call.arguments[0]!);
   const instName = lowerer.qualify(
-    ts.getSourceFileOfNode(call),
-    `%mx${positionTag(lowerer, call)}.${shape.classNode.name?.text ?? ""}`,
+    call.getSourceFile(),
+    `%mx${call.getStart()}.${shape.classNode.name?.text ?? ""}`,
   );
   const ordinal = lowerer.mixinOrdinals.get(shape.classNode) ?? 0;
   lowerer.mixinOrdinals.set(shape.classNode, ordinal + 1);
@@ -526,17 +469,10 @@ function instantiateMixinCall(
   // The supported positions put that point at one top-level statement of
   // the call's file — lowerFileInit's positional merge emits them there
   // (before the statement; every allowed shape evaluates nothing
-  // observable ahead of the call). A call in a conditional's arm runs only
-  // when the arm is selected, so its statics lower with the call's value
-  // instead (staticsInArm). Anything subtler is a named fence, never a
-  // reordering.
+  // observable ahead of the call). Anything subtler is a named fence,
+  // never a reordering.
   if (info.staticFields.length > 0 || (info.staticBlocks?.length ?? 0) > 0) {
-    const inert = inertReadOf(lowerer);
-    const holder = staticsEvaluationStatementOf(call, inert);
-    if (!holder && staticsArmStatementOf(call, inert) !== null) {
-      if (info.mixinInstance) info.mixinInstance.staticsInArm = true;
-      return info;
-    }
+    const holder = staticsEvalStatementOf(call);
     if (!holder) {
       lowerer.unsupported(
         "SC1090",
@@ -545,10 +481,7 @@ function instantiateMixinCall(
       );
     }
     if (info.mixinInstance) {
-      info.mixinInstance.statics = {
-        sf: ts.getSourceFileOfNode(call),
-        pos: ts.tokenStartOfNode(holder),
-      };
+      info.mixinInstance.statics = { sf: call.getSourceFile(), pos: holder.getStart() };
     }
   }
   return info;
@@ -576,10 +509,9 @@ export function mixinIntersectionInstanceType(lowerer: Lowerer, widened: ts.Type
   const plainParts: string[] = [];
   for (const part of parts) {
     const sym = part.getSymbol();
-    const decl = sym ? sym.valueDeclaration : undefined;
+    const decl = sym ? lowerer.checker.valueDeclarationOf(sym) : undefined;
     const node =
-      decl &&
-      (ts.isClassDeclaration(decl) || ts.isClassExpression(decl)) &&
+      decl && (ts.isClassDeclaration(decl) || ts.isClassExpression(decl)) &&
       lowerer.mixinInstancesByClassNode.has(decl)
         ? decl
         : null;
@@ -640,18 +572,38 @@ export function mixinIntersectionInstanceType(lowerer: Lowerer, widened: ts.Type
  * discovery/emit drift. */
 function pinnedMixinCallPosition(call: ts.CallExpression): boolean {
   let n: ts.Node = call;
-  for (
-    let p: ts.Node | undefined = n.parent;
-    p !== undefined && !ts.isSourceFile(p);
-    n = p, p = p.parent
-  ) {
+  for (let p: ts.Node | undefined = n.parent; p !== undefined && !ts.isSourceFile(p); n = p, p = p.parent) {
     if (ts.isParenthesizedExpression(p)) continue;
-    if (ts.isCallExpression(p) && p.arguments.nodes.length === 1 && p.arguments.nodes[0] === n)
-      continue;
+    if (ts.isCallExpression(p) && p.arguments.length === 1 && p.arguments[0] === n) continue;
     if (ts.isVariableDeclaration(p) && p.initializer === n) {
       return ts.isVariableDeclarationList(p.parent) && (p.parent.flags & ts.NodeFlags.Const) !== 0;
     }
     return ts.isExpressionWithTypeArguments(p) && ts.isHeritageClause(p.parent);
   }
   return false;
+}
+
+/** The top-level statement whose evaluation IS a statics-bearing mixin
+ * call's evaluation point, or null: the path from the call to the source
+ * file may cross only parens, enclosing mixin-call argument positions,
+ * a sole-declarator top-level variable statement, a bare expression
+ * statement, or a top-level class declaration's heritage clause. */
+function staticsEvalStatementOf(call: ts.CallExpression): ts.Statement | null {
+  let n: ts.Node = call;
+  for (let p: ts.Node | undefined = n.parent; p !== undefined; n = p, p = p.parent) {
+    if (ts.isParenthesizedExpression(p)) continue;
+    if (ts.isCallExpression(p) && p.arguments.length === 1 && p.arguments[0] === n) continue;
+    if (
+      ts.isVariableDeclaration(p) && p.initializer === n &&
+      ts.isVariableDeclarationList(p.parent) && p.parent.declarations.length === 1 &&
+      ts.isVariableStatement(p.parent.parent) && ts.isSourceFile(p.parent.parent.parent)
+    ) {
+      return p.parent.parent;
+    }
+    if (ts.isExpressionStatement(p) && ts.isSourceFile(p.parent)) return p;
+    if (ts.isExpressionWithTypeArguments(p) || ts.isHeritageClause(p)) continue;
+    if (ts.isClassDeclaration(p) && ts.isSourceFile(p.parent) && ts.isHeritageClause(n)) return p;
+    return null;
+  }
+  return null;
 }

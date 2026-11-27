@@ -1,3 +1,4 @@
+// This file was modified from scriptc (Apache-2.0); see MODIFICATIONS.md.
 #include "scr_runtime.h"
 /* worker.performance: a worker thread's loop-utilization snapshot, published
  * by scr_perf_loop.c on each loop turn once the worker unit installs it. */
@@ -398,8 +399,9 @@ ScrDyn *scr_worker_thread_name_current(void) {
 #elif defined(__APPLE__) && !defined(SCR_LIB)
 #include <pthread.h>
 #endif
-#if defined(__linux__) && defined(SCR_WORKERS) && !defined(SCR_LIB)
+#if defined(__linux__) && (defined(SCR_WORKERS) || defined(__ANDROID__)) && !defined(SCR_LIB)
 #include <pthread.h>
+#include "scr_stack_thread.h"
 #endif
 
 #ifdef SCR_STACK_GUARD_TSD
@@ -453,16 +455,20 @@ void scr_stack_guard_init(void) {
   size_t size = pthread_get_stacksize_np(self);
   if (high > size) SCR_STACK_GUARD_SET(scr_stack_guard_for(high - size, size));
 #elif defined(__linux__) && !defined(SCR_LIB)
+#ifdef __ANDROID__
+  /* Android: every thread the program runs on is a pthread of the host's
+   * (scr_stack_thread.h); the thread library knows its exact extent. */
+  {
+    uintptr_t guard = scr_stack_guard_of_thread();
+    if (guard) SCR_STACK_GUARD_SET(guard);
+    return;
+  }
+#endif
 #ifdef SCR_WORKERS
   if (!scr_context_is_main()) {
     /* Worker threads: the thread library knows the exact extent. */
-    pthread_attr_t attr;
-    void *low = NULL;
-    size_t size = 0;
-    if (pthread_getattr_np(pthread_self(), &attr) != 0) return;
-    if (pthread_attr_getstack(&attr, &low, &size) == 0 && low && size)
-      scr_stack_guard = scr_stack_guard_for((uintptr_t)low, size);
-    pthread_attr_destroy(&attr);
+    uintptr_t guard = scr_stack_guard_of_thread();
+    if (guard) scr_stack_guard = guard;
     return;
   }
 #endif

@@ -1,6 +1,0 @@
-{
- "order": [
-  "<repo>/tests/corpus/os-homedir-env-cascade.ts"
- ],
- "diags": []
-}

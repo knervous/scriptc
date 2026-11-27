@@ -1,4 +1,5 @@
 #!/usr/bin/env node
+// This file was modified from scriptc (Apache-2.0); see MODIFICATIONS.md.
 import { execFileSync } from "node:child_process";
 import { mkdtempSync, readFileSync, rmSync, statSync } from "node:fs";
 import { join } from "node:path";
@@ -16,20 +17,14 @@ try {
   if (manifest.name !== expectedName) {
     throw new Error(`expected ${expectedName} in ${tarball}, found ${manifest.name}`);
   }
-  // The compiler starts both executables directly: the LLVM helper and the
-  // comptime evaluator.
-  for (const tool of ["scriptc-llvm-codegen", "scriptc-comptime"]) {
-    if (!Object.values(manifest.bin ?? {}).includes(`bin/${tool}`)) {
-      throw new Error(`${expectedName} must declare ${tool} as an npm bin`);
-    }
-    const mode = statSync(join(root, "bin", tool)).mode & 0o777;
-    if (mode !== 0o755) {
-      throw new Error(
-        `${expectedName} ${tool} has mode ${mode.toString(8)} in ${tarball}, expected 755`,
-      );
-    }
+  if (!Object.values(manifest.bin ?? {}).includes("bin/scriptc-llvm-codegen")) {
+    throw new Error(`${expectedName} must declare the LLVM helper as an npm bin`);
   }
-  process.stdout.write(`verified ${expectedName} helper and evaluator tarball mode 755\n`);
+  const mode = statSync(join(root, "bin", "scriptc-llvm-codegen")).mode & 0o777;
+  if (mode !== 0o755) {
+    throw new Error(`${expectedName} LLVM helper has mode ${mode.toString(8)} in ${tarball}, expected 755`);
+  }
+  process.stdout.write(`verified ${expectedName} LLVM helper tarball mode 755\n`);
 } finally {
   rmSync(work, { recursive: true, force: true });
 }

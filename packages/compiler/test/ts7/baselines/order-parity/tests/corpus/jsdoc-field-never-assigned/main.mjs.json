@@ -1,7 +1,0 @@
-{
- "order": [
-  "<repo>/tests/corpus/jsdoc-field-never-assigned/dep.mjs",
-  "<repo>/tests/corpus/jsdoc-field-never-assigned/main.mjs"
- ],
- "diags": []
-}

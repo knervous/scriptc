@@ -1,4 +1,7 @@
+// This file was modified from scriptc (Apache-2.0); see MODIFICATIONS.md.
 /* LlEmitter's function emission: function bodies, generator and async scaffolding, async awaits, WASI fulfillment and trampolines. */
+import { analyzeIntegerRanges } from "../../ir/integer-ranges.js";
+import { sourceSitePath, stripSourceSites } from "../../frontend/browser-target.js";
 import {
   type LlArgPackAndTrampolinePrologue,
   type LlEmitter,
@@ -10,7 +13,7 @@ import {
 import { type IrFunction, type IrModule, type IrType, isRefCounted, typeKey } from "../../ir/ir.js";
 import { INT32_FALLBACK_SUFFIX } from "../../ir/parameter-versions.js";
 import { planJsGroups } from "../../ir/js-groups.js";
-import { jsImmediates } from "./jsval.js";
+import { jsImmediates } from "./jsword.js";
 import { BlockBuilder } from "./blocks.js";
 import { findPrivateSplitLocals } from "./split-loops.js";
 import {
@@ -334,11 +337,14 @@ export function emitFunction(emitter: LlEmitter, fn: IrFunction): string {
           parameters: new Set(fn.params.map((param) => param.localId)),
         })
       : new Map();
+  // A typed-array read is an integer only where it has its element, so ranges and bounds are found in turn: the
+  // reads proved in bounds without any element's range give theirs, and the proof runs again over those ranges.
   const slotFacts = emitter.int32Slots.facts(fn.name);
-  const rangeFacts = analyzeIntegerRangeFacts(numericFn, slotFacts);
+  const reads = findBytesBounds(numericFn, analyzeIntegerRanges(numericFn, slotFacts));
+  const rangeFacts = analyzeIntegerRangeFacts(numericFn, slotFacts, reads);
   emitter.integerRanges = rangeFacts.ranges;
   emitter.integerLoopRanges = rangeFacts.loopRanges;
-  beginLoopEntryVersions(emitter, numericFn, slotFacts, rangeFacts);
+  beginLoopEntryVersions(emitter, numericFn, slotFacts, rangeFacts, reads);
   emitter.int32Elements = slotFacts.elements ?? null;
   emitter.integerOrNaNLocals = findIntegerOrNaNLocals(emitter, numericFn);
   emitter.bytesBounds =
@@ -671,17 +677,23 @@ export function emitFunction(emitter: LlEmitter, fn: IrFunction): string {
   ) {
     B.entryAllocas.push(`%source_frame = alloca { ptr, ptr, ptr, ptr, i32, i32 }`);
     // Until its first statement runs, a positioned frame names the function
-    // itself (the stack guard's RangeError is raised there).
+    // itself (the stack guard's RangeError is raised there). Source sites as
+    // the compile options show them (stripped, or with their prefix remapped).
     const frame = emitter.cstr(
       positions?.textAt(fn.loc) ??
-        (fn.sourceName === undefined
-          ? `    at ${fn.loc.file}`
-          : frameText(fn.sourceName, fn.loc.file)),
+        (stripSourceSites()
+          ? `    at ${fn.sourceName ?? "<anonymous>"}`
+          : fn.sourceName === undefined
+            ? `    at ${sourceSitePath(fn.loc.file)}`
+            : `    at ${fn.sourceName} (${sourceSitePath(fn.loc.file)})`),
     );
     if (
       B.excCellInvariant &&
       emitter.mod.lib === undefined &&
       emitter.mod.workers !== true &&
+      // A piece of this fork's threaded layout (nativeEntry) links a thread-instanced runtime, whose active cell
+      // pointer is thread-local, not the plain global read below.
+      emitter.nativeEntry === null &&
       emitter.sizeType === "i64" &&
       // Unoptimized code would keep the inline push's values in stack
       // slots of their own; the calls add the frame's 40 bytes and no more.
@@ -1560,6 +1572,9 @@ export function emitArgPackAndTrampolinePrologue(
  * code. */
 export function parkingFunctions(emitter: LlEmitter): Set<string> | null {
   if (emitter.wasi || emitter.mod.workers === true) return null;
+  // Programs that embed the dynamic engine keep fibers: island code may park the context.
+  const embedded = emitter.mod.embedded;
+  if (embedded !== undefined && embedded.modules.length > 0) return null;
   const testSub = (text: string): boolean =>
     text.includes("@scr_test_sub") && /@scr_test_sub\b/.test(text);
   for (const decl of emitter.decls) if (testSub(decl)) return null;

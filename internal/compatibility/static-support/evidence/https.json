@@ -1,3 +1,0 @@
-{
-    "node-builtin.https": ["tests/corpus/2645-https-client-url-argument.ts", "tests/corpus/2690-https-server-timeout-option.ts"]
-}

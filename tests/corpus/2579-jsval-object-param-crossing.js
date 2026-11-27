@@ -1,3 +1,4 @@
+// @dynamic
 // The repro-2 shape without npm: a JSDoc `@param {object}` slot is
 // checked-dynamic, and an 'any'-typed engine value flowing into it
 // CONVERTS (the jsval→dyn wrap) instead of fencing — prettier's

@@ -1,6 +1,0 @@
-{
- "order": [
-  "<repo>/tests/corpus/9794-promise-resolve-maybe-promise-channel.ts"
- ],
- "diags": []
-}

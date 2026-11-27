@@ -1,6 +1,0 @@
-{
- "order": [
-  "<repo>/tests/corpus/inexact-predicate-else-shared-read.ts"
- ],
- "diags": []
-}

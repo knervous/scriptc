@@ -1,7 +1,0 @@
-{
-  "entry": "workloads/cyclic-graphs.ts",
-  "args": [
-    "3"
-  ],
-  "scaleArg": 0
-}

@@ -1,6 +1,0 @@
-{
- "order": [
-  "<repo>/tests/corpus/2566-promise-reject-dyn-reason.js"
- ],
- "diags": []
-}

@@ -1,3 +1,4 @@
+// This file was modified from scriptc (Apache-2.0); see MODIFICATIONS.md.
 import { createHash } from "node:crypto";
 import { mkdtemp, readFile, rm, writeFile } from "node:fs/promises";
 import { tmpdir } from "node:os";
@@ -13,11 +14,13 @@ import {
 import { existingDriverTracePaths, normalizedProbeInvocation } from "./trace-paths.js";
 import { stableTestMemo } from "./session.js";
 import {
+  QJS_ENGINE_SOURCES,
   LRE_SOURCES,
   ZLIB_SOURCES,
   vendorEngineDir,
   vendorTlsDir,
   vendorZlibDir,
+  vendorCurlDir,
 } from "./vendor.js";
 import { nativeSourceFiles, runtimeSrcDir } from "./runtime-inputs.js";
 
@@ -51,7 +54,7 @@ interface EffectiveCompilerInvocationProbe {
  * intentionally uses a target-wide synthetic TU so it can discover every
  * owned system header, but that generic command is not sufficient identity for
  * a wrapper that injects flags or preincluded files only for a particular build
- * flavor (for example, only when it sees -O2). */
+ * flavor (for example, only when it sees -O2 or -DSCR_DYNAMIC). */
 async function effectiveCompilerInvocationFingerprintFresh(
   driver: Pick<CcDriver, "argv">,
   environmentFingerprint: string,
@@ -164,10 +167,10 @@ export function effectiveCompilerInvocationFingerprint(
  * hashes the resolved files. Runtime-local and vendored source/header bytes
  * have their own content/version identities; scanning every owned file for
  * angle includes closes the system-header gap in separately built QuickJS,
- * libregexp, mbedTLS, zlib, and Ryū translation units. */
+ * libregexp, mbedTLS, zlib, curl, and Ryū translation units. */
 export async function implicitDependencyProbeIncludes(rtDir: string): Promise<string[]> {
   const vendor = join(rtDir, "..", "vendor");
-  const quickjsSources = new Set<string>(LRE_SOURCES);
+  const quickjsSources = new Set<string>([...QJS_ENGINE_SOURCES, ...LRE_SOURCES]);
   const zlibSources = new Set<string>(ZLIB_SOURCES.map((source) => basename(source)));
   const fileGroups = await Promise.all([
     nativeSourceFiles(rtDir, false),
@@ -184,6 +187,7 @@ export async function implicitDependencyProbeIncludes(rtDir: string): Promise<st
       true,
       (name) => name.endsWith(".h") || zlibSources.has(name),
     ),
+    nativeSourceFiles(join(vendor, "curl", "include"), true, (name) => name.endsWith(".h")),
   ]);
   const includes = new Set<string>();
   for (const path of fileGroups.flat()) {
@@ -395,6 +399,8 @@ async function implicitToolchainFingerprintsFresh(
         join(vendorTlsDir(), "library"),
         "-I",
         vendorZlibDir(),
+        "-I",
+        join(vendorCurlDir(), "include"),
         "-M",
       ];
       const [dependencyResults, linker, assembler, compilerInvocation] = await Promise.all([

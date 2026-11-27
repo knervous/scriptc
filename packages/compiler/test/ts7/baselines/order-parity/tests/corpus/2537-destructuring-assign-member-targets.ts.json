@@ -1,6 +1,0 @@
-{
- "order": [
-  "<repo>/tests/corpus/2537-destructuring-assign-member-targets.ts"
- ],
- "diags": []
-}

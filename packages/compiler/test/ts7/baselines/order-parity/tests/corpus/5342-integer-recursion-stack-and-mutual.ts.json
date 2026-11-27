@@ -1,6 +1,0 @@
-{
- "order": [
-  "<repo>/tests/corpus/5342-integer-recursion-stack-and-mutual.ts"
- ],
- "diags": []
-}

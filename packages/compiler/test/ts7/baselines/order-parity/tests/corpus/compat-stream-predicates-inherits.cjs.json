@@ -1,6 +1,0 @@
-{
- "order": [
-  "<repo>/tests/corpus/compat-stream-predicates-inherits.cjs"
- ],
- "diags": []
-}

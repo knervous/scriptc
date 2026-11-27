@@ -1,5 +1,6 @@
+// This file was modified from scriptc (Apache-2.0); see MODIFICATIONS.md.
 import type { IrRegexIntrinsicMethod, IrStrIntrinsicMethod, IrType } from "./ir.js";
-import { arrayOf, BOOL, F64, REGEX, STRING, VOID } from "./ir.js";
+import { arrayOf, BOOL, DYN, F64, REGEX, STRING, VOID } from "./ir.js";
 
 /** Per-method signature for strIntrinsic: `argTypes` lists every argument
  * position (optional ones included); `minArgs` is the minimum number of required arguments
@@ -33,6 +34,7 @@ export const STR_INTRINSIC_SIGS: Record<
   toWellFormed: { argTypes: [], minArgs: 0, result: STRING },
   byteLength: { argTypes: [], minArgs: 0, result: F64 },
   cpAtByte: { argTypes: [F64], minArgs: 1, result: STRING },
+  cpAt: { argTypes: [F64], minArgs: 1, result: STRING },
 };
 
 /** Per-method signature for regexIntrinsic. test/source/flags take the
@@ -51,7 +53,9 @@ export const REGEX_INTRINSIC_SIGS: Record<
   exec: { receiver: STRING, argTypes: [REGEX], result: VOID },
   execGroups: { receiver: STRING, argTypes: [REGEX, F64], result: VOID },
   execSpans: { receiver: STRING, argTypes: [REGEX, F64, F64], result: VOID },
-  matchGroups: { receiver: STRING, argTypes: [REGEX, F64, F64], result: VOID },
+  // Upstream's native `matchGroups` (a string receiver, the regex and two capture masks) shares its name with this
+  // fork's browser-target match-result property read below; this fork's frontend emits only the latter, so its
+  // signature is the one kept (upstream's LLVM lowering of the native form stays, unreachable).
   lastIndex: { receiver: REGEX, argTypes: [], result: F64 },
   matchAll: { receiver: STRING, argTypes: [REGEX], result: arrayOf(arrayOf(STRING)) },
   matchAllCaptures: { receiver: STRING, argTypes: [REGEX], result: arrayOf(arrayOf(STRING)) },
@@ -70,6 +74,13 @@ export const REGEX_INTRINSIC_SIGS: Record<
   flags: { receiver: REGEX, argTypes: [], result: STRING },
   toString: { receiver: REGEX, argTypes: [], result: STRING },
   replace: { receiver: STRING, argTypes: [REGEX, STRING], result: STRING },
+  replaceFn: { receiver: STRING, argTypes: [REGEX, DYN], result: STRING },
+  replaceAllFn: { receiver: STRING, argTypes: [REGEX, DYN], result: STRING },
+  matchHasIndex: { receiver: arrayOf(STRING), argTypes: [], result: BOOL },
+  matchIndex: { receiver: arrayOf(STRING), argTypes: [], result: F64 },
+  matchInput: { receiver: arrayOf(STRING), argTypes: [], result: STRING },
+  matchHasGroups: { receiver: arrayOf(STRING), argTypes: [], result: BOOL },
+  matchGroups: { receiver: arrayOf(STRING), argTypes: [], result: DYN },
   replaceAll: { receiver: STRING, argTypes: [REGEX, STRING], result: STRING },
   split: { receiver: STRING, argTypes: [REGEX, F64], result: arrayOf(STRING) },
 };

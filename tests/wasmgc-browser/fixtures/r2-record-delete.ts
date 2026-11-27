@@ -1,0 +1,1 @@
+const h:any=globalThis;const r={n:1};h.auditDelete(r);

@@ -1,1 +1,0 @@
-{"name": "island-lazy-load-reads-machine", "private": true, "scriptc": {"packages": {"lazy-kit": {"run": "node", "evaluate": "lazy"}}}}

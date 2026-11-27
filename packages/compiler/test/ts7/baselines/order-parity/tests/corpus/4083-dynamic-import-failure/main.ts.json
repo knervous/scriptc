@@ -1,7 +1,0 @@
-{
- "order": [
-  "<repo>/tests/corpus/4083-dynamic-import-failure/errors.ts",
-  "<repo>/tests/corpus/4083-dynamic-import-failure/main.ts"
- ],
- "diags": []
-}

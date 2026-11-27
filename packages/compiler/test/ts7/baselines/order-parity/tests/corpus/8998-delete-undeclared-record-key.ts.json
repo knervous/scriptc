@@ -1,6 +1,0 @@
-{
- "order": [
-  "<repo>/tests/corpus/8998-delete-undeclared-record-key.ts"
- ],
- "diags": []
-}

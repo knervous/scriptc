@@ -1,6 +1,0 @@
-{
- "order": [
-  "<repo>/tests/corpus/for-of-destructuring-custom-iterable.ts"
- ],
- "diags": []
-}

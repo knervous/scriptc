@@ -1,6 +1,0 @@
-{
- "order": [
-  "<repo>/tests/corpus/6450-promise-race-never-entry.ts"
- ],
- "diags": []
-}

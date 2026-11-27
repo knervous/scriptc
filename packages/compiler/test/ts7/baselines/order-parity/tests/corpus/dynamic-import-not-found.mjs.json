@@ -1,6 +1,0 @@
-{
- "order": [
-  "<repo>/tests/corpus/dynamic-import-not-found.mjs"
- ],
- "diags": []
-}

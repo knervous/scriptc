@@ -1,6 +1,0 @@
-{
- "order": [
-  "<repo>/tests/corpus/2443-union-literal-shadow-narrowing.ts"
- ],
- "diags": []
-}

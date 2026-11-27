@@ -1,6 +1,0 @@
-{
- "order": [
-  "<repo>/tests/corpus/http2-compat-writehead-header-map.ts"
- ],
- "diags": []
-}

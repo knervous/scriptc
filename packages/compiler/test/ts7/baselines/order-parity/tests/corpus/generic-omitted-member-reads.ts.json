@@ -1,6 +1,0 @@
-{
- "order": [
-  "<repo>/tests/corpus/generic-omitted-member-reads.ts"
- ],
- "diags": []
-}

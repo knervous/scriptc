@@ -1,4 +1,9 @@
+// This file was modified from scriptc (Apache-2.0); see MODIFICATIONS.md.
 /* LlEmitter's module-level output: module parts, helper definitions, library declarations and FFI callback definitions. */
+import { deflateRawSync } from "node:zlib";
+import { LlvmUnsupportedError } from "./unsupported.js";
+import { moduleEmbedsBuiltin, moduleEmbedsCompressedNpm, moduleFetchesNatively, NPM_COMPRESS_MIN } from "../../ir/runtime-features.js";
+import { llvmBytes as llBytes } from "../literals.js";
 import { loopUnrollMetadata } from "./periodic-guards.js";
 import { relieveHeapPressure } from "../../heap-pressure.js";
 import { emitWasmModules } from "./wasm-modules.js";
@@ -68,7 +73,6 @@ import {
 } from "./common.js";
 import { literalCapWord, literalCapWord32 } from "./string-key-hash.js";
 import { hasLoneSurrogate, llvmBytes, wtf8Bytes } from "../literals.js";
-import { nodeIslandManifest } from "../../node-islands/modules.js";
 import { undefinedArmTag } from "../../ir/analysis.js";
 import { NULLABLE_ABSENT, NULLABLE_NULL } from "./nullable-unions.js";
 import {
@@ -507,26 +511,54 @@ function writeDefinitions(
 export function emitModuleParts(emitter: LlEmitter): string[] {
   // Function bodies first (the literal/unit/fn-value tables fill as they
   // emit), then the file assembles around them — the runtime ABI’s order.
+  // SCRIPTC_LLVM_COLLECT_UNSUPPORTED=1 (a census, never a build): every function's first unsupported construct is
+  // collected and the compile then fails once, listing them all, instead of stopping at the first. It emits in order.
+  const collect = process.env["SCRIPTC_LLVM_COLLECT_UNSUPPORTED"] === "1" ? new Map<string, string[]>() : null;
   const chunks = emitter.targetOptions.functionChunks ?? 1;
   const fnDefs =
-    (chunks > 1 ? emitFunctionsInChunks(emitter, chunks) : null) ??
-    emitFunctionsOnWorkers(emitter, emitter.targetOptions.functionWorkers ?? 1) ??
-    [];
-  if (fnDefs.length === 0)
-    for (const fn of emitter.mod.functions) {
+    (collect !== null
+      ? null
+      : ((chunks > 1 ? emitFunctionsInChunks(emitter, chunks) : null) ??
+        emitFunctionsOnWorkers(emitter, emitter.targetOptions.functionWorkers ?? 1))) ?? [];
+  if (fnDefs.length === 0) {
+    const emitOne = (fn: IrFunction): void => {
       const def = emitter.emitFunction(fn);
       fnDefs.push(def);
       emitter.fnDefText.set(fn.name, def);
       relieveHeapPressure();
+    };
+    for (const fn of emitter.mod.functions) {
+      if (!collect) {
+        emitOne(fn);
+        continue;
+      }
+      try {
+        emitOne(fn);
+      } catch (err) {
+        if (!(err instanceof Error)) throw err;
+        // Internal errors count too: WasmGC-only constructs reach this backend for the first time under native-any.
+        const kind = err instanceof LlvmUnsupportedError ? err.kind : `internal: ${err.message.split("\n")[0]!.slice(0, 120)}`;
+        // SCRIPTC_LLVM_COLLECT_STACK=<kind> prints where that kind was refused (the census names only the function).
+        if (process.env["SCRIPTC_LLVM_COLLECT_STACK"] === kind) console.error(`census stack ${fn.name}:`, err.stack);
+        const at = `${fn.name}${fn.loc?.file ? ` (${fn.loc.file.split("/src/").pop()})` : ""}`;
+        const sites = collect.get(kind) ?? [];
+        sites.push(at);
+        collect.set(kind, sites);
+      }
     }
+    if (collect && collect.size) {
+      const lines = [...collect].sort((a, b) => b[1].length - a[1].length).map(([kind, sites]) => `${kind} x${sites.length}: ${sites.slice(0, 4).join(", ")}`);
+      throw new LlvmUnsupportedError(`census of ${collect.size} kinds:\n${lines.join("\n")}`);
+    }
+  }
   emitter.selectStacklessAsync(fnDefs);
   const errorViews: string[] = [];
-  for (const property of ERROR_READER_PROPERTIES) {
-    const reader = errorReaderName(property);
-    if (emitter.mod.functions.some((fn) => fn.name === reader)) {
-      emitter.declare(`declare void @scr_error_install_${property}_reader(ptr)`);
+  for (const property of ["name", "message"]) {
+    if (emitter.mod.functions.some((fn) => fn.name === `%error.${property}.read`)) {
+      // The reader answers a dyn (lowering's %error.<property>.read): the runtime takes it to a string itself.
+      emitter.declare(`declare void @scr_error_install_${property}_view(ptr)`);
       errorViews.push(
-        `  call void @scr_error_install_${property}_reader(ptr @${mangleFunction(reader)})`,
+        `  call void @scr_error_install_${property}_view(ptr @${mangleFunction(`%error.${property}.read`)})`,
       );
     }
   }
@@ -575,6 +607,22 @@ export function emitModuleParts(emitter: LlEmitter): string[] {
   const hasNoInlineRecordClone = [...emitter.recordCloneShapes].some(
     (shapeId) => (emitter.recordsById.get(shapeId)?.fields.length ?? 0) >= 16,
   );
+  const embedded = emitter.mod.embedded;
+  const usesIsland = embedded !== undefined && embedded.modules.length > 0;
+  const storeNpmText = (text: string): { bytes: Buffer; raw: number } => {
+    const plain = Buffer.from(text, "utf8");
+    if (text.length < NPM_COMPRESS_MIN) return { bytes: plain, raw: 0 };
+    const deflated = deflateRawSync(plain, { level: 9 });
+    return deflated.length < plain.length
+      ? { bytes: deflated, raw: plain.length }
+      : { bytes: plain, raw: 0 };
+  };
+  const npmStored = usesIsland
+    ? embedded.modules.map((m) => ({
+        src: storeNpmText(m.source),
+        esm: m.esm === undefined ? null : storeNpmText(m.esm),
+      }))
+    : [];
 
   // Module globals, FIRST OCCURRENCE per id: a class-expression static
   // instantiated through several mixin applications registers one global
@@ -664,9 +712,17 @@ export function emitModuleParts(emitter: LlEmitter): string[] {
   const usesDnsResolve = runtimeFeatures.dnsResolve;
   const usesHttp2 = runtimeFeatures.http2;
   const usesHttp = runtimeFeatures.http;
-  // Fetch-referencing programs register native fetch before main.
-  // Runtime selection compiles scr_fetch.c on the same predicate.
-  const usesFetch = runtimeFeatures.fetch;
+  // Fetch-referencing programs register the native fetch bridge before
+  // any island entry (the engine's lazy boot consults it) — native/executable.ts
+  // compiles scr_fetch.c on the same predicate.
+  // On the host island the page's fetch is the host's: only a static fetch installs the runtime's.
+  const usesFetch = emitter.hostIsland ? moduleFetchesNatively(emitter.mod) : runtimeFeatures.fetch;
+  const embedsZlib = moduleEmbedsBuiltin(emitter.mod, "node:zlib");
+  const embedsNet =
+    moduleEmbedsBuiltin(emitter.mod, "node:http") ||
+    moduleEmbedsBuiltin(emitter.mod, "node:https") ||
+    moduleEmbedsBuiltin(emitter.mod, "node:net") ||
+    moduleEmbedsBuiltin(emitter.mod, "node:tls");
   const usesAsyncHooks = runtimeFeatures.asyncHooks;
   // URL programs give the host parser the IDNA unit's ToASCII.
   const usesUrlIdna = runtimeFeatures.urlIdna;
@@ -688,11 +744,16 @@ export function emitModuleParts(emitter: LlEmitter): string[] {
   // Programs that read Symbol.toPrimitive install ToNumber's
   // Symbol.toPrimitive step; the others do not link it.
   const usesToPrimitiveNumber = runtimeFeatures.toPrimitiveNumber;
-  const snapshotsTlsCa = runtimeFeatures.tls || runtimeFeatures.tlsCa;
+  const snapshotsTlsCa =
+    runtimeFeatures.tls ||
+    runtimeFeatures.tlsCa ||
+    moduleEmbedsBuiltin(emitter.mod, "node:https") ||
+    moduleEmbedsBuiltin(emitter.mod, "node:tls");
   // The process verdict has the same precedence as the C reference
   // emitter: node:test owns the final status when present; otherwise an
   // embedded process.exitCode owns it; ordinary programs return zero.
   const usesNodeTest = runtimeFeatures.nodeTest;
+  const programExitUsesIsland = !usesNodeTest && usesIsland;
   /* The entry file path the runner's tracing events carry, interned here so
    * the string constant exists before the globals are written. */
   const testEntryPtr = usesNodeTest ? emitter.cstr(emitter.mod.sourceFile) : "";
@@ -760,6 +821,21 @@ export function emitModuleParts(emitter: LlEmitter): string[] {
   if (usesHttp2) emitter.declare(`declare void @scr_http2_dyn_install()`);
   if (usesHttp) emitter.declare(`declare void @scr_http_dyn_install()`);
   if (usesFetch) emitter.declare(`declare void @scr_fetch_install()`);
+  if (embedsZlib) emitter.declare(`declare void @scr_zlib_island_install()`);
+  if (embedsNet) emitter.declare(`declare void @scr_net_island_install()`);
+  if (usesIsland) {
+    emitter.declare(
+      `declare void @scr_island_modules(ptr, ${emitter.sizeType}, ptr, ${emitter.sizeType})`,
+    );
+    emitter.declare(`declare void @scr_island_entry_module(ptr)`);
+    emitter.declare(`declare i32 @scr_island_exit_code()`);
+    if (moduleEmbedsCompressedNpm(emitter.mod)) {
+      emitter.declare(`declare void @scr_island_set_inflate(ptr)`);
+      emitter.declare(
+        `declare zeroext i1 @scr_zlib_inflate_exact(ptr, ${emitter.sizeType}, ptr, ${emitter.sizeType})`,
+      );
+    }
+  }
   if (usesAsyncHooks) emitter.declare(`declare void @scr_async_hooks_install()`);
   if (usesUrlIdna) emitter.declare(`declare void @scr_url_idna_install()`);
   if (usesDynBufferMembers) emitter.declare(`declare void @scr_bytes_buffer_members_install()`);
@@ -823,11 +899,16 @@ export function emitModuleParts(emitter: LlEmitter): string[] {
   // the loop too: its exit accounting notes still-suspended generator
   // fibers as abandoned, so the RC audit downgrades exactly like the
   // async loop-exhaustion story.
+  // An entry that returns without the loop (nativeEntry.runsLoop false: a piece sharing its thread's loop with a
+  // later entry) runs its top-level code only, and leaves its globals alive for the callbacks it registered.
+  const entryOnly = emitter.nativeEntry !== null && !emitter.nativeEntry.runsLoop;
   const runsLoop =
-    emitter.usesTimers ||
-    emitter.usesPromises ||
-    emitter.ffiHasForeignCallback ||
-    emitter.mod.functions.some((f) => f.async === true || f.generator !== undefined);
+    !entryOnly &&
+    (emitter.usesTimers ||
+      emitter.usesPromises ||
+      usesIsland ||
+      emitter.ffiHasForeignCallback ||
+      emitter.mod.functions.some((f) => f.async === true || f.generator !== undefined));
   const uncaughtReleases = entryMayThrow && !asyncEntry ? exitReleaseLines("gu") : [];
   const loopReleasesU = runsLoop ? exitReleaseLines("gl") : [];
   const loopReleasesR = runsLoop ? exitReleaseLines("gr") : [];
@@ -839,6 +920,17 @@ export function emitModuleParts(emitter: LlEmitter): string[] {
   // the out-of-line scr_exc_pending call; per-call checks inline the
   // test (pendingTestLines).
   if (entryMayThrow || runsLoop) emitter.declare(`declare zeroext i1 @scr_exc_pending()`);
+  // The native export wrappers (emitted after the extern block flushes): their runtime calls, declared here.
+  if (emitter.nativeExports.some((ex) => ex.params.includes("bytes"))) emitter.declare(`declare ptr @scr_bytes_from_data(ptr, ${emitter.sizeType})`);
+  if (emitter.nativeExports.some((ex) => ex.params.includes("mutable-bytes"))) emitter.declare(`declare ptr @scr_bytes_from_external(ptr, ${emitter.sizeType})`);
+  if (emitter.nativeExports.some((ex) => emitter.mayThrow.has(ex.name))) {
+    emitter.declare(`declare zeroext i1 @scr_exc_pending()`);
+    // main's epilogue declares these two inline when it may throw or runs the loop.
+    if (!(entryMayThrow || runsLoop)) {
+      emitter.declare(`declare zeroext i1 @scr_exc_handle_uncaught(i1 zeroext)`);
+      emitter.declare(`declare void @scr_exc_print_uncaught()`);
+    }
+  }
   // A synchronous program that reads the loop milestones marks the loop's
   // start and end around its exit listeners (main's epilogue below); a
   // program that runs the loop marks the start before it and the loop's
@@ -859,22 +951,43 @@ export function emitModuleParts(emitter: LlEmitter): string[] {
     emitter.declare(`declare void @scr_promise_rethrow_top_level(ptr)`);
     emitter.declare(`declare void @scr_promise_release(ptr)`);
     emitter.declare(`declare void @scr_exit_code_note(i32)`);
+    if (programExitUsesIsland && inlineExitListeners) {
+      emitter.declare(`declare ${emitter.sizeType} @scr_island_exit_code_version()`);
+    }
   }
   const topPendingExitLines = (): string[] => {
     if (!asyncEntry) return [];
     const lines: string[] = [];
     // finish_top_level noted 13 unless the program set process.exitCode.
-    // A failed node:test run outranks either before exit listeners run.
-    if (usesNodeTest) {
+    // A failed node:test run (or, with the island, the engine's exit code) outranks either before exit
+    // listeners run.
+    if (usesNodeTest || usesIsland) {
       lines.push(
-        `  %tla_program_exit = call i32 @scr_test_exit_code()`,
+        `  %tla_program_exit = call i32 @${usesNodeTest ? "scr_test_exit_code" : "scr_island_exit_code"}()`,
         `  %tla_program_exit_zero = icmp eq i32 %tla_program_exit, 0`,
         `  %tla_hint = call i32 @scr_exit_code_hint_get()`,
         `  %tla_exit_status = select i1 %tla_program_exit_zero, i32 %tla_hint, i32 %tla_program_exit`,
         `  call void @scr_exit_code_note(i32 %tla_exit_status)`,
       );
     }
+    const tracksIslandExit = programExitUsesIsland && inlineExitListeners;
+    if (tracksIslandExit) {
+      lines.push(`  %tla_exit_version = call ${emitter.sizeType} @scr_island_exit_code_version()`);
+    }
     for (const line of exitListenerLines("xp")) lines.push(line);
+    if (tracksIslandExit) {
+      // An island exit listener that set the engine's process.exitCode notes it as the hint.
+      lines.push(
+        `  %tla_exit_version_after = call ${emitter.sizeType} @scr_island_exit_code_version()`,
+        `  %tla_exit_changed = icmp ne ${emitter.sizeType} %tla_exit_version_after, %tla_exit_version`,
+        `  br i1 %tla_exit_changed, label %tla_exit_updated, label %tla_exit_done`,
+        `tla_exit_updated:`,
+        `  %tla_listener_exit = call i32 @scr_island_exit_code()`,
+        `  call void @scr_exit_code_note(i32 %tla_listener_exit)`,
+        `  br label %tla_exit_done`,
+        `tla_exit_done:`,
+      );
+    }
     for (const line of topPendingReleases) lines.push(line);
     // An exit listener may set process.exitCode again, as in Node.
     lines.push(`  %tla_exit_code = call i32 @scr_exit_code_hint_get()`, `  ret i32 %tla_exit_code`);
@@ -1335,11 +1448,68 @@ export function emitModuleParts(emitter: LlEmitter): string[] {
     );
   }
   if (emitter.templateStringsInstances.size > 0) out.push(``);
+  const islandEntryPath = usesIsland ? emitter.cstr(emitter.mod.sourceFile) : null;
   for (const [text, c] of emitter.cstrs) {
     // NUL-terminated byte-array constants for scr_jb_puts and indentation.
     out.push(`@${c.sym} = internal constant [${c.len + 1} x i8] c"${llStrBytes(text)}"`);
   }
   if (emitter.cstrs.size > 0) out.push(``);
+  if (usesIsland) {
+    const fmt = { esm: 0, cjs: 1, json: 2 } as const;
+    const edgeKind = { any: 0, import: 1, require: 2 } as const;
+    embedded.modules.forEach((m, i) => {
+      const stored = npmStored[i]!;
+      const key = Buffer.from(m.key, "utf8");
+      out.push(
+        `@sc_npm_key_${i} = internal constant [${key.length + 1} x i8] c"${llBytes(key)}"`,
+        `@sc_npm_src_${i} = internal constant [${stored.src.bytes.length + 1} x i8] c"${llBytes(stored.src.bytes)}"`,
+      );
+      if (stored.esm !== null) {
+        out.push(
+          `@sc_npm_esm_${i} = internal constant [${stored.esm.bytes.length + 1} x i8] c"${llBytes(stored.esm.bytes)}"`,
+        );
+      }
+    });
+    const moduleRows = embedded.modules.map((m, i) => {
+      const stored = npmStored[i]!;
+      const esm =
+        stored.esm === null
+          ? `ptr null, ${emitter.sizeType} 0, ${emitter.sizeType} 0`
+          : `ptr @sc_npm_esm_${i}, ${emitter.sizeType} ${stored.esm.bytes.length}, ${emitter.sizeType} ${stored.esm.raw}`;
+      return (
+        `%ScrIslandModule { ptr @sc_npm_key_${i}, ptr @sc_npm_src_${i}, ` +
+        `${emitter.sizeType} ${stored.src.bytes.length}, ${emitter.sizeType} ${stored.src.raw}, ` +
+        `i32 ${fmt[m.format]}, ${esm} }`
+      );
+    });
+    out.push(
+      `@sc_npm_modules = internal constant [${moduleRows.length} x %ScrIslandModule] [ ${moduleRows.join(", ")} ]`,
+    );
+    embedded.edges.forEach((edge, i) => {
+      const parts: [string, string][] = [
+        ["from", edge.from],
+        ["spec", edge.specifier],
+        ["to", edge.to],
+      ];
+      for (const [part, text] of parts) {
+        const bytes = Buffer.from(text, "utf8");
+        out.push(
+          `@sc_npm_edge_${i}_${part} = internal constant [${bytes.length + 1} x i8] c"${llBytes(bytes)}"`,
+        );
+      }
+    });
+    if (embedded.edges.length > 0) {
+      const edgeRows = embedded.edges.map(
+        (edge, i) =>
+          `%ScrIslandEdge { ptr @sc_npm_edge_${i}_from, ptr @sc_npm_edge_${i}_spec, ` +
+          `ptr @sc_npm_edge_${i}_to, i32 ${edgeKind[edge.kind]} }`,
+      );
+      out.push(
+        `@sc_npm_edges = internal constant [${edgeRows.length} x %ScrIslandEdge] [ ${edgeRows.join(", ")} ]`,
+      );
+    }
+    out.push(``);
+  }
   for (const [body, sym] of emitter.mapOpsConsts) {
     // A ScrMapOps, or a ScrMapIdentityOps (promise keys) with one more field.
     const fields = body
@@ -1439,6 +1609,20 @@ export function emitModuleParts(emitter: LlEmitter): string[] {
       );
     }
   }
+  // The runtime's AggregateError (8), AssertionError (9) and SuppressedError (10) kinds have no class in this
+  // fork's table (ir.ts RUNTIME_ERROR_CLASSES): their instances take Error's position, so they answer
+  // `instanceof Error` and no other class test.
+  const errorRoot = emitter.errorIntervals.find((iv) => iv.kind === 0);
+  if (errorRoot !== undefined) {
+    for (const kind of [8, 9, 10]) {
+      for (const field of [0, 1]) {
+        stamps.push(
+          // Past the declared array (the runtime's table is longer): not inbounds of the declared type.
+          `  store ${emitter.sizeType} ${errorRoot.pre}, ptr getelementptr (%ScrVt, ptr @scr_error_vts, i64 ${kind}, i32 ${field})`,
+        );
+      }
+    }
+  }
   if (emitter.emitterInterval !== null) {
     // The runtime emitter vtable's interval (emitterVtStampLines): bare
     // EventEmitter instances answer instanceof and dispatch dynamic
@@ -1502,8 +1686,9 @@ export function emitModuleParts(emitter: LlEmitter): string[] {
   }
   if (emitter.abortFrames) out.push(...abortFramesDefinition(FN_ATTRS));
   const entryStart = out.length;
-  out.push(
-    `define i32 @${emitter.mod.workers ? "sc_context_entry" : emitter.wasi ? "__main_argc_argv" : "main"}(i32 %argc, ptr %argv) ${FN_ATTRS} {`,
+  // Element by element: the program's stamps and global releases can outnumber a call's argument limit.
+  for (const line of [
+    `define i32 @${emitter.nativeEntry?.symbol ?? (emitter.mod.workers ? "sc_context_entry" : emitter.wasi ? "__main_argc_argv" : "main")}(i32 %argc, ptr %argv) ${FN_ATTRS} {`,
     `entry:`,
     ...(emitter.runtimeAbiMarker ? [`  call void @${RUNTIME_ABI_MARKER}()`] : []),
     ...(emitter.cpuDispatch && !emitter.mod.workers ? [CPU_LEVEL_INIT_CALL] : []),
@@ -1558,6 +1743,8 @@ export function emitModuleParts(emitter: LlEmitter): string[] {
     ...(emitter.ffiHasForeignCallback ? [`  call void @scr_ffi_install()`] : []),
     ...(snapshotsTlsCa ? [`  call void @scr_tls_ca_install()`] : []),
     ...(usesFetch ? [`  call void @scr_fetch_install()`] : []),
+    ...(embedsZlib ? [`  call void @scr_zlib_island_install()`] : []),
+    ...(embedsNet ? [`  call void @scr_net_island_install()`] : []),
     ...(usesAsyncHooks ? [`  call void @scr_async_hooks_install()`] : []),
     ...(usesUrlIdna ? [`  call void @scr_url_idna_install()`] : []),
     ...(usesDynBufferMembers ? [`  call void @scr_bytes_buffer_members_install()`] : []),
@@ -1571,6 +1758,16 @@ export function emitModuleParts(emitter: LlEmitter): string[] {
     ...(usesHttp2 ? [`  call void @scr_http2_dyn_install()`] : []),
     ...(usesStream ? [`  call void @scr_stream_install()`] : []),
     `  call void @scr_lib_init(i32 %argc, ptr %argv)`,
+    ...(usesIsland
+      ? [
+          `  call void @scr_island_entry_module(ptr ${islandEntryPath})`,
+          ...(moduleEmbedsCompressedNpm(emitter.mod)
+            ? [`  call void @scr_island_set_inflate(ptr @scr_zlib_inflate_exact)`]
+            : []),
+          `  call void @scr_island_modules(ptr @sc_npm_modules, ${emitter.sizeType} ${embedded.modules.length}, ` +
+            `ptr ${embedded.edges.length > 0 ? "@sc_npm_edges" : "null"}, ${emitter.sizeType} ${embedded.edges.length})`,
+        ]
+      : []),
     // node:test takes Node's runtime options (the snapshot update flag and
     // the reporter options) out of argv first.
     ...(usesNodeTest ? [`  call void @scr_test_init(ptr ${testEntryPtr})`] : []),
@@ -1671,17 +1868,21 @@ export function emitModuleParts(emitter: LlEmitter): string[] {
     // stops before a normal exit's listeners do, so the milestones read there
     // are set. An exit from inside the body (process.exit, an uncaught throw)
     // returns through another epilogue and leaves them at -1, as Node does.
-    ...(emitter.readsLoopMetrics() && !runsLoop
+    ...(!entryOnly && emitter.readsLoopMetrics() && !runsLoop
       ? [`  call void @scr_perf_loop_mark()`, `  call void @scr_perf_loop_end()`]
       : []),
-    ...exitListenerLines("xn"),
-    ...globalReleases,
-    ...(usesNodeTest
+    ...(entryOnly ? [`  ret i32 0`] : []),
+    ...(entryOnly ? [] : exitListenerLines("xn")),
+    ...(entryOnly ? [] : globalReleases),
+    ...(entryOnly ? [] : usesNodeTest
       ? [`  %test_exit = call i32 @scr_test_exit_code()`, `  ret i32 %test_exit`]
-      : [`  %native_exit = call i32 @scr_exit_code_hint_get()`, `  ret i32 %native_exit`]),
+      : usesIsland
+        ? [`  %island_exit = call i32 @scr_island_exit_code()`, `  ret i32 %island_exit`]
+        : [`  %native_exit = call i32 @scr_exit_code_hint_get()`, `  ret i32 %native_exit`]),
     `}`,
     ``,
-  );
+  ]) out.push(line);
+  for (const line of emitter.nativeExportDefs()) out.push(line);
   // Inline RC helpers are emitted here rather than with the other helpers;
   // the start-up section claims them with the rest of the text appended after
   // the listed definitions (below).
@@ -3209,4 +3410,13 @@ export function emitParts(emitter: LlEmitter): string[] {
         "$1thread_local(localexec) global ",
       ),
   );
+}
+
+/** The island module tree's manifest (upstream's node-islands/modules.ts, which builds on its newer frontend and
+ * is not part of this fork; the fork's frontend lowers no Node-island calls). */
+function nodeIslandManifest(modules: IrNodeIslandModules): string {
+  return JSON.stringify({
+    files: modules.files.map((file) => [file.path, file.size, file.sha256]),
+    links: modules.links.map((link) => [link.path, link.target]),
+  });
 }

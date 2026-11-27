@@ -1,5 +1,0 @@
-{
-  "type": "module",
-  "name": "@corpus/fpj",
-  "exports": { ".": "./main.ts" }
-}

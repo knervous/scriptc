@@ -1,6 +1,0 @@
-{
- "order": [
-  "<repo>/tests/corpus/perf-loop-metrics-exit-in-body.ts"
- ],
- "diags": []
-}

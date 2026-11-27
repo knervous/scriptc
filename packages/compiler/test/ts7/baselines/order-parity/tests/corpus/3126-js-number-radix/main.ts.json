@@ -1,7 +1,0 @@
-{
- "order": [
-  "<repo>/tests/corpus/3126-js-number-radix/format.js",
-  "<repo>/tests/corpus/3126-js-number-radix/main.ts"
- ],
- "diags": []
-}

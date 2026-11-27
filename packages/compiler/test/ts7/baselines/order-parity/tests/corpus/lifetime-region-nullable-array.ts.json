@@ -1,6 +1,0 @@
-{
- "order": [
-  "<repo>/tests/corpus/lifetime-region-nullable-array.ts"
- ],
- "diags": []
-}

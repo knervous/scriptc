@@ -1,0 +1,44 @@
+var log = [];
+const show = (label, f) => { try { log.push(label + "=" + JSON.stringify(f())); } catch (e) { log.push(label + "!" + (e instanceof TypeError ? "TypeError" : e instanceof RangeError ? "RangeError" : String(e))); } };
+const from = Array.from;
+show("set", () => from(new Set([1, 2, 2, 3])));
+show("map", () => from(new Map([[1, "a"]])));
+show("str", () => from("a😀b"));
+show("arr-holes", () => from([1, , 3]));
+show("mapfn", () => from([1, 2, 3], (x, i) => x * 10 + i));
+show("mapfn-args", () => from([5], function (...a) { return a.length + ":" + typeof this; }));
+show("thisArg", () => from([1, 2], function (x) { return this.k + x; }, { k: 100 }));
+show("mapfn-arrow-this", () => from([1], () => typeof undefined, { k: 1 }));
+show("bad-mapfn", () => from([1], 5 ));
+show("bad-mapfn-null", () => from([1], null ));
+show("bad-mapfn-before-iter", () => from(undefined , 5 ));
+show("null", () => from(null ));
+show("undefined", () => from(undefined ));
+show("number", () => from(5 ));
+show("bool", () => from(true ));
+show("arraylike", () => from({ length: 3, 0: "a", 1: "b", 2: "c" } ));
+show("arraylike-sparse", () => from({ length: 3, 1: "x" } ));
+show("len-frac", () => from({ length: 2.9, 0: 1, 1: 2, 2: 3 } ));
+show("len-neg", () => from({ length: -5 } ));
+show("len-nan", () => from({ length: NaN, 0: 1 } ));
+show("len-str", () => from({ length: "2", 0: 1, 1: 2 } ));
+show("len-undef", () => from({ 0: 1 } ));
+show("len-getter-order", () => { const seen = []; const o= { get length() { seen.push("length"); return 2; }, get 0() { seen.push("0"); return "a"; }, get 1() { seen.push("1"); return "b"; } }; const r = from(o, (x) => { seen.push("map" + x); return x; }); return [r, seen]; });
+show("arraylike-map", () => from({ length: 2, 0: 1, 1: 2 } , (x, i) => x + i));
+let closed = 0;
+const closing= { [Symbol.iterator]() { let i = 0; return { next: () => ({ value: ++i, done: i > 5 }), return() { closed++; return {}; } }; } };
+show("close-on-throw", () => from(closing, (x) => { if (x === 2) throw new RangeError("stop"); return x; }));
+log.push("closed=" + closed);
+show("no-close-on-done", () => from(closing));
+log.push("closed=" + closed);
+show("iter-next-nonobject", () => from({ [Symbol.iterator]() { return { next: () => 5 }; } } ));
+show("iter-nonobject", () => from({ [Symbol.iterator]() { return 5; } } ));
+show("iter-null-method-arraylike", () => from({ [Symbol.iterator]: null, length: 1, 0: "z" } ));
+show("iter-undefined-method-arraylike", () => from({ [Symbol.iterator]: undefined, length: 1, 0: "z" } ));
+show("iter-not-callable", () => from({ [Symbol.iterator]: 5 } ));
+show("sparse-result", () => { const r = from({ length: 3 } ); return [r.length, 0 in r, r[0]]; });
+show("is-array", () => Array.isArray(from("ab")));
+show("of", () => Array.of(1, 2, 3));
+
+
+export function run() { return log.join("\n"); }

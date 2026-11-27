@@ -1,3 +1,4 @@
+// This file was modified from scriptc (Apache-2.0); see MODIFICATIONS.md.
 /* scriptc runtime — JSON parsing and the JSON output buffer (scr_json.c).
  * Included by scr_runtime.h, which says where new declarations go. */
 #ifndef SCR_JSON_H
@@ -192,6 +193,12 @@ void scr_jb_put_number(ScrJsonBuf *b, double v);
  * as \u00XX, lone surrogates as \udXXX, everything else (UTF-8 included)
  * verbatim — exactly the JS JSON.stringify escape set. */
 void scr_jb_put_json_str(ScrJsonBuf *b, const ScrStr *s);
+/* String(v) of a JSVAL node appended into b (the emitted sc_ds display
+ * walkers' arm; scr_dyn_display/to_string route here too): the engine's
+ * ToString. A bridged failure (throwing user toString, a symbol) leaves
+ * the exception PENDING and appends nothing — the loud path, never a
+ * fabricated rendering. */
+void scr_dyn_isl_tostr_buf(ScrJsonBuf *b, const ScrDyn *d);
 /* JSON.stringify of a Date object: toJSON()'s ISO text, null if invalid
  * (scr_lib.c). */
 typedef struct ScrDate ScrDate;

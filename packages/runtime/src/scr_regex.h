@@ -1,3 +1,4 @@
+// This file was modified from scriptc (Apache-2.0); see MODIFICATIONS.md.
 /* scriptc runtime — regular expressions (scr_regex.c). Included by
  * scr_runtime.h, which says where new declarations go. */
 #ifndef SCR_REGEX_H
@@ -5,6 +6,24 @@
 
 #include "scr_array.h"
 
+/* ── regular expressions (scr_regex.c — linked ONLY when the program
+ * contains a regex literal; see native-toolchain.ts) ────────────────────────────────
+ * The engine is quickjs-ng's libregexp (the same bytecode interpreter the
+ * dynamic island uses), compiled standalone. Each regex literal evaluation
+ * creates a fresh refcounted instance sharing an immortal template per
+ * (pattern, flags) pair. Template bytecode compiles lazily on first use
+ * and is freed at exit; constructed regexes own their bytecode.
+ * Subjects are matched as UTF-16 (converted per call from the UTF-8
+ * storage), so all observable index behavior is UTF-16-exact like Node.
+ *
+ * Global and sticky regexes carry numeric lastIndex. Exec/test update it
+ * after matching; String methods apply their specified state rules.
+ *
+ * Ownership: subjects/replacements are BORROWED; string/array results
+ * return +1. replace_all without /g THROWS a catchable TypeError
+ * (callers are compiler-emitted pending
+ * checks); every other failure mode aborts.
+ */
 typedef int32_t (*ScrRegexMatcherFn)(const uint8_t *s, int32_t len, int32_t start,
                                      uint8_t **capture);
 

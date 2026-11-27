@@ -1,3 +1,4 @@
+// This file was modified from scriptc (Apache-2.0); see MODIFICATIONS.md.
 import type { DynamicFieldStores } from "../ir/int32-slots.js";
 import type { IrModule, IrType } from "../ir/ir.js";
 import {
@@ -81,7 +82,7 @@ export function computeCyclic(
 export type IntrinsicKind =
   | "func"
   | "dyn"
-  | "jsval"
+  | "jsword"
   | "classval"
   | "promise"
   | "caught"
@@ -332,7 +333,7 @@ function analyzeCycles(
     switch (t.kind) {
       case "func":
       case "dyn":
-      case "jsval":
+      case "jsword":
       case "classval":
       case "promise":
       case "caught":

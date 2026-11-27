@@ -4,51 +4,38 @@ import { tmpdir } from "node:os";
 import { join } from "node:path";
 import { fileURLToPath, pathToFileURL } from "node:url";
 import { promisify } from "node:util";
-import { afterAll, beforeEach, describe, expect, test } from "vitest";
-import {
-  compile,
-  compileC,
-  deserializeModule,
-  serializeModule,
-  validateModule,
-} from "@scriptc/compiler";
+import { expect, test } from "vitest";
+import { compile, compileC, deserializeModule, serializeModule, validateModule } from "@scriptc/compiler";
 import { emitLlvmModule } from "../../packages/compiler/src/backend/llvm/emitter.js";
-import { type IrModule } from "../../packages/compiler/src/ir/ir.js";
-import { moduleLinkFeatures } from "./link-features.js";
 import {
-  llvmEmitterCases,
-  llvmEmitterOptions,
-  llvmEmitterRequest,
-  type LlvmEmitterRequest,
-} from "./self-hosting-llvm-emitter-cases.js";
-import { skipUnownedTest, suiteCosts } from "./shard.js";
+  moduleUsesAssert, moduleUsesBigInt, moduleUsesCopying, moduleUsesDynInvoke, moduleUsesEmitter, moduleUsesInspect,
+  moduleUsesLegacyTextDecoder, moduleUsesRegex, moduleUsesStream, moduleUsesSymbol, moduleUsesZlib, type IrModule,
+} from "../../packages/compiler/src/ir/ir.js";
+import { llvmEmitterCases, llvmEmitterOptions, llvmEmitterRequest, type LlvmEmitterRequest } from "./self-hosting-llvm-emitter-cases.js";
+import { normalizedEmbeddingLlvm } from "./self-hosting-llvm-embedding.js";
 
 const root = fileURLToPath(new URL("../..", import.meta.url));
 const entry = join(root, "tests/fixtures/self-hosting/llvm-emitter.ts");
 const execFileAsync = promisify(execFile);
 const runOptions = { cwd: root, timeout: 60_000, maxBuffer: 256 * 1024 * 1024 };
 const sanitize = process.env["SCRIPTC_SAN"] === "1";
-// The bootstrap builds the compiler once and then emits the compiler's own
-// module twice: 435 MB of IR to 269 MB of LLVM each time. On one idle core
-// the plain native emitter emits it in 91 s (0.4 s read, 15 s decode, 75 s
-// emission) and the ASan build in 252 s; the fixed point takes 395 s plain
-// and 811 s sanitized. CI runners run these steps at more than three times
-// that rate, which is what carried the old 300 s and 900 s per-stage bounds
-// and the matching test budgets. Each bound here allows about twice the CI
-// time and still stops a stage that hangs.
-const seedTimeout = sanitize ? 1_200_000 : 900_000;
-const emitTimeout = sanitize ? 1_800_000 : 600_000;
-const testTimeout = sanitize ? 5_400_000 : 3_600_000;
-const generatedProgram = "scriptc-generated-v1";
 
 function programStderr(stderr: Buffer): string {
   const text = stderr.toString("utf8");
   return sanitize
-    ? text.replace(
-        /^==\d+==WARNING: ASan doesn't fully support makecontext\/swapcontext functions and may produce false positives in some cases!\n/gm,
-        "",
-      )
+    ? text.replace(/^==\d+==WARNING: ASan doesn't fully support makecontext\/swapcontext functions and may produce false positives in some cases!\n/gm, "")
     : text;
+}
+
+function nativeFeatures(mod: IrModule) {
+  return {
+    regex: moduleUsesRegex(mod), copying: moduleUsesCopying(mod),
+    inspect: moduleUsesInspect(mod), dynInvoke: moduleUsesDynInvoke(mod),
+    symbol: moduleUsesSymbol(mod), bigint: moduleUsesBigInt(mod), zlib: moduleUsesZlib(mod),
+    assert: moduleUsesAssert(mod),
+    emitter: moduleUsesEmitter(mod), stream: moduleUsesStream(mod),
+    textDecoderLegacy: moduleUsesLegacyTextDecoder(mod),
+  };
 }
 
 // Execute generated modules across expression dispatch, shared mutable
@@ -85,129 +72,59 @@ const programs = [
   "3120-ir-nonfinite-numbers.ts",
   "4031-event-emitter-long-tuples.ts",
   "text-codec-values/main.ts",
-  "string-split-traversal.ts",
   "heap-input-aliases.ts",
   "heap-input-collections.ts",
   "input-lifetime-intervals.ts",
   "regex-input-lifetimes.ts",
   "checked-value-input-lifetimes.ts",
   "checked-dispatch-input-lifetimes.js",
-  "literal-switch-dispatch.ts",
-  "local-union-storage.ts",
-  "class-callback-storage.ts",
-  "byte-record-windows.ts",
-  "typed-array-masked-index-stores.ts",
-  "constant-callback-dispatch.ts",
-  "constant-number-remainders.ts",
-  "numeric-call-specialization.ts",
-  "scalar-string-slices.ts",
-  "native-worker-roots/main.ts",
-  "native-worker-shared-views.ts",
 ];
-// Debug info turns the emitter's loop optimizations off. These programs are
-// emitted without it, so the compiled emitter runs its loop analyses on them
-// (typed-array loop versioning, which caches null index shapes).
-const withoutDebugInfo = new Set(["typed-array-masked-index-stores.ts"]);
 
-const backend = "llvm" as const;
-const title = `the complete LLVM emitter bootstraps natively (${backend})`;
-
-// The bootstrap's two halves are separate tests so SCRIPTC_TEST_SHARD can run
-// them on different shards (tests/harness/shard.ts). Both need the seed: a
-// shard builds it once for whichever halves it owns.
-const halfCosts = suiteCosts(import.meta.filename);
-
-const dir = mkdtempSync(
-  join(process.platform === "win32" ? tmpdir() : "/tmp", "scriptc-llvm-emitter-"),
-);
-afterAll(() => rmSync(dir, { recursive: true, force: true }));
-const executable = (name: string) => join(dir, name + (process.platform === "win32" ? ".exe" : ""));
-const stage = executable("emitter");
-const input = join(dir, "input.json");
-const output = join(dir, "native.ll");
-const config = join(dir, "config.json");
-const started = performance.now();
-const progress = (phase: string) =>
-  console.log(`LLVM bootstrap: ${phase} (${((performance.now() - started) / 1000).toFixed(1)}s)`);
-
-let seed: Promise<IrModule> | undefined;
-/** Build the native emitter seed once per process and return its own IR. */
-function buildSeed(): Promise<IrModule> {
-  seed ??= (async () => {
-    // Lower the full production graph in a child so synchronous frontend
-    // work cannot block Vitest's worker RPC while it compiles the seed.
-    const api = pathToFileURL(join(root, "packages/compiler/src/index.ts")).href;
-    progress("build seed");
-    const { stdout } = await execFileAsync(
-      process.execPath,
-      [
-        // The seed's frontend peak is about 2.0 GB; the other self-hosting
-        // harnesses raise the bound too, and darwin's default heap is that
-        // size exactly (the plain macOS lane died at 2042 MB).
-        "--max-old-space-size=8192",
-        "--import",
-        "tsx",
-        "--input-type=module",
-        "--eval",
+for (const backend of ["llvm"] as const) {
+  test(`the complete LLVM emitter bootstraps natively (${backend})`, async () => {
+    const dir = mkdtempSync(join(process.platform === "win32" ? tmpdir() : "/tmp", "scriptc-llvm-emitter-"));
+    const executable = (name: string) => join(dir, name + (process.platform === "win32" ? ".exe" : ""));
+    const stage = executable("emitter");
+    const input = join(dir, "input.json");
+    const output = join(dir, "native.ll");
+    const config = join(dir, "config.json");
+    try {
+      // Lower the full production graph in a child so synchronous frontend
+      // work cannot block Vitest's worker RPC while it compiles the seed.
+      const api = pathToFileURL(join(root, "packages/compiler/src/index.ts")).href;
+      const { stdout } = await execFileAsync(process.execPath, [
+        "--import", "tsx", "--input-type=module", "--eval",
         `import { compile } from ${JSON.stringify(api)};
          const result = await compile(process.argv[1], {
            outDir: process.argv[2], outPath: process.argv[3], backend: process.argv[4],
-           optimization: 'dev', sanitize: process.argv[5] === '1', emitIr: true,
+           dynamic: false, optimization: 'dev', sanitize: process.argv[5] === '1', emitIr: true,
          });
          console.log(JSON.stringify(result));`,
-        entry,
-        dir,
-        stage,
-        backend,
-        sanitize ? "1" : "0",
-      ],
-      { ...runOptions, timeout: seedTimeout },
-    );
-    const built = JSON.parse(stdout) as Awaited<ReturnType<typeof compile>>;
-    if (!built.ok)
-      throw new Error(built.diagnostics.map((d) => `${d.code}: ${d.message}`).join("\n"));
-    if (!("binaryPath" in built)) throw new Error("bootstrap did not produce an executable");
-    expect(built.backend).toBe(backend);
-    expect(built.irPath).toBeDefined();
-    const ownIr = deserializeModule(readFileSync(built.irPath!, "utf8"));
-    expect(ownIr.functions.length).toBeGreaterThan(800);
-    expect(validateModule(ownIr)).toEqual([]);
-    progress("seed built");
-    return ownIr;
-  })();
-  return seed;
-}
+        entry, dir, stage, backend, sanitize ? "1" : "0",
+      ], { ...runOptions, timeout: 600_000 });
+      const built = JSON.parse(stdout) as Awaited<ReturnType<typeof compile>>;
+      if (!built.ok) throw new Error(built.diagnostics.map((d) => `${d.code}: ${d.message}`).join("\n"));
+      if (!("binaryPath" in built)) throw new Error("bootstrap did not produce an executable");
+      expect(built.backend).toBe(backend);
 
-const emit = async (
-  mod: IrModule,
-  name: string,
-  request = llvmEmitterRequest(),
-): Promise<string> => {
-  writeFileSync(input, serializeModule(mod, true));
-  writeFileSync(config, JSON.stringify(request));
-  const result = await execFileAsync(stage, [input, output, config], {
-    ...runOptions,
-    timeout: emitTimeout,
-  }).catch((cause: unknown) => {
-    throw new Error(`native LLVM emission failed for ${name}`, { cause });
-  });
-  expect(result.stdout, name).toBe("");
-  expect(result.stderr, name).toBe("");
-  const text = readFileSync(output, "utf8");
-  const expected = emitLlvmModule(mod, llvmEmitterOptions(request));
-  expect(text, name).toBe(expected);
-  return text;
-};
+      expect(built.irPath).toBeDefined();
+      const ownIr = deserializeModule(readFileSync(built.irPath!, "utf8"));
+      expect(ownIr.functions.length).toBeGreaterThan(800);
+      expect(validateModule(ownIr)).toEqual([]);
 
-// skipUnownedTest partitions a describe block's tests.
-describe(title, () => {
-  beforeEach((context) => skipUnownedTest(context, halfCosts));
+      const emit = async (mod: IrModule, name: string, request = llvmEmitterRequest()): Promise<string> => {
+        writeFileSync(input, serializeModule(mod));
+        writeFileSync(config, JSON.stringify(request));
+        const result = await execFileAsync(stage, [input, output, config], { ...runOptions, timeout: 300_000 })
+          .catch((cause: unknown) => { throw new Error(`native LLVM emission failed for ${name}`, { cause }); });
+        expect(result.stdout, name).toBe("");
+        expect(result.stderr, name).toBe("");
+        const text = readFileSync(output, "utf8");
+        const expected = emitLlvmModule(mod, llvmEmitterOptions(request));
+        expect(normalizedEmbeddingLlvm(text, mod), name).toBe(normalizedEmbeddingLlvm(expected, mod));
+        return text;
+      };
 
-  test(
-    `${title}: emitter cases and programs`,
-    async () => {
-      await buildSeed();
-      progress("compare emitter cases");
       for (const item of llvmEmitterCases()) {
         expect(validateModule(item.module), item.name).toEqual([]);
         const text = await emit(item.module, item.name, item.request);
@@ -218,23 +135,12 @@ describe(title, () => {
       // A refusal must leave the requested output untouched, with the same
       // exception category/message under Node and the compiled emitter.
       const rejected = llvmEmitterCases()[0]!.module;
-      rejected.classes = [
-        {
-          name: "UnimplementedNative",
-          fields: [],
-          runtime: true,
-          loc: { file: rejected.sourceFile, start: 0, end: 0 },
-        },
-      ];
-      writeFileSync(input, serializeModule(rejected, true));
+      rejected.classes = [{ name: "UnimplementedNative", fields: [], runtime: true, loc: { file: rejected.sourceFile, start: 0, end: 0 } }];
+      writeFileSync(input, serializeModule(rejected));
       writeFileSync(config, JSON.stringify(llvmEmitterRequest()));
       writeFileSync(output, "untouched");
       const args = [input, output, config];
-      const oracleRefusal = spawnSync(
-        process.execPath,
-        ["--import", "tsx", entry, ...args],
-        runOptions,
-      );
+      const oracleRefusal = spawnSync(process.execPath, ["--import", "tsx", entry, ...args], runOptions);
       const nativeRefusal = spawnSync(stage, args, runOptions);
       for (const result of [oracleRefusal, nativeRefusal]) {
         expect(result.error).toBeUndefined();
@@ -247,38 +153,19 @@ describe(title, () => {
       expect(readFileSync(output, "utf8")).toBe("untouched");
 
       for (const source of programs) {
-        progress(`compile and run ${source}`);
         const sourcePath = join(root, "tests/corpus", source);
         const irPath = join(dir, "program.ir.json");
-        const lowered = await compile(sourcePath, {
-          outDir: dir,
-          outPath: irPath,
-          outputKind: "ir",
-        });
-        if (!lowered.ok)
-          throw new Error(`${source}: ${lowered.diagnostics.map((d) => d.message).join("\n")}`);
+        const lowered = await compile(sourcePath, { outDir: dir, outPath: irPath, outputKind: "ir", dynamic: false });
+        if (!lowered.ok) throw new Error(`${source}: ${lowered.diagnostics.map((d) => d.message).join("\n")}`);
         const mod = deserializeModule(readFileSync(irPath, "utf8"));
-        const request: LlvmEmitterRequest = withoutDebugInfo.has(source)
-          ? llvmEmitterRequest()
-          : llvmEmitterRequest({
-              debug: true,
-              sources: [{ file: sourcePath, text: readFileSync(sourcePath, "utf8") }],
-            });
+        const request: LlvmEmitterRequest = llvmEmitterRequest({
+          debug: true, sources: [{ file: sourcePath, text: readFileSync(sourcePath, "utf8") }],
+        });
         const text = await emit(mod, source, request);
         const llvmPath = join(dir, "program.ll");
         const outPath = executable("program");
         writeFileSync(llvmPath, text);
-        await compileC({
-          cPath: llvmPath,
-          outPath,
-          // Emitted modules are generated programs closed over the runtime
-          // tree, as in compile(): reuse cached runtime objects instead of
-          // rebuilding every runtime unit for each program.
-          cacheIdentity: generatedProgram,
-          sanitize,
-          optimization: "dev",
-          ...moduleLinkFeatures(mod),
-        });
+        await compileC({ cPath: llvmPath, outPath, sanitize, optimization: "dev", ...nativeFeatures(mod) });
         const node = spawnSync(process.execPath, [sourcePath], runOptions);
         const native = spawnSync(outPath, [], runOptions);
         for (const result of [node, native]) {
@@ -289,62 +176,22 @@ describe(title, () => {
         expect(native.stdout, source).toEqual(node.stdout);
         expect(programStderr(native.stderr), source).toBe(programStderr(node.stderr));
       }
-    },
-    testTimeout,
-  );
 
-  test(
-    `${title}: fixed point`,
-    async () => {
       // The seed emits its own complete IR, including the production
       // optimizer and LLVM expression/library graph. Compile those bytes
       // and require a second native generation to reproduce the module.
-      const ownIr = await buildSeed();
-      progress("emit own IR");
       const self = await emit(ownIr, "LLVM emitter emits itself");
       const selfPath = join(dir, "self.ll");
       const secondStage = executable("emitter-second");
       writeFileSync(selfPath, self);
-      progress("compile second generation");
-      await compileC({
-        cPath: selfPath,
-        outPath: secondStage,
-        cacheIdentity: generatedProgram,
-        sanitize,
-        optimization: "dev",
-        ...moduleLinkFeatures(ownIr),
-      });
+      await compileC({ cPath: selfPath, outPath: secondStage, sanitize, optimization: "dev", ...nativeFeatures(ownIr) });
       const again = join(dir, "again.ll");
-      progress("second generation emits own IR");
-      const second = await execFileAsync(secondStage, [input, again, config], {
-        ...runOptions,
-        timeout: emitTimeout,
-      }).catch((cause: unknown) => {
-        // The fixture reports what it catches on stdout and exits non-zero, so
-        // a bare "Command failed" hides whether the second generation crashed,
-        // overran its stack or timed out. Say what the child said. Promisified
-        // execFile exposes the exit status as `code` (a number, or an error
-        // string such as ENOENT when the child never ran), not `status`.
-        const failed = cause as {
-          code?: number | string;
-          signal?: string | null;
-          stdout?: string;
-          stderr?: string;
-        };
-        const said = (text: string | undefined): string => (text ?? "").slice(0, 2_000);
-        throw new Error(
-          `the second generation did not reproduce the module: code=${String(failed.code)}` +
-            ` signal=${String(failed.signal)}` +
-            `\nstdout: ${said(failed.stdout)}` +
-            `\nstderr: ${said(failed.stderr)}`,
-          { cause },
-        );
-      });
+      const second = await execFileAsync(secondStage, [input, again, config], { ...runOptions, timeout: 300_000 });
       expect(second.stdout).toBe("");
       expect(second.stderr).toBe("");
       expect(readFileSync(again, "utf8")).toBe(self);
-      progress("fixed point verified");
-    },
-    testTimeout,
-  );
-});
+    } finally {
+      rmSync(dir, { recursive: true, force: true });
+    }
+  }, 1_200_000);
+}

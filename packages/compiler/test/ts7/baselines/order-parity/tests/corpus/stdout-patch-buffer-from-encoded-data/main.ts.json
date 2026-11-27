@@ -1,7 +1,0 @@
-{
- "order": [
-  "<repo>/tests/corpus/stdout-patch-buffer-from-encoded-data/patch.mjs",
-  "<repo>/tests/corpus/stdout-patch-buffer-from-encoded-data/main.ts"
- ],
- "diags": []
-}

@@ -1,0 +1,11 @@
+const h: any = globalThis;
+const a = new Uint8Array(4);
+a[0] = 5;
+h.auditKeep(a);
+h.auditWrite(a);
+const back: Uint8Array = h.auditKept();
+back[2] = 7;
+const big = new Float64Array(200000);
+big[0] = 1;
+const foreign: Float32Array = h.auditFloats();
+console.log(a[1], a[2], h.auditKept() === a, h.auditRead(), foreign.length, foreign[1]);

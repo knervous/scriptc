@@ -1,6 +1,0 @@
-{
- "order": [
-  "<repo>/tests/corpus/2721-array-nested-missing-receiver.ts"
- ],
- "diags": []
-}

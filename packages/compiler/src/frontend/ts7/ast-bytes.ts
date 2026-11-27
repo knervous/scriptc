@@ -1,3 +1,4 @@
+// This file was modified from scriptc (Apache-2.0); see MODIFICATIONS.md.
 /** Native-compatible readers for the pinned tsgo binary AST format. All
  * offsets are checked before a byte is read; malformed server data fails at
  * this boundary instead of becoming a bogus AST node or an unbounded walk. */
@@ -9,26 +10,15 @@ export class AstDecodeError extends Error {
 }
 
 export function astBounds(bytes: Uint8Array, offset: number, length: number): void {
-  if (
-    !Number.isSafeInteger(offset) ||
-    !Number.isSafeInteger(length) ||
-    offset < 0 ||
-    length < 0 ||
-    offset > bytes.length ||
-    length > bytes.length - offset
-  ) {
+  if (!Number.isSafeInteger(offset) || !Number.isSafeInteger(length) ||
+      offset < 0 || length < 0 || offset > bytes.length || length > bytes.length - offset) {
     throw new AstDecodeError("byte range is outside the response");
   }
 }
 
 export function astU32(bytes: Uint8Array, offset: number): number {
   astBounds(bytes, offset, 4);
-  return (
-    bytes[offset]! +
-    bytes[offset + 1]! * 256 +
-    bytes[offset + 2]! * 65536 +
-    bytes[offset + 3]! * 16777216
-  );
+  return bytes[offset]! + bytes[offset + 1]! * 256 + bytes[offset + 2]! * 65536 + bytes[offset + 3]! * 16777216;
 }
 
 export function astI32(bytes: Uint8Array, offset: number): number {
@@ -40,7 +30,7 @@ export function astI32(bytes: Uint8Array, offset: number): number {
  * UTF-8 decoding deliberately replaces those sequences, so decode them
  * explicitly. Preserve U+FEFF anywhere, including just after a surrogate.
  * Valid UTF-8 segments use the runtime's optimized decoder. A runtime that
- * cannot represent lone surrogates must refuse them here; replacing
+ * cannot represent lone surrogates must refuse them here; silently replacing
  * a code unit would change checker names and compiler input. */
 export function decodeAstString(bytes: Uint8Array, offset: number, length: number): string {
   astBounds(bytes, offset, length);
@@ -55,8 +45,7 @@ export function decodeAstString(bytes: Uint8Array, offset: number, length: numbe
     if (segment < i) result += Buffer.from(bytes.subarray(segment, i)).toString("utf8");
     const code = 0xd000 | ((second & 0x3f) << 6) | (third & 0x3f);
     const unit = String.fromCharCode(code);
-    if (unit.charCodeAt(0) !== code)
-      throw new AstDecodeError("runtime cannot preserve lone UTF-16 surrogates");
+    if (unit.charCodeAt(0) !== code) throw new AstDecodeError("runtime cannot preserve lone UTF-16 surrogates");
     result += unit;
     i += 2;
     segment = i + 1;
@@ -71,11 +60,7 @@ export function decodeAstString(bytes: Uint8Array, offset: number, length: numbe
 export class AstMsgpackReader {
   private position: number;
 
-  constructor(
-    private readonly bytes: Uint8Array,
-    offset: number,
-    private readonly end: number,
-  ) {
+  constructor(private readonly bytes: Uint8Array, offset: number, private readonly end: number) {
     astBounds(bytes, offset, end - offset);
     this.position = offset;
   }
@@ -100,8 +85,7 @@ export class AstMsgpackReader {
     else throw new AstDecodeError("expected a structured array");
     // Every element requires at least one byte. This bounds allocations
     // before callers iterate an attacker-controlled count.
-    if (length > this.end - this.position)
-      throw new AstDecodeError("structured array exceeds its section");
+    if (length > this.end - this.position) throw new AstDecodeError("structured array exceeds its section");
     return length;
   }
 
@@ -129,8 +113,7 @@ export class AstMsgpackReader {
     else if (marker === 0xda) length = this.uintBytes(2);
     else if (marker === 0xdb) length = this.uintBytes(4);
     else throw new AstDecodeError("expected a structured string");
-    if (length > this.end - this.position)
-      throw new AstDecodeError("structured string exceeds its section");
+    if (length > this.end - this.position) throw new AstDecodeError("structured string exceeds its section");
     const result = decodeAstString(this.bytes, this.position, length);
     this.position += length;
     return result;

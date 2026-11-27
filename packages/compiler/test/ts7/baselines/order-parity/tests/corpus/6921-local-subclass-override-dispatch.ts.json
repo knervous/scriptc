@@ -1,6 +1,0 @@
-{
- "order": [
-  "<repo>/tests/corpus/6921-local-subclass-override-dispatch.ts"
- ],
- "diags": []
-}

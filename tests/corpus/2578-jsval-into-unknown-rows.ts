@@ -1,3 +1,4 @@
+// @dynamic
 // The jsval→dyn crossing (SCR_DYN_JSVAL): an 'any'-typed engine value
 // flowing into 'unknown' slots wraps by reference, and the armed row-1..3
 // ops answer through the engine — typeof, truthiness, String(), and ===

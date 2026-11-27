@@ -1,6 +1,0 @@
-{
- "order": [
-  "<repo>/tests/corpus/9976-override-narrowed-parameter-union.ts"
- ],
- "diags": []
-}

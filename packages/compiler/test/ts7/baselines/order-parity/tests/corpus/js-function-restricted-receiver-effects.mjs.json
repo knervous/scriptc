@@ -1,6 +1,0 @@
-{
- "order": [
-  "<repo>/tests/corpus/js-function-restricted-receiver-effects.mjs"
- ],
- "diags": []
-}

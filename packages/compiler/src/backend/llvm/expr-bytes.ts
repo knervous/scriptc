@@ -1,3 +1,4 @@
+// This file was modified from scriptc (Apache-2.0); see MODIFICATIONS.md.
 /* Focused LLVM expression emission extracted from emitter.ts. */
 import { InternalCompilerError } from "../../errors.js";
 import { emitBorrowedInput } from "./borrowed-inputs.js";
@@ -928,17 +929,20 @@ export function emitBytesIntrinsic(
         return call("scr_js_bytes_byte_length", "double (ptr)", `ptr ${r.name}`, false, true);
       return host.emitBytesLength(e.receiver.type.elem, r.name, true);
     case "get":
-      // Any invalid index traps (the array runtime's discipline).
       if (e.receiver.type.kind !== "bytes") {
         throw new InternalCompilerError("llvm emitter bug: bytesIntrinsic get on non-bytes");
       }
+      // This fork's frontend never marks invalidNaN: an index the array has no element at (past the end, negative,
+      // fractional) reads undefined in JS, which a number read holds as NaN, as the WasmGC lane's reserved
+      // undefined NaN does (bytes.ts `get`). So every read takes that path; a read proven in bounds stays
+      // straight-line.
       return host.emitBytesGet(
         e.receiver.type.elem,
         r.name,
         args[0]!,
         e.args[0],
         host.bytesBounds.has(e),
-        e.invalidNaN === true,
+        true,
         host.bytesOwned.has(e),
         host.bytesAliasScopes.get(e),
       );

@@ -1,6 +1,0 @@
-{
- "order": [
-  "<repo>/tests/corpus/8896-builtin-namespace-optional-receiver/main.ts"
- ],
- "diags": []
-}

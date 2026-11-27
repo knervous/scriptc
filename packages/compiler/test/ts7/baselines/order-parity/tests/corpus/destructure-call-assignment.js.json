@@ -1,6 +1,0 @@
-{
- "order": [
-  "<repo>/tests/corpus/destructure-call-assignment.js"
- ],
- "diags": []
-}

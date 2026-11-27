@@ -246,7 +246,7 @@ test("parameters, nested captures and mixed environments", () => {
   expect([...values.plain(fn)].sort()).toEqual(["flag", "p"]);
 });
 
-test("a jsval twin shares its closure's environment, and debug builds keep every box", () => {
+test("a jsword twin shares its closure's environment, and debug builds keep every box", () => {
   const fn = outer([boxed("x")], [declare("x", ref("p")), use(closure("reader", ["x"]))]);
   const reader = lifted("reader", ["x"], [], { jsEntry: "reader%js" });
   const twin = lifted("reader%js", ["x"]);

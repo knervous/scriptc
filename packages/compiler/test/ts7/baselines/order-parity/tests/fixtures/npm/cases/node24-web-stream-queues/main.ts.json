@@ -1,6 +1,0 @@
-{
- "order": [
-  "<repo>/tests/fixtures/npm/cases/node24-web-stream-queues/main.ts"
- ],
- "diags": []
-}

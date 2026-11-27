@@ -1,3 +1,0 @@
-{
-    "node-builtin.readline": ["tests/corpus/1475-readline-closed-stdin.ts"]
-}

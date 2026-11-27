@@ -1,3 +1,4 @@
+// This file was modified from scriptc (Apache-2.0); see MODIFICATIONS.md.
 import type { CompileOutputKind } from "../compile-types.js";
 import type { CliOutputKind } from "./paths.js";
 
@@ -9,14 +10,7 @@ export interface OutputOptionValues {
   sanitize: boolean;
   optimization?: string;
   strip?: boolean;
-  staticLink?: boolean;
   windowsSubsystem?: string;
-  detachedExit?: boolean;
-  stdoutBuffering?: boolean;
-  largePages?: boolean;
-  cpuDispatch?: boolean;
-  profileGenerate?: string;
-  profileUse?: string;
   ffi?: string;
 }
 
@@ -45,12 +39,8 @@ export function resolveOutputOptions(
   const backend = values.backend as "llvm" | undefined;
   const rawEmit = values.emit;
   if (
-    rawEmit !== undefined &&
-    rawEmit !== "ir" &&
-    rawEmit !== "llvm" &&
-    rawEmit !== "asm" &&
-    rawEmit !== "obj" &&
-    rawEmit !== "exe"
+    rawEmit !== undefined && rawEmit !== "ir" && rawEmit !== "llvm" &&
+    rawEmit !== "asm" && rawEmit !== "obj" && rawEmit !== "exe"
   ) {
     return {
       ok: false,
@@ -62,10 +52,7 @@ export function resolveOutputOptions(
     return { ok: false, message: `scriptc run requires --emit=exe` };
   }
   if (values.emitIr && rawEmit !== undefined && emit !== "ir" && emit !== "exe") {
-    return {
-      ok: false,
-      message: `--emit-ir cannot be combined with --emit=${emit}; use --emit=ir`,
-    };
+    return { ok: false, message: `--emit-ir cannot be combined with --emit=${emit}; use --emit=ir` };
   }
   if (values.emitIr && emit === "ir") {
     return { ok: false, message: `--emit-ir and --emit=ir select the same output; use --emit=ir` };
@@ -76,32 +63,8 @@ export function resolveOutputOptions(
   if (values.strip && emit !== "exe") {
     return { ok: false, message: `--strip is only supported with --emit=exe` };
   }
-  if (values.staticLink && emit !== "exe") {
-    return { ok: false, message: `--static is only supported with --emit=exe` };
-  }
-  if (values.detachedExit && emit !== "exe") {
-    return { ok: false, message: `--detached-exit is only supported with --emit=exe` };
-  }
-  if (values.stdoutBuffering && emit !== "exe") {
-    return { ok: false, message: `--stdout-buffering is only supported with --emit=exe` };
-  }
-  if (values.largePages && emit !== "exe") {
-    return { ok: false, message: `--large-pages is only supported with --emit=exe` };
-  }
-  if (values.cpuDispatch && emit !== "exe") {
-    return { ok: false, message: `--cpu-dispatch is only supported with --emit=exe` };
-  }
-  if (values.profileGenerate !== undefined && emit !== "exe") {
-    return { ok: false, message: `--profile-generate is only supported with --emit=exe` };
-  }
-  if (values.profileUse !== undefined && emit !== "exe") {
-    return { ok: false, message: `--profile-use is only supported with --emit=exe` };
-  }
   if (emit === "ir" && backend !== undefined) {
-    return {
-      ok: false,
-      message: `--emit=ir cannot be combined with --backend; IR is emitted before backend selection`,
-    };
+    return { ok: false, message: `--emit=ir cannot be combined with --backend; IR is emitted before backend selection` };
   }
   if (SOURCE_KINDS.has(emit)) {
     if (!values.keepLlvm) {

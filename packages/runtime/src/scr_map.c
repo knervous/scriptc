@@ -1,3 +1,4 @@
+// This file was modified from scriptc (Apache-2.0); see MODIFICATIONS.md.
 /* ES Map<K, V> — the compact-dict design (see scr_runtime.h for the API
  * contract): a dense, insertion-ordered entries array plus an open-addressing
  * bucket table of entry indices. Deletions tombstone their entry (key and
@@ -166,8 +167,9 @@ static uint64_t scr_map_hash_dyn(const ScrDyn *d) {
     // must also agree when a key crosses the boundary in either form.
     kind = SCR_DYN_OBJ;
     break;
-
-
+  /* The optional island bridge exposes equality but no hash. A shared
+   * bucket still preserves correctness without adding an engine dependency. */
+  case SCR_DYN_JSVAL: value = 0; break;
   default: value = scr_map_slot_from_ptr((void *)d); break;
   }
   return scr_key_word_hash(value) ^ kind;

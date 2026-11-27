@@ -1,7 +1,0 @@
-{
-  "entry": "workloads/ast-interp.ts",
-  "args": [
-    "5"
-  ],
-  "scaleArg": 0
-}

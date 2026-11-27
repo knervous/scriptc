@@ -1,7 +1,15 @@
+// This file was modified from scriptc (Apache-2.0); see MODIFICATIONS.md.
 import { chmodSync, statSync } from "node:fs";
 
 /** The mode a spawnable toolchain payload carries. */
 const EXECUTABLE_MODE = 0o755;
+
+interface ExecutableModeIo {
+  statSync(path: string): { mode: number };
+  chmodSync(path: string, mode: number): void;
+}
+
+const defaultIo: ExecutableModeIo = { statSync, chmodSync };
 
 /** Makes sure a toolchain payload (the ts7 checker, tsc-ts, the LLVM
  * helper or the compile-time evaluator) can be executed before it is
@@ -11,11 +19,11 @@ const EXECUTABLE_MODE = 0o755;
  * denied"). Repair the mode when the file is writable, and otherwise name
  * the file and the fix so the failure is actionable. Windows has no
  * execute bit. */
-export function ensureExecutable(path: string): void {
+export function ensureExecutable(path: string, io: ExecutableModeIo = defaultIo): void {
   if (process.platform === "win32") return;
   let mode: number;
   try {
-    mode = statSync(path).mode;
+    mode = io.statSync(path).mode;
   } catch (error) {
     throw new Error(
       `toolchain executable ${path} is missing; reinstall scriptc (${(error as Error).message})`,
@@ -26,7 +34,7 @@ export function ensureExecutable(path: string): void {
   // untouched and reported below.
   if ((mode & 0o200) !== 0) {
     try {
-      chmodSync(path, EXECUTABLE_MODE);
+      io.chmodSync(path, EXECUTABLE_MODE);
       return;
     } catch {
       /* Report below. */

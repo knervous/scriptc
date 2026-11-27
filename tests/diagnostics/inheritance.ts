@@ -9,9 +9,9 @@ class Animal {
   }
 }
 
-// Abstract properties resolve through the concrete instance. Keep this
-// accepted method beside the rejected inheritance forms to ensure their
-// diagnostics do not reintroduce a refusal for abstract property reads.
+// abstract classes compile; abstract PROPERTY declarations are erased at
+// runtime (no shared slot exists), so reads through abstract-typed
+// receivers keep a named fence
 abstract class Base {
   abstract kind(): string;
   abstract limit: number;
@@ -49,32 +49,13 @@ class RetypedRepeat extends Animal {
   name: number = 2;
 }
 
-// an override must fit the inherited slot: a narrower parameter is checked
-// at the slot and a shorter parameter list drops the rest there, but a
-// shorter list whose body reads `arguments` has no adapter
-class Shorter extends Animal {
-  feed(): string {
-    return this.name + arguments.length;
+// overrides must keep the exact signature (method bivariance is unsound
+// through a vtable)
+class Bivariant extends Animal {
+  feed(other: Bivariant): string {
+    return other.name;
   }
 }
-
-// An override may add TRAILING optional or defaulted parameters (corpus
-// 8540): the inherited slot keeps the base arity and fills the omitted
-// values. A call that supplies one of the extras still needs the override's
-// own body, which a virtual slot cannot carry — a subclass below makes this
-// receiver virtual, so the surplus argument fences instead of vanishing.
-class TrailingOption extends Animal {
-  feed(other: Animal, note: string = "n"): string {
-    return other.name + note;
-  }
-}
-class TrailingOptionChild extends TrailingOption {
-  feed(other: Animal, note: string = "c"): string {
-    return other.name + note;
-  }
-}
-const trailingOption: TrailingOption = new TrailingOption();
-trailingOption.feed(new Animal(), "x");
 
 // Conditional super() is supported; both branches initialize the receiver.
 class Conditional extends Animal {
@@ -91,8 +72,8 @@ class Conditional extends Animal {
 const rec = { name: "r" };
 console.log(rec instanceof Animal);
 
-// ...and folds statically for standalone classes, which still evaluates
-// both operands (Node evaluates them) before answering
+// ...and folds statically for standalone classes, so a computed operand
+// whose effects would be dropped is rejected
 class Point {
   x: number = 0;
 }
@@ -109,32 +90,4 @@ const gaRef = GenericAbstract;
 new Aliased();
 new BareRepeat();
 new RetypedRepeat();
-// A refused override does not reject its class: the construction
-// compiles, and the call through the class is what reports it.
-const shorter = new Shorter();
-shorter.feed();
-
-// A shorter override that a subclass overrides again, called through its
-// own class: the virtual slot still takes every inherited argument, and a
-// parameter that cannot be omitted has no value to pass.
-class Needs {
-  need(name: string, weight: number): string {
-    return `${name} ${weight}`;
-  }
-}
-class NeedsNone extends Needs {
-  need(): string {
-    return "mid";
-  }
-}
-class NeedsNoneBelow extends NeedsNone {
-  need(): string {
-    return "low";
-  }
-}
-const needsNone: NeedsNone = new NeedsNoneBelow();
-needsNone.need();
-// A shorter override read as a value through its own class: the value is
-// the slot function, which takes the inherited parameters.
-const neededValue = new NeedsNoneBelow().need;
-neededValue.call(needsNone);
+new Bivariant();

@@ -1,3 +1,4 @@
+// @dynamic
 // RegExp values crossing INTO the island (the z.string().regex(/^a+$/)
 // shape): a fresh engine RegExp rebuilt from source+flags — the pattern
 // TEXT crosses, both worlds compile the ES-spec grammar. Literals and

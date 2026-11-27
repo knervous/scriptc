@@ -3,7 +3,7 @@ import {
   BOOL,
   DYN,
   F64,
-  JSVAL,
+  JSWORD,
   STRING,
   VOID,
   type IrExpr,
@@ -161,8 +161,8 @@ test("serialized IR carries each function's tier", () => {
   ]);
 });
 
-test("jsval operators are dynamic operations and jsval conversions are boundaries", () => {
-  const js: IrExpr = { kind: "libCall", fn: "js.fromDyn", args: [dynParam], type: JSVAL, loc };
+test("jsword operators are dynamic operations and jsword conversions are boundaries", () => {
+  const js: IrExpr = { kind: "libCall", fn: "js.fromDyn", args: [dynParam], type: JSWORD, loc };
   expect(dynamicOperationOf(js)).toBeNull();
   expect(
     dynamicOperationOf({ kind: "libCall", fn: "js.toDyn", args: [js], type: DYN, loc }),
@@ -175,17 +175,17 @@ test("jsval operators are dynamic operations and jsval conversions are boundarie
       kind: "libCall",
       fn: "js.fromF64",
       args: [{ kind: "numLit", value: 1, type: F64, loc }],
-      type: JSVAL,
+      type: JSWORD,
       loc,
     }),
   ).toBeNull();
   expect(
-    dynamicOperationOf({ kind: "libCall", fn: "js.add", args: [js, js], type: JSVAL, loc }),
+    dynamicOperationOf({ kind: "libCall", fn: "js.add", args: [js, js], type: JSWORD, loc }),
   ).toBe("js.add");
   const sum = fn("sum", {
     kind: "libCall",
     fn: "js.toDyn",
-    args: [{ kind: "libCall", fn: "js.add", args: [js, js], type: JSVAL, loc }],
+    args: [{ kind: "libCall", fn: "js.add", args: [js, js], type: JSWORD, loc }],
     type: DYN,
     loc,
   });

@@ -1,6 +1,0 @@
-{
- "order": [
-  "<repo>/tests/corpus/3080-exhaustive-never-bindings.ts"
- ],
- "diags": []
-}

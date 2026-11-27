@@ -1,0 +1,8 @@
+scriptc fork with a WasmGC backend and a native host
+Copyright 2026 Paul Johnson
+
+This product is a derivative of scriptc (https://github.com/vercel-labs/scriptc), licensed under the Apache License, Version 2.0 (LICENSE). Upstream's copyright and license notices are kept where they stand.
+
+The additions in this fork, licensed under the same terms, include the WasmGC backend (packages/compiler/src/backend/wasmgc), typed host-module imports, the object linker (packages/compiler/src/link), the native host (native/host), changes to the LLVM lane and the runtime, and their tests and tooling. MODIFICATIONS.md lists every file changed from or added to upstream.
+
+The vendored third-party code in native/host/vendor keeps its own licences and notices: Blitz, vello and anyrender (MIT or Apache-2.0), Stylo (MPL-2.0; the files this fork modifies are published here in source form), libmatoya (MIT) and libopus (BSD-3-Clause).

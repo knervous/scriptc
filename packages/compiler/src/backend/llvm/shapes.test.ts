@@ -33,6 +33,7 @@ function declarationHost(
       return "@sc_cstr";
     },
     needOom() {},
+    objectAudit: true,
     mapOps: (operands) => (operands.every((op) => op === "null") ? "null" : "@sc_map_ops"),
     sizeType: pointerBits === 32 ? "i32" : "i64",
     cycleBufOffset: 4,
@@ -48,6 +49,7 @@ function declarationHost(
     unionNoneRef: () => "@sc_union_none",
     recordsById: new Map(),
     recordCloneShapes: new Set(),
+    freezableShapes: new Set(),
     rcHelpers: inlineRc ? new Set() : null,
     ...(inlineRc
       ? { rcMode: inlineRc === "release" ? ("release" as const) : ("speed" as const) }

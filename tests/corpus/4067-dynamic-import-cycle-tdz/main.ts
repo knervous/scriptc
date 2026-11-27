@@ -1,3 +1,4 @@
+// @dynamic
 // import() of a module whose cycle partner reads a const of it at top
 // level: the partner evaluates first, its read throws ReferenceError, and
 // the import() promise rejects with that error.

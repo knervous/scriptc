@@ -1,6 +1,0 @@
-{
- "order": [
-  "<repo>/tests/corpus/5915-dyn-error-string-conversions.ts"
- ],
- "diags": []
-}

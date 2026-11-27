@@ -1,3 +1,4 @@
+// This file was modified from scriptc (Apache-2.0); see MODIFICATIONS.md.
 import { withWorkerRuntimeVariants } from "./worker-matrix.mjs";
 import { withLibraryRuntimeFlavors } from "./library-matrix.mjs";
 
@@ -59,6 +60,8 @@ export const BASE_RUNTIME_SOURCES = [
   // exact libm functions that let a program link without libm.so.
   "scr_ieee754.c",
   "scr_glibc_math.c",
+  // dyn.needsOpen / dyn.opened: untyped destructuring and new Map/Set(untyped) reach them in static programs too.
+  "scr_dyn_native_open.c",
 ];
 
 export const OPTIONAL_RUNTIME_SOURCES = [
@@ -178,6 +181,7 @@ export const OPTIONAL_RUNTIME_SOURCES = [
   // Blob and File box their reads as dyn promises through scr_async_dyn.c.
   ["scr_blob.c", "dynAsync"],
   ["scr_zlib.c", "zlib"],
+  ["scr_zlib_island.c", all("zlib", "engineIsland")],
   ["scr_brotli.c", all("zlib", "brotli")],
   ["scr_zstd.c", all("zlib", "zstd")],
   // Intl over ICU (scr_intl.c): the default-locale number/date formats and
@@ -352,6 +356,26 @@ export const OPTIONAL_RUNTIME_SOURCES = [
   ["scr_webcrypto_aes.c", all("cipher", "webcrypto")],
   ["scr_abort.c", "abortSignalOnly"],
   ["scr_fetch.c", "nativeFetch"],
+  // The engine island (QuickJS) and its bridges: a dynamic link without the
+  // host island. engineIsland is `dynamic` unless hostIsland is on, so every
+  // existing program selects exactly what it did.
+  ["scr_island.c", "engineIsland"],
+  ["scr_web.c", "engineIsland"],
+  ["scr_inspect_island.c", all("engineIsland", "inspect")],
+  // The host island (scr_host_island.h): the scr_jsval_* ABI over the
+  // embedding application's scr_host_ops() vtable, in place of the engine
+  // island. Its native-dyn units carry the native dyn model's builtin
+  // values, and scr_host_lre.c gives libregexp the hooks the engine archive
+  // would. Only a program with hostIsland selects any of them.
+  ["scr_dyn_native.c", "hostIsland"],
+  ["scr_dyn_native_symbol.c", "hostIsland"],
+  ["scr_dyn_native_regex.c", "hostIsland"],
+  ["scr_host_island.c", "hostIsland"],
+  ["scr_host_lre.c", "hostIsland"],
+  // Android's half of the host island (libmain.so's main thread, the host's
+  // uncaught hook); empty on every other target.
+  ["scr_host_android.c", "hostIsland"],
+  ["scr_net_island.c", "netIslandEffective"],
   // Node islands: libnode loaded on first use (explicit @scriptc/node calls),
   // over the SCR_NODE_ISLANDS build of scr_async.c.
   ["scr_node_island.c", "nodeIsland"],
@@ -432,6 +456,22 @@ function withJsObjectModel(variants) {
 }
 
 export function variantsFor(source) {
+  const dynamicOnly = new Set([
+    "scr_zlib_island.c",
+    "scr_island.c",
+    "scr_web.c",
+    "scr_inspect_island.c",
+    "scr_net_island.c",
+    "scr_dyn_native.c",
+    "scr_dyn_native_symbol.c",
+    "scr_dyn_native_regex.c",
+    "scr_host_island.c",
+    "scr_host_lre.c",
+    "scr_host_android.c",
+  ]);
+  if (dynamicOnly.has(source)) {
+    return [{ id: "dynamic", when: { dynamic: true }, defines: ["SCR_DYNAMIC"] }];
+  }
   const variants = [{ id: "default", when: {}, defines: [] }];
   // scr_json.c builds one object per flavor (and workers mode): its paths
   // for Node island handles and handle classes call through tables that
@@ -483,6 +523,14 @@ export function variantsFor(source) {
     // TextDecoder legacy one when it has both. Every other program keeps the
     // default object, byte for byte.
     withJsObjectModel(variants);
+  }
+  variants.push({ id: "dynamic", when: { dynamic: true }, defines: ["SCR_DYNAMIC"] });
+  if (source === "scr_bytes.c") {
+    variants.push({
+      id: "dynamic-text-decoder-legacy",
+      when: { dynamic: true, textDecoderLegacy: true },
+      defines: ["SCR_DYNAMIC", "SCR_TEXT_DECODER_LEGACY"],
+    });
   }
   // util.isDeepStrictEqual's ArrayBuffer and SharedArrayBuffer arm asks the
   // mutable-buffers registry whether either side is detached, and Node throws
@@ -839,6 +887,19 @@ export function variantsFor(source) {
   return variants;
 }
 
+/* Optional units every COFF executable links, whatever its features: lld-link reports the undefined symbols of every
+ * object it links, also those only functions no program reaches refer to, where the ELF and Mach-O links of the same
+ * objects do not. scr_lib.c (a base unit) posts through the remote queue (scr_remote_post, scr_instance_remote,
+ * scr_remote_hold) from its Atomics.waitAsync and timer workers, and scr_ffi_queue.c defines it: without the unit no
+ * Windows executable linked unless the program had a foreign FFI callback. */
+const COFF_LINKED_OPTIONAL_SOURCES = new Set(["scr_ffi_queue.c"]);
+
+/* Base units only COFF packs carry: scr_coff_unlinked.c, weak stand-ins for the functions a linked unit calls in an
+ * optional unit from functions that only programs selecting that unit reach. The ELF and Mach-O links drop those
+ * calls with their sections; linking the optional units on COFF instead would run their constructors in programs
+ * that do not select them (the unit's header says which). */
+const COFF_BASE_SOURCES = ["scr_coff_unlinked.c"];
+
 export function createRuntimePackMatrix({
   target,
   compileFlags,
@@ -850,7 +911,10 @@ export function createRuntimePackMatrix({
   libraryOnly = false,
 }) {
   const vendorArchives = [
-    { id: "libregexp", predicate: "regex" },
+    { id: "quickjs", predicate: "engineIsland" },
+    // The engine archive carries its own libregexp; every other link with
+    // regex (a static one, or a host-island one) takes the vendored archive.
+    { id: "libregexp", predicate: { all: ["regex"], not: ["engineIsland"] } },
     { id: "zlib", predicate: "zlibEffective" },
     { id: "brotli", predicate: all("zlib", "brotli") },
     { id: "zstd", predicate: all("zlib", "zstd") },
@@ -871,9 +935,16 @@ export function createRuntimePackMatrix({
         ...BASE_RUNTIME_SOURCES.filter((source) => !omitRuntimeSources.includes(source)).map(
           (source) => ({ source, predicate: true }),
         ),
+        ...(target?.object_format === "coff" ? COFF_BASE_SOURCES : []).map((source) => ({ source, predicate: true })),
         ...extraRuntimeSources.map((source) => ({ source, predicate: true })),
         ...OPTIONAL_RUNTIME_SOURCES.filter(([source]) => !omitOptionalSources.includes(source)).map(
-          ([source, predicate]) => ({ source, predicate }),
+          ([source, predicate]) => ({
+            source,
+            predicate:
+              target?.object_format === "coff" && COFF_LINKED_OPTIONAL_SOURCES.has(source)
+                ? true
+                : predicate,
+          }),
         ),
       ].map((unit) => ({ ...unit, variants: variantsFor(unit.source) })),
       archives: vendorArchives.filter(({ id }) => !omitArchives.includes(id)),

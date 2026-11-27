@@ -1,3 +1,0 @@
-{
-    "node-builtin.querystring": ["tests/corpus/957-builtins-namespace.ts", "tests/corpus/2917-builtin-callable-widths.ts"]
-}

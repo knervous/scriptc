@@ -56,9 +56,17 @@ const bareU = undefined;
 const bareN = null;
 
 // Whole-union string conversion lowers for primitive/unit arms (the
-// per-union ToString helper — `${mk()}` compiles), and a record or array
-// arm converts as it does alone (corpus string-of-union-record-arms) —
-// no pin here anymore.
+// per-union ToString helper — `${mk()}` compiles); an OBJECT arm has no
+// honest text (JS prints "[object Object]") and stays fenced.
+const templated = `${mkAB()}`;
+
+// `x == null` lowers as the null-or-undefined tag test — but a union with
+// BOTH unit arms needs the operand twice, so an effectful operand (a call)
+// gets its own fence pointing at a const binding.
+function mkNullish(): string | null | undefined {
+  return null;
+}
+const looseCall = mkNullish() == null;
 
 // A DECLARED `T | string` param infers nothing for T (no union
 // unification); the body's use of T then fails with the instantiation.

@@ -1,3 +1,4 @@
+// @dynamic
 // Island ('any'-typed) values in typed builtin slots: the boundary pass
 // wraps each argument in a validated island exit — strict primitives, the
 // dynCheck stance — so regex tests over 'any' text, repeat/slice counts

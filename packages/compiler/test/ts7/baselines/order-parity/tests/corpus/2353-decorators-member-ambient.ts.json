@@ -1,6 +1,0 @@
-{
- "order": [
-  "<repo>/tests/corpus/2353-decorators-member-ambient.ts"
- ],
- "diags": []
-}

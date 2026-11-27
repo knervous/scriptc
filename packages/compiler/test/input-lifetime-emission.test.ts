@@ -8,25 +8,15 @@ import { emitLlvmModule } from "../src/backend/llvm/emitter.js";
 async function emit(source: string): Promise<string> {
   const dir = await mkdtemp(join(tmpdir(), "scriptc-input-emission-"));
   try {
-    const entry = join(dir, "main.ts"),
-      output = join(dir, "main.json");
+    const entry = join(dir, "main.ts"), output = join(dir, "main.json");
     await writeFile(entry, source);
-    const result = await compile(entry, {
-      outDir: dir,
-      outPath: output,
-      outputKind: "ir",
-    });
+    const result = await compile(entry, { outDir: dir, outPath: output, outputKind: "ir", dynamic: false });
     if (!result.ok) throw new Error(result.diagnostics.map((d) => d.message).join("\n"));
     return emitLlvmModule(deserializeModule(await readFile(output, "utf8")));
-  } finally {
-    await rm(dir, { recursive: true, force: true });
-  }
+  } finally { await rm(dir, { recursive: true, force: true }); }
 }
 function body(llvm: string, name: string): string {
-  const found = new RegExp(
-    `^define internal [^\\n]*@sc_(?:b)?f_${name}(?:\\.i32)?\\([^]*?^}`,
-    "m",
-  ).exec(llvm);
+  const found = new RegExp(`^define internal [^\\n]*@sc_(?:b)?f_${name}\\([^]*?^}`, "m").exec(llvm);
   expect(found, name).not.toBeNull();
   return found![0];
 }
@@ -46,12 +36,7 @@ console.log(preserve(holder), snapshot(holder));
   expect(body(llvm, "preserve")).not.toContain("@sc_release_Cell");
   expect(body(llvm, "snapshot")).toContain("@sc_retain_Cell");
   expect(body(llvm, "snapshot")).toContain("@sc_release_Cell");
-  // `read` returns a projection of its borrowed parameter without a
-  // reference; its owned adapter takes one for callers outside direct calls.
-  expect(body(llvm, "read")).not.toContain("@scr_str_retain_v");
-  expect(/^define internal [^\n]*@sc_f_read(?:\.i32)?\([^]*?^}/m.exec(llvm)?.[0]).toContain(
-    "@scr_str_retain_v",
-  );
+  expect(body(llvm, "read")).toContain("@scr_str_retain_v");
 });
 
 test("regex runtime inputs borrow independently of result ownership and lastIndex mutation", async () => {

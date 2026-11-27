@@ -1,6 +1,0 @@
-{
- "order": [
-  "<repo>/tests/corpus/5370-zlib-stream-roundtrip.ts"
- ],
- "diags": []
-}

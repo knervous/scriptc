@@ -1,0 +1,1 @@
+const a=new Float64Array(1);const u=a[2];console.log(Number.isNaN(u),u===u,u??7,Math.abs(u));

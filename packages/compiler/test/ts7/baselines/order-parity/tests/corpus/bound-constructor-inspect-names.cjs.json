@@ -1,6 +1,0 @@
-{
- "order": [
-  "<repo>/tests/corpus/bound-constructor-inspect-names.cjs"
- ],
- "diags": []
-}

@@ -1,6 +1,12 @@
+// This file was modified from scriptc (Apache-2.0); see MODIFICATIONS.md.
 /** Runtime requirements derived from the lowered program, shared by compiler hosts. */
 import { type IrModule } from "../ir/ir.js";
-import { jsObjectModelFact, moduleRuntimeFeatures } from "../ir/runtime-features.js";
+import {
+  jsObjectModelFact,
+  moduleEmbedsBuiltin,
+  moduleEmbedsCompressedNpm,
+  moduleRuntimeFeatures,
+} from "../ir/runtime-features.js";
 import { hasForeignFfiCallback } from "./ffi-callbacks.js";
 import type { NativeLinkFeatures } from "./native-link-info.js";
 import { withRequiredLinkFeatures } from "./native-link-info-core.js";
@@ -21,6 +27,7 @@ export function carriesDebugSources(
  * so its checked conversions call the report of their failures. */
 export function executableLinkFeatures(
   mod: IrModule,
+  dynamic: boolean,
   largePages = false,
   debugSources = false,
 ): NativeLinkFeatures {
@@ -37,6 +44,7 @@ export function executableLinkFeatures(
   // (LINK_FEATURE_REQUIREMENTS), whichever fact selected it.
   return withRequiredLinkFeatures({
     ...(mod.workers ? { workers: true } : {}),
+    dynamic,
     ...(largePages ? { largePages: true } : {}),
     ...(debugSources && mod.lib === undefined ? { conversionTrace: true } : {}),
     ...(youngNurseryRequested() && mod.lib === undefined ? { youngNursery: true } : {}),
@@ -47,6 +55,11 @@ export function executableLinkFeatures(
     fileHandle: features.fileHandle,
     fetch: features.fetch,
     ...(features.eventTarget || features.fsWebStream ? { eventTarget: true } : {}),
+    netIsland:
+      moduleEmbedsBuiltin(mod, "node:http") ||
+      moduleEmbedsBuiltin(mod, "node:https") ||
+      moduleEmbedsBuiltin(mod, "node:net") ||
+      moduleEmbedsBuiltin(mod, "node:tls"),
     ...(features.wasm ? { wasm: true } : {}),
     ...(features.warningReplace ? { warningReplace: true } : {}),
     ...(features.promiseRejectDyn ? { promiseRejectDyn: true } : {}),
@@ -70,7 +83,7 @@ export function executableLinkFeatures(
     ...(features.moduleNamespaceDyn ? { moduleNamespaceDyn: true } : {}),
     ...(features.primitiveWrapper ? { primitiveWrapper: true } : {}),
     ...(features.iteratorProto ? { iteratorProto: true } : {}),
-    zlib: features.zlib,
+    zlib: features.zlib || moduleEmbedsCompressedNpm(mod),
     ...(features.brotli ? { brotli: true } : {}),
     ...(features.zstd ? { zstd: true } : {}),
     assert: features.assert,

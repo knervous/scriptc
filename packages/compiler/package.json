@@ -1,6 +1,6 @@
 {
   "name": "@scriptc/compiler",
-  "version": "0.4.17",
+  "version": "0.2.4",
   "description": "The scriptc compiler — TypeScript/JavaScript frontend, typed IR, LLVM backend",
   "license": "Apache-2.0",
   "homepage": "https://scriptc.dev",
@@ -29,42 +29,38 @@
   "files": [
     "dist",
     "ambient",
-    "shims",
     "surface-manifest.json"
   ],
   "publishConfig": {
     "access": "public"
   },
   "scripts": {
-    "build": "node node_modules/tsc-ts/bin/tsc-ts.js -p tsconfig.json"
+    "build": "node node_modules/typescript/bin/tsc -p tsconfig.json"
   },
   "dependencies": {
     "@scriptc/runtime": "workspace:*",
-    "tsc-ts": "0.1.3",
-    "typescript": "7.1.0-beta",
+    "binaryen": "^132.0.0",
+    "typescript": "7.0.2",
     "typescript5": "npm:typescript@5.9.3"
-  },
-  "devDependencies": {
-    "typescript-7.0": "npm:typescript@7.0.2"
   },
   "optionalDependencies": {
     "@scriptc/llvm-darwin-arm64": "workspace:*",
     "@scriptc/llvm-darwin-x64": "workspace:*",
-    "@scriptc/llvm-linux-x64-gnu": "workspace:*",
     "@scriptc/llvm-linux-arm64-gnu": "workspace:*",
-    "@scriptc/llvm-linux-x64-musl": "workspace:*",
     "@scriptc/llvm-linux-arm64-musl": "workspace:*",
+    "@scriptc/llvm-linux-x64-gnu": "workspace:*",
+    "@scriptc/llvm-linux-x64-musl": "workspace:*",
     "@scriptc/llvm-win32-x64-msvc": "workspace:*",
+    "@scriptc/runtime-android-arm64": "workspace:*",
     "@scriptc/runtime-darwin-arm64": "workspace:*",
     "@scriptc/runtime-darwin-x64": "workspace:*",
-    "@scriptc/runtime-linux-x64-gnu": "workspace:*",
-    "@scriptc/runtime-linux-arm64-gnu": "workspace:*",
-    "@scriptc/runtime-linux-x64-musl": "workspace:*",
-    "@scriptc/runtime-linux-arm64-musl": "workspace:*",
-    "@scriptc/runtime-win32-x64-msvc": "workspace:*",
-    "@scriptc/runtime-wasm32-wasi": "workspace:*",
     "@scriptc/runtime-ios-arm64": "workspace:*",
     "@scriptc/runtime-ios-simulator-arm64": "workspace:*",
-    "@scriptc/runtime-android-arm64": "workspace:*"
+    "@scriptc/runtime-linux-arm64-gnu": "workspace:*",
+    "@scriptc/runtime-linux-arm64-musl": "workspace:*",
+    "@scriptc/runtime-linux-x64-gnu": "workspace:*",
+    "@scriptc/runtime-linux-x64-musl": "workspace:*",
+    "@scriptc/runtime-wasm32-wasi": "workspace:*",
+    "@scriptc/runtime-win32-x64-msvc": "workspace:*"
   }
 }

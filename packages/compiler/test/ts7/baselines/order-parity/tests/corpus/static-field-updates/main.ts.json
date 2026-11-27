@@ -1,7 +1,0 @@
-{
- "order": [
-  "<repo>/tests/corpus/static-field-updates/counter.ts",
-  "<repo>/tests/corpus/static-field-updates/main.ts"
- ],
- "diags": []
-}

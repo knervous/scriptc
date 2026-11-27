@@ -1,3 +1,4 @@
+// This file was modified from scriptc (Apache-2.0); see MODIFICATIONS.md.
 import { BOOL, DYN, F64, STRING, VOID } from "../ir.js";
 import { defineLibFnSignatures } from "./shared.js";
 
@@ -28,4 +29,5 @@ export const classSignatures = defineLibFnSignatures({
    * no-op, kept for ownership uniformity). Never throws. A direct
    * `C.name` on the class name itself folds to a strLit instead. */
   "class.name": { argTypes: [null], result: STRING },
+"class.pageIs": { argTypes: [null, STRING], result: BOOL },
 });

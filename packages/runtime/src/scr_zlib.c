@@ -1,3 +1,4 @@
+// This file was modified from scriptc (Apache-2.0); see MODIFICATIONS.md.
 /* node:zlib, the lowered slice: the one-shot zlib/raw-DEFLATE/gzip codecs
  * over u8 bytes with Node's DEFAULT options. Compiled ONLY when the program
  * uses zlib (native-toolchain.ts gates it exactly like scr_regex.c/libregexp),
@@ -108,6 +109,12 @@ void scr_zlib_codec_async(const ScrBytes *data, double mode, bool compressing,
 }
 #endif
 
+/* One-shot raw-DEFLATE inflate into a caller-sized buffer: the island's
+ * compressed embedded module text (the emitter stores big npm sources
+ * deflated and their exact inflated length in the table row — the emitted
+ * main installs this through scr_island_set_inflate). True only when the
+ * stream ends exactly at dst_len; any mismatch is a build/runtime bug the
+ * caller surfaces, never a silent truncation. */
 bool scr_zlib_inflate_exact(const unsigned char *src, size_t src_len,
                             unsigned char *dst, size_t dst_len) {
   z_stream zs;

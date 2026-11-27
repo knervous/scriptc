@@ -1,7 +1,0 @@
-{
- "order": [
-  "<repo>/tests/corpus/function-own-prototype/consumer.js",
-  "<repo>/tests/corpus/function-own-prototype/main.js"
- ],
- "diags": []
-}

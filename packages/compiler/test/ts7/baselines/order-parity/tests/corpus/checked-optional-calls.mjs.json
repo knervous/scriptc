@@ -1,6 +1,0 @@
-{
- "order": [
-  "<repo>/tests/corpus/checked-optional-calls.mjs"
- ],
- "diags": []
-}

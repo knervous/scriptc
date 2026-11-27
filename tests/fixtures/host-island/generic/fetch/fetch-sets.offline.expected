@@ -1,0 +1,4 @@
+data 200 text/plain;charset=utf-8 hi there
+blob 200 text/plain blob body
+http rejected true true TypeError Failed to fetch
+then rejected true true TypeError Failed to fetch

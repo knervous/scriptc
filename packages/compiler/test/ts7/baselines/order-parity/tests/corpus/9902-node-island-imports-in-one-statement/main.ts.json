@@ -1,6 +1,0 @@
-{
- "order": [
-  "<repo>/tests/corpus/9902-node-island-imports-in-one-statement/main.ts"
- ],
- "diags": []
-}

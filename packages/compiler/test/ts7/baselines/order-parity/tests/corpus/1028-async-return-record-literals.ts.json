@@ -1,6 +1,0 @@
-{
- "order": [
-  "<repo>/tests/corpus/1028-async-return-record-literals.ts"
- ],
- "diags": []
-}

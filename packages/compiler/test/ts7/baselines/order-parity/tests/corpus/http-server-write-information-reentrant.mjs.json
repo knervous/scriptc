@@ -1,6 +1,0 @@
-{
- "order": [
-  "<repo>/tests/corpus/http-server-write-information-reentrant.mjs"
- ],
- "diags": []
-}

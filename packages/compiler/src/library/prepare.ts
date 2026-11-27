@@ -1,64 +1,21 @@
+// This file was modified from scriptc (Apache-2.0); see MODIFICATIONS.md.
 import { dirname, resolve } from "node:path";
 import type { CompileFailure } from "../compile-types.js";
-import { frontendDisposed } from "../frontend/dispose-hook.js";
-import {
-  fenceSpeculativeWasiFunctions,
-  moduleWasiUnavailableSurface,
-  targetRefusalDiag,
-} from "../backend/target-diagnostics.js";
-import {
-  libAsyncExportDiag,
-  libAsyncSurfaceDiag,
-  libExportUnresolvedDiag,
-  libGenericExportDiag,
-  libIntBoundaryDiag,
-  libNpmIneligibleDiag,
-  libSidecarDiag,
-  libUnmappableSignatureDiag,
-  iceDiag,
-  LIB_INBOUND_BYTES_TRAP_CODE,
-  LIB_RUNTIME_TRAP_CODES,
-  type ScrDiagnostic,
-} from "../diagnostics/diagnostic.js";
-import { compilerCrashDiag, isCompilerCrash } from "../diagnostics/crash-site.js";
-import {
-  checkLibraryIntegerSlots,
-  classSeed,
-  hasIntSlots,
-  join,
-  numberCarrierKind,
-  type AbsVal,
-  type FnIntSlots,
-  type IntClass,
-  type IntSlotConfig,
-} from "./int-infer.js";
+import { fenceSpeculativeWasiFunctions, moduleWasiUnavailableSurface, targetRefusalDiag } from "../backend/target-diagnostics.js";
+import { checkerPanicDiag, libAsyncExportDiag, libAsyncSurfaceDiag, libExportUnresolvedDiag, libGenericExportDiag, libIntBoundaryDiag, libNpmIneligibleDiag, libSidecarDiag, libUnmappableSignatureDiag, iceDiag, isCheckerPanic, LIB_INBOUND_BYTES_TRAP_CODE, LIB_RUNTIME_TRAP_CODES, type ScrDiagnostic } from "../diagnostics/diagnostic.js";
+import { checkLibraryIntegerSlots, classSeed, hasIntSlots, numberCarrierKind, type FnIntSlots, type IntSlotConfig } from "./int-infer.js";
 import { profileRemediation, profileTeaching, type LibraryProfile } from "./library-profile.js";
 import { decorateLibraryRefusals, evaluateLibraryFences } from "./fence-eval.js";
 import { assembleTrapTeaching } from "./trap-teaching.js";
-import {
-  buildSidecar,
-  canonicalModuleGraph,
-  canonicalPath,
-  libraryIdentityHashes,
-  type SidecarIntegerSlotFacts,
-  type SidecarIrRecordPattern,
-  type SidecarIrTypePattern,
-} from "./sidecar.js";
+import { buildSidecar, canonicalModuleGraph, canonicalPath, libraryIdentityHashes, type SidecarIntegerSlotFacts, type SidecarIrRecordPattern, type SidecarIrTypePattern } from "./sidecar.js";
 import { validateSidecar } from "./sidecar-validate.js";
-import type { EntryExport } from "../frontend/lib-exports.js";
+import type { EntryExportInfo } from "../frontend/lib-exports.js";
 import type { ContractFacts } from "../frontend/lib-contract.js";
 import type { LowerResult } from "../frontend/lowering/lowerer.js";
 import type { FrontendFactory } from "../frontend/pipeline.js";
-import {
-  type IrFfiImport,
-  type IrLibSection,
-  type IrModule,
-  type IrRecordShape,
-  type IrType,
-} from "../ir/ir.js";
+import { type IrFfiImport, type IrLibSection, type IrModule, type IrRecordShape, type IrType } from "../ir/ir.js";
 import { moduleLibAsyncSurface, moduleLibNondeterministicSurface } from "./ir-policy.js";
 import { validateModule } from "../ir/validate.js";
-import { checkContracts } from "../contracts/check.js";
 
 /** The marshalling-class fit over IR types (design §4.2 + the ratified
  * integer plumbing classes): number is every f64-backed class, bool/string
@@ -68,7 +25,6 @@ function libClassFits(cls: string, t: IrType): boolean {
     case "bool":
       return t.kind === "bool";
     case "string":
-    case "cstring":
       return t.kind === "string";
     case "bytes":
       return t.kind === "bytes" && t.elem === "u8";
@@ -79,14 +35,10 @@ function libClassFits(cls: string, t: IrType): boolean {
 
 /** Resolve the profile's export map against the entry module — SC4002/
  * SC4004/SC4007 from the declaration facts, SC4003 from the lowered IR
- * signatures — and land the library section on the module. The facts come
- * from the declaration the entry's export table names (directly, through an
- * export list, or through a re-export facade), and `libExportUnits` names
- * the unit that declaration lowered to. */
+ * signatures — and land the library section on the module. */
 function resolveLibrarySection(
   profile: LibraryProfile,
-  entryInfo: Map<string, EntryExport>,
-  libExportUnits: ReadonlyMap<string, string>,
+  entryInfo: Map<string, EntryExportInfo>,
   mod: IrModule,
   entryPath: string,
 ): { lib: IrLibSection } | { diagnostics: ScrDiagnostic[] } {
@@ -98,21 +50,7 @@ function resolveLibrarySection(
     const info = entryInfo.get(e.export);
     if (info === undefined) {
       diagnostics.push(
-        libExportUnresolvedDiag(
-          e.export,
-          "the entry module exports no value by that name",
-          entryLoc,
-        ),
-      );
-      continue;
-    }
-    if (info.kind === "value") {
-      diagnostics.push(
-        libExportUnresolvedDiag(
-          e.export,
-          `the entry module exports it as ${info.what}, not a function declaration`,
-          info.loc,
-        ),
+        libExportUnresolvedDiag(e.export, "the entry module has no exported function declaration by that name", entryLoc),
       );
       continue;
     }
@@ -124,18 +62,10 @@ function resolveLibrarySection(
       diagnostics.push(libAsyncExportDiag(e.export, info.async ? "async" : "generator", info.loc));
       continue;
     }
-    // The unit that supplies the export: the entry module's own function
-    // for a direct export, the declaring module's tagged unit when the
-    // entry re-exports it.
-    const fnName = libExportUnits.get(e.export) ?? e.export;
-    const fn = fnByName.get(fnName);
+    const fn = fnByName.get(e.export);
     if (fn === undefined) {
       diagnostics.push(
-        libExportUnresolvedDiag(
-          e.export,
-          "the export did not lower to a compiled function",
-          info.loc,
-        ),
+        libExportUnresolvedDiag(e.export, "the export did not lower to a compiled function", info.loc),
       );
       continue;
     }
@@ -164,9 +94,7 @@ function resolveLibrarySection(
         );
       }
     });
-    if (
-      e.returns === "void" ? fn.returnType.kind !== "void" : !libClassFits(e.returns, fn.returnType)
-    ) {
+    if (e.returns === "void" ? fn.returnType.kind !== "void" : !libClassFits(e.returns, fn.returnType)) {
       bad = true;
       diagnostics.push(
         libUnmappableSignatureDiag(
@@ -180,7 +108,7 @@ function resolveLibrarySection(
     if (!bad) {
       const resolvedExport: IrLibSection["exports"][number] = {
         symbol: e.symbol,
-        fnName,
+        fnName: e.export,
         params: e.params,
         returns: e.returns,
       };
@@ -200,22 +128,10 @@ function resolveLibrarySection(
           profileRemediation(profile, LIB_INBOUND_BYTES_TRAP_CODE),
         );
       }
-      if (e.params.includes("cstring")) {
-        // The host-contract trap for a NULL cstring parameter: a C string
-        // argument is a pointer to NUL-terminated text, never NULL. Same
-        // code and assembly-once discipline as the bytes and integer traps.
-        resolvedExport.inboundCstringTrap = assembleTrapTeaching(
-          profileTeaching(profile, LIB_INBOUND_BYTES_TRAP_CODE) ??
-            "scriptc: library inbound cstring parameter is NULL\n",
-          LIB_INBOUND_BYTES_TRAP_CODE,
-          e.symbol,
-          profileRemediation(profile, LIB_INBOUND_BYTES_TRAP_CODE),
-        );
-      }
       if (e.params.includes("i64") || e.params.includes("u64")) {
         // The sibling host-contract trap for inbound declared-integer
         // parameters (ask 4): a value past ±(2^53−1) cannot ride f64
-        // exactly, and implicit rounding is a coercion the author never
+        // exactly, and silent rounding is a coercion the author never
         // wrote. Same code (SC4012 — one host-contract story), same
         // assembly-once discipline.
         resolvedExport.inboundIntTrap = assembleTrapTeaching(
@@ -249,32 +165,29 @@ function resolveLibrarySection(
     }
   }
   const lib: IrLibSection = {
-    profileName: profile.name,
-    prefix: profile.prefix,
-    initSymbol: profile.initSymbol,
-    sinkRegisterSymbol: profile.sinkRegisterSymbol,
-    collectSymbol: profile.collectSymbol,
-    resultResetSymbol: profile.resultResetSymbol,
-    threadInstances: profile.instancePerThread,
-    // Host-callback channels: declaration order is the runtime slot
-    // assignment, and the unregistered-call trap text is assembled HERE,
-    // once, for consistent constant bytes (a DETECTED
-    // trap: the funnel classifies the "scriptc: library callback "
-    // prefix as SC4025 and names the entry the host called — the entry
-    // is runtime knowledge, so no compile-time SC4012-style assembly
-    // can carry it). Both fields stay absent on callback-free profiles
-    // (the byte-identity guarantee).
+      profileName: profile.name,
+      prefix: profile.prefix,
+      initSymbol: profile.initSymbol,
+      sinkRegisterSymbol: profile.sinkRegisterSymbol,
+      collectSymbol: profile.collectSymbol,
+      resultResetSymbol: profile.resultResetSymbol,
+      threadInstances: profile.instancePerThread,
+      // Host-callback channels: declaration order is the runtime slot
+      // assignment, and the unregistered-call trap text is assembled HERE,
+      // once, for consistent constant bytes (a DETECTED
+      // trap: the funnel classifies the "scriptc: library callback "
+      // prefix as SC4025 and names the entry the host called — the entry
+      // is runtime knowledge, so no compile-time SC4012-style assembly
+      // can carry it). Both fields stay absent on callback-free profiles
+      // (the byte-identity guarantee).
 
-    exports,
-    trapOverlays,
+      exports,
+      trapOverlays,
   };
   if (profile.callbacks.length > 0) {
     lib.callbackRegisterSymbol = profile.callbackRegisterSymbol!;
     lib.callbacks = profile.callbacks.map((cb, slot) => ({
-      name: cb.name,
-      slot,
-      params: [...cb.params],
-      returns: cb.returns,
+      name: cb.name, slot, params: [...cb.params], returns: cb.returns,
       unregisteredTrap: `scriptc: library callback '${cb.name}' invoked before registration\n`,
     }));
   }
@@ -286,93 +199,26 @@ function resolveLibrarySection(
  * / `exports.<name>.return`; the u8/u32/i32 plumbing classes contribute
  * their proven inbound shapes as parameter seeds (the wrapper's coercion
  * contract), tightening the intraprocedural analysis at zero declaration
- * cost. An f64 parameter contributes the shape it actually admits — any
- * double, NaN and fractions included — because the marshalled edge passes
- * it through untouched: if the same unit is also reached through an
- * integer entry, that entry's tighter assumption must not survive on the
- * f64 entry's behalf. Sidecar-declared slots (record fields, msg arms,
- * helper params and returns) merge into the same config at sidecar build. */
-function libraryIntSlotConfig(
-  profile: LibraryProfile,
-  libExportUnits: ReadonlyMap<string, string>,
-): IntSlotConfig {
+ * cost. Sidecar-declared slots (record fields, msg arms, helper params
+ * and returns) merge into the same config at sidecar build. */
+function libraryIntSlotConfig(profile: LibraryProfile): IntSlotConfig {
   const cfg: IntSlotConfig = { fns: new Map(), records: new Map() };
   for (const e of profile.exports) {
     const params = e.params.map((c) => (c === "i64" || c === "u64" ? c : null));
     const ret = e.returns === "i64" || e.returns === "u64" ? e.returns : null;
-    // classSeed(f64) is the unrestricted shape: the analysis counts an
-    // unconstrained double as a legitimate arrival, not as "no fact".
-    const paramSeeds = e.params.map((c) =>
-      c === "f64" || c === "u8" || c === "u32" || c === "i32" ? classSeed(c) : null,
-    );
-    if (params.every((p) => p === null) && ret === null && paramSeeds.every((s) => s === null))
-      continue;
-    // The slot config is keyed by the compiled unit (a re-exported export
-    // lives in its declaring module's unit); the paths name the profile's
-    // own export key, which is what a teaching or diagnostic quotes.
-    const fnName = libExportUnits.get(e.export) ?? e.export;
-    const existing = cfg.fns.get(fnName);
-    const slots: FnIntSlots = existing ?? {
-      fnName,
-      params: e.params.map(() => null),
-      paramPaths: e.params.map(() => null),
-      ret: null,
-      retPath: null,
-      paramSeeds: e.params.map(() => null),
+    const paramSeeds = e.params.map((c) => (c === "u8" || c === "u32" || c === "i32" ? classSeed(c) : null));
+    if (params.every((p) => p === null) && ret === null && paramSeeds.every((s) => s === null)) continue;
+    const slots: FnIntSlots = {
+      fnName: e.export,
+      params,
+      paramPaths: e.params.map((c, i) => (c === "i64" || c === "u64" ? `exports.${e.export}.params[${i}]` : null)),
+      ret,
+      retPath: ret !== null ? `exports.${e.export}.return` : null,
+      paramSeeds,
     };
-    if (existing === undefined) cfg.fns.set(fnName, slots);
-    // Two profile exports may alias one compiled unit, and that unit has
-    // ONE parameter binding and ONE return value; their declarations
-    // COALESCE rather than replace each other. The call-site obligation is
-    // the stricter class (u64's range is inside i64's, so proving u64
-    // discharges both), the parameter seed is the hull of every inbound
-    // shape (a value can arrive through any alias; an f64 alias admits the
-    // unrestricted shape, so nothing a sibling entry proves may stand in
-    // for it), and a path follows the declaration that set the class, so a
-    // refusal quotes a class that declaration actually made. Nothing an
-    // earlier export declared is dropped by a later one.
-    params.forEach((cls, i) => {
-      if (cls === null) return;
-      mergeDeclaredClass(slots, i, cls, `exports.${e.export}.params[${i}]`);
-      mergeDeclaredSeed(slots, i, classSeed(cls));
-    });
-    paramSeeds.forEach((seed, i) => {
-      if (seed !== null) mergeDeclaredSeed(slots, i, seed);
-    });
-    if (ret !== null) mergeDeclaredReturn(slots, ret, `exports.${e.export}.return`);
+    cfg.fns.set(e.export, slots);
   }
   return cfg;
-}
-
-/** Fold one declared parameter class onto a shared slot: keep the stricter
- * obligation (and the path that declared it). */
-function mergeDeclaredClass(slots: FnIntSlots, index: number, cls: IntClass, path: string): void {
-  while (slots.params.length <= index) {
-    slots.params.push(null);
-    slots.paramPaths.push(null);
-    slots.paramSeeds.push(null);
-  }
-  const current = slots.params[index] ?? null;
-  if (current === null || (current === "i64" && cls === "u64")) {
-    slots.params[index] = cls;
-    slots.paramPaths[index] = path;
-  }
-}
-
-/** Fold one declared return class onto a shared slot, same rule. */
-function mergeDeclaredReturn(slots: FnIntSlots, cls: IntClass, path: string): void {
-  if (slots.ret === null || (slots.ret === "i64" && cls === "u64")) {
-    slots.ret = cls;
-    slots.retPath = path;
-  }
-}
-
-/** Fold one inbound shape onto a shared slot's seed: the binding may hold
- * any alias's value, so the seed is the hull (least upper bound), never a
- * replacement. */
-function mergeDeclaredSeed(slots: FnIntSlots, index: number, seed: AbsVal): void {
-  const current = slots.paramSeeds[index] ?? null;
-  slots.paramSeeds[index] = current === null ? { ...seed } : join(current, seed);
 }
 
 /** Match the sidecar syntax's exact structural type projection against the
@@ -387,7 +233,10 @@ function sidecarRecordMatcher(
   const records = new Map((mod.records ?? []).map((shape) => [shape.id, shape]));
   const unions = new Map((mod.unions ?? []).map((union) => [union.id, union]));
 
-  const recordMatches = (pattern: SidecarIrRecordPattern, shape: IrRecordShape): boolean => {
+  const recordMatches = (
+    pattern: SidecarIrRecordPattern,
+    shape: IrRecordShape,
+  ): boolean => {
     if (shape.tuple === true || shape.indexValue !== undefined) return false;
     const variants = [pattern.fields];
     if (pattern.kindMayBeOmitted === true) {
@@ -403,7 +252,10 @@ function sidecarRecordMatcher(
     );
   };
 
-  const unionMatches = (patterns: SidecarIrTypePattern[], actual: IrType[]): boolean => {
+  const unionMatches = (
+    patterns: SidecarIrTypePattern[],
+    actual: IrType[],
+  ): boolean => {
     if (patterns.length !== actual.length) return false;
     const used = new Set<number>();
     const visit = (index: number): boolean => {
@@ -419,7 +271,10 @@ function sidecarRecordMatcher(
     return visit(0);
   };
 
-  const typeMatches = (pattern: SidecarIrTypePattern, actual: IrType): boolean => {
+  const typeMatches = (
+    pattern: SidecarIrTypePattern,
+    actual: IrType,
+  ): boolean => {
     switch (pattern.kind) {
       case "f64":
       case "string":
@@ -482,13 +337,18 @@ function mergeSidecarIntSlots(
       };
       cfg.fns.set(h.fnName, slots);
     }
-    // A sidecar helper may name a unit an export map (or another helper
-    // fact) already obliged, so these fold onto the slot instead of
-    // replacing it.
     if (h.kind === "param") {
-      mergeDeclaredClass(slots, h.index!, h.cls, h.path);
+      const i = h.index!;
+      while (slots.params.length <= i) {
+        slots.params.push(null);
+        slots.paramPaths.push(null);
+        slots.paramSeeds.push(null);
+      }
+      slots.params[i] = h.cls;
+      slots.paramPaths[i] = h.path;
     } else {
-      mergeDeclaredReturn(slots, h.cls, h.path);
+      slots.ret = h.cls;
+      slots.retPath = h.path;
     }
   }
   for (const r of facts.records) {
@@ -542,8 +402,12 @@ export function prepareLibrary(
   timing: (phase: string, detail?: Record<string, unknown>) => void = () => {},
 ): PreparedLibrary | CompileFailure {
   const entryPath = profile.entry;
-  // Library and executable graphs share automatic package eligibility.
-  // Explicit profile selections attempt source inference; failures remain refusals.
+  // Bare npm specifiers in a library graph take the STATIC-OR-REFUSE
+  // posture: "lib" runs the same auto-detection and eligibility bar as
+  // the executable lane's --npm-static (own .d.ts, unminified shipped JS,
+  // no build-transform markers), automatically — the library path has no
+  // island/dynamic tier to offer. Explicit profile npm_static entries may
+  // also attempt source inference; any failed attempt remains a refusal.
   const fe = createFrontend(entryPath, "lib", undefined, profile.npmStatic);
   timing("frontend-load", {
     entry_bytes: fe.entryText().length,
@@ -551,7 +415,7 @@ export function prepareLibrary(
   });
   let lowered: LowerResult;
   let sourceTexts: Map<string, string>;
-  let entryInfo: Map<string, EntryExport>;
+  let entryInfo: Map<string, EntryExportInfo>;
   let contractFacts: ContractFacts | null;
   try {
     // Every library refusal leaves through the ask-5 teaching decoration:
@@ -562,14 +426,23 @@ export function prepareLibrary(
       diagnostics: decorateLibraryRefusals(diagnostics, profile),
       sourceTexts: fe.sourceTexts(),
     });
-    // Report the package-specific refusal before general preflight errors.
-    const npmRefused = fe.npmStatic.filter((s) => s.status === "refused");
+    // The npm verdicts FIRST: whatever the shared frontend would have
+    // served from the island — an eligibility miss, an untyped install, a
+    // preflight offender inside a package's files, a dropped inferred
+    // surface — refuses here with the package and the specific bar it
+    // missed. Checked before the general preflight, whose diagnostics for
+    // these same imports speak executable-lane teachings (SC1010/SC0001 at
+    // the unresolvable edge); the library answer is this one.
+    const npmRefused = fe.npmStatic.filter((s) => s.status === "fallback");
     if (npmRefused.length > 0) {
       return fail(
         npmRefused.map((s) =>
           libNpmIneligibleDiag(
             s.package,
-            s.detail ?? "its static compilation was refused",
+            // The one shared offender reason that narrates the executable
+            // lane's fallback loses that clause here — no island exists on
+            // this path to serve anything.
+            (s.detail ?? "its static compilation was refused").replace("; the island serves the package", ""),
             fe.npmImportSites.get(s.package) ?? { file: entryPath, start: 0, end: 0 },
           ),
         ),
@@ -589,21 +462,14 @@ export function prepareLibrary(
     const contractSurfaceRoots: string[] = [];
     if (profile.sidecar !== null && profile.sidecar.integerSlots.length > 0) {
       const sc = profile.sidecar;
-      const fnNames = new Set(
-        contractFacts!.functions.filter((f) => !f.generic).map((f) => f.name),
-      );
+      const fnNames = new Set(contractFacts!.functions.filter((f) => !f.generic).map((f) => f.name));
       for (const name of [sc.initExport, sc.updateExport, sc.subscriptionsExport]) {
         if (fnNames.has(name)) contractSurfaceRoots.push(name);
       }
       for (const fn of contractFacts!.functions) {
         if (fn.generic) continue;
         const first = fn.params[0];
-        if (
-          first !== undefined &&
-          first.shape !== null &&
-          first.shape.k === "ref" &&
-          first.shape.name === sc.model
-        ) {
+        if (first !== undefined && first.shape !== null && first.shape.k === "ref" && first.shape.name === sc.model) {
           contractSurfaceRoots.push(fn.name);
         }
       }
@@ -615,12 +481,10 @@ export function prepareLibrary(
     // SC4024 diagnostics, unused channels legal, undeclared references
     // refused with the callback teaching. The library lane never loads a
     // native-FFI manifest, so the channel set owns the surface outright.
-    // A cstring channel parameter is a string on the TypeScript side; the
-    // channel's own classes (lib.callbacks) drive the marshalling.
     const cbImports: IrFfiImport[] = profile.callbacks.map((cb) => ({
       name: cb.name,
       symbol: cb.name,
-      params: cb.params.map((cls) => (cls === "cstring" ? "string" : cls)),
+      params: [...cb.params],
       returns: cb.returns,
     }));
     const integerSlotRoots: string[] = [];
@@ -630,9 +494,8 @@ export function prepareLibrary(
     }
     try {
       lowered = fe.lower({
+        dynamic: false,
         targetPlatform: buildPlatform,
-        // Library artifacts are static-tier only (two-tier design I2).
-        tierMode: "static-only",
         ...(cbImports.length > 0 ? { ffiImports: cbImports } : {}),
         ...(cbImports.length > 0 ? { libraryCallbacks: true } : {}),
         // The profile-mapped exports are called from OUTSIDE the graph:
@@ -653,15 +516,14 @@ export function prepareLibrary(
         lib_roots: profile.exports.length + contractSurfaceRoots.length,
       });
     } catch (e) {
-      if (!isCompilerCrash(e)) throw e;
-      return fail([compilerCrashDiag(e, { file: entryPath, start: 0, end: 0 })]);
+      if (!isCheckerPanic(e)) throw e;
+      return fail([checkerPanicDiag(e.message.split("\n", 1)[0]!, { file: entryPath, start: 0, end: 0 })]);
     }
     if (lowered.module === null) return fail(lowered.diagnostics);
-    entryInfo = fe.entryExports(profile.exports.map((e) => e.export));
+    entryInfo = fe.entryExports();
     sourceTexts = fe.sourceTexts();
   } finally {
     fe.dispose();
-    frontendDisposed();
   }
   const mod = lowered.module!;
   timing("frontend-dispose");
@@ -678,13 +540,7 @@ export function prepareLibrary(
   // then the profile's determinism fences (ask 5, SC4008) over the same
   // compiled graph the attestation scan reads: all refused before anything
   // is emitted, so the narrowed library link set below is structural fact.
-  const resolved = resolveLibrarySection(
-    profile,
-    entryInfo,
-    lowered.libExportUnits ?? new Map(),
-    mod,
-    entryPath,
-  );
+  const resolved = resolveLibrarySection(profile, entryInfo, mod, entryPath);
   if ("diagnostics" in resolved) return fail(resolved.diagnostics);
   const asyncSurface = moduleLibAsyncSurface(mod);
   if (asyncSurface !== null) {
@@ -693,24 +549,17 @@ export function prepareLibrary(
   const fenced = evaluateLibraryFences(mod, profile);
   if (fenced.length > 0) return fail(fenced);
   mod.lib = resolved.lib;
-  if (lowered.contracts) {
-    const checked = checkContracts(mod, lowered.contracts, sourceTexts);
-    timing("contracts");
-    if (checked.diagnostics.length > 0) return fail(checked.diagnostics);
-    if (checked.contracts) mod.contracts = checked.contracts;
-  }
   if (buildPlatform === "wasi") {
     fenceSpeculativeWasiFunctions(mod);
     const unavailable = moduleWasiUnavailableSurface(mod);
-    if (unavailable !== null)
-      return fail([targetRefusalDiag("wasm32-wasi", unavailable.surface, unavailable.loc)]);
+    if (unavailable !== null) return fail([targetRefusalDiag("wasm32-wasi", unavailable.surface, unavailable.loc)]);
   }
 
   // Ask 4's declared integer slots: the export map's i64/u64 classes
   // seed the config here; sidecar-declared slots (record fields, msg
   // arms, helper params/returns) merge in after the projection resolves
   // them below.
-  let intCfg = libraryIntSlotConfig(profile, lowered.libExportUnits ?? new Map());
+  let intCfg = libraryIntSlotConfig(profile);
 
   // The ask-2 contract sidecar rides the same invocation. Identity first
   // (schema §2's worked build_id definition over compiler version, profile
@@ -724,11 +573,7 @@ export function prepareLibrary(
   if (profile.sidecar !== null) {
     const rootDir = dirname(resolve(profilePath));
     const modules = canonicalModuleGraph(rootDir, sourceTexts);
-    const { buildId, sourceHash } = libraryIdentityHashes(
-      compilerVersion,
-      profile.profileBytes,
-      modules,
-    );
+    const { buildId, sourceHash } = libraryIdentityHashes(compilerVersion, profile.profileBytes, modules);
     mod.lib.identity = {
       buildIdSymbol: profile.sidecar.buildIdSymbol,
       abiVersionSymbol: profile.sidecar.abiVersionSymbol,
@@ -751,11 +596,7 @@ export function prepareLibrary(
     if (violations.length > 0) {
       // The projection above refuses every user-caused shape; a rule
       // violation surviving to here is an emitter bug.
-      return fail(
-        violations.map((v) =>
-          iceDiag(`sidecar self-check failed — ${v}`, { file: entryPath, start: 0, end: 0 }),
-        ),
-      );
+      return fail(violations.map((v) => iceDiag(`sidecar self-check failed — ${v}`, { file: entryPath, start: 0, end: 0 })));
     }
     sidecarJson = built.json;
     const merged = mergeSidecarIntSlots(intCfg, built.integerSlotFacts, mod);
@@ -775,11 +616,7 @@ export function prepareLibrary(
   if (hasIntSlots(intCfg)) {
     const refusals = checkLibraryIntegerSlots(mod, intCfg).filter((v) => v.outcome === "refuse");
     if (refusals.length > 0) {
-      return fail(
-        refusals.map((v) =>
-          libIntBoundaryDiag(v.path, v.cls, v.obligation!, v.detail!, v.fix!, v.loc),
-        ),
-      );
+      return fail(refusals.map((v) => libIntBoundaryDiag(v.path, v.cls, v.obligation!, v.detail!, v.fix!, v.loc)));
     }
   }
   timing("integer-proof");
@@ -809,45 +646,23 @@ export function libraryLocalizeSymbols(profile: LibraryProfile): string[] | unde
 
 export function libraryWasmExports(profile: LibraryProfile): string[] {
   return [
-    profile.initSymbol,
-    "scriptc_alloc",
-    "scriptc_free",
+    profile.initSymbol, "scriptc_alloc", "scriptc_free",
     ...(profile.collectSymbol === null ? [] : [profile.collectSymbol]),
     ...(profile.resultResetSymbol === null ? [] : [profile.resultResetSymbol]),
-    ...(profile.sidecar === null
-      ? []
-      : [profile.sidecar.buildIdSymbol, profile.sidecar.abiVersionSymbol]),
+    ...(profile.sidecar === null ? [] : [profile.sidecar.buildIdSymbol, profile.sidecar.abiVersionSymbol]),
     ...profile.exports.map((entry) => entry.symbol),
   ];
 }
 
-export function libraryWasmRefusal(
-  profile: LibraryProfile,
-  sanitize: boolean,
-): ScrDiagnostic | null {
+export function libraryWasmRefusal(profile: LibraryProfile, sanitize: boolean): ScrDiagnostic | null {
   const reserved = new Set(["scriptc_alloc", "scriptc_free", "memory", "_initialize", "_start"]);
-  const symbols = [
-    profile.initSymbol,
-    profile.sinkRegisterSymbol,
-    profile.collectSymbol,
-    profile.resultResetSymbol,
-    profile.callbackRegisterSymbol,
-    ...profile.exports.map((entry) => entry.symbol),
-    profile.sidecar?.buildIdSymbol,
-    profile.sidecar?.abiVersionSymbol,
-  ];
-  const surface = sanitize
-    ? "sanitized library builds"
-    : profile.instancePerThread
-      ? "thread-instanced libraries (instantiate separate Wasm instances instead)"
-      : profile.localizeRuntime
-        ? "runtime localization (Wasm instances already isolate their runtime)"
-        : symbols.some((symbol) => symbol != null && reserved.has(symbol))
-          ? "library symbols reserved by the Wasm embedding ABI"
-          : profile.callbacks.some((cb) => cb.name === "panic")
-            ? "a callback named 'panic' (reserved by the Wasm embedding ABI)"
-            : null;
-  return surface === null
-    ? null
-    : targetRefusalDiag("wasm32-wasi", surface, { file: profile.entry, start: 0, end: 0 });
+  const symbols = [profile.initSymbol, profile.sinkRegisterSymbol, profile.collectSymbol, profile.resultResetSymbol,
+    profile.callbackRegisterSymbol, ...profile.exports.map((entry) => entry.symbol), profile.sidecar?.buildIdSymbol, profile.sidecar?.abiVersionSymbol];
+  const surface = sanitize ? "sanitized library builds"
+    : profile.instancePerThread ? "thread-instanced libraries (instantiate separate Wasm instances instead)"
+    : profile.localizeRuntime ? "runtime localization (Wasm instances already isolate their runtime)"
+    : symbols.some((symbol) => symbol != null && reserved.has(symbol)) ? "library symbols reserved by the Wasm embedding ABI"
+    : profile.callbacks.some((cb) => cb.name === "panic") ? "a callback named 'panic' (reserved by the Wasm embedding ABI)"
+    : null;
+  return surface === null ? null : targetRefusalDiag("wasm32-wasi", surface, { file: profile.entry, start: 0, end: 0 });
 }

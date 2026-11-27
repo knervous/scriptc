@@ -1,6 +1,0 @@
-{
- "order": [
-  "<repo>/tests/corpus/class-never-getter.ts"
- ],
- "diags": []
-}

@@ -1,6 +1,0 @@
-{
- "order": [
-  "<repo>/tests/corpus/5685-loop-counter-offset-bounds.ts"
- ],
- "diags": []
-}

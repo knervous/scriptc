@@ -1,6 +1,0 @@
-{
- "order": [
-  "<repo>/tests/corpus/7180-generic-local-binding-early-uses.ts"
- ],
- "diags": []
-}

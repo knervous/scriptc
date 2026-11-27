@@ -1,6 +1,0 @@
-{
- "order": [
-  "<repo>/tests/corpus/9396-destructure-tuple-or-empty.ts"
- ],
- "diags": []
-}

@@ -1,7 +1,0 @@
-{
- "order": [
-  "<repo>/tests/corpus/950-modules-basic/util.ts",
-  "<repo>/tests/corpus/950-modules-basic/main.ts"
- ],
- "diags": []
-}

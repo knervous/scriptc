@@ -1,6 +1,0 @@
-{
- "order": [
-  "<repo>/tests/corpus/3116-sequence-expression-lifetimes.ts"
- ],
- "diags": []
-}

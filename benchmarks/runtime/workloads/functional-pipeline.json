@@ -1,7 +1,0 @@
-{
-  "entry": "workloads/functional-pipeline.ts",
-  "args": [
-    "1"
-  ],
-  "scaleArg": 0
-}

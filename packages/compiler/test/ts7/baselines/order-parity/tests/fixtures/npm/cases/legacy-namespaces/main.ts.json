@@ -1,6 +1,0 @@
-{
- "order": [
-  "<repo>/tests/fixtures/npm/cases/legacy-namespaces/main.ts"
- ],
- "diags": []
-}

@@ -1,3 +1,4 @@
+// This file was modified from scriptc (Apache-2.0); see MODIFICATIONS.md.
 #include "scr_runtime.h"
 #include "scr_key.h"
 #include "scr_collation_data.h"
@@ -2965,7 +2966,18 @@ ScrStr *scr_str_trim_end(ScrStr *s) {
 /* Split owns a fresh array and appends only present string values. Fill an
  * available dense slot directly; ordinary push handles growth and the sparse
  * boundary. The array remains valid after every append, including RC audit. */
-
+/* split(separator, limit) with a STRING separator (ECMA-262 22.1.3.23):
+ * limit is ToUint32'd; zero returns [] and reaching the limit stops before
+ * any later separator probes. The no-limit wrapper supplies 2^32-1.
+ * an empty separator splits into single UTF-16 code units ("".split("") is
+ * [] — no probe matches nothing); a non-empty separator splits on every
+ * byte-level occurrence (well-formed UTF-8 is self-synchronizing, so byte
+ * matches are exactly code-point matches), keeping empty pieces at the
+ * ends and between adjacent separators; an empty subject with a non-empty
+ * separator is [""]. Where JS's per-unit split of an astral char would
+ * yield the two lone surrogate halves, each half is U+FFFD here
+ * (divergence 2 — the same substitution the island's boundary marshal
+ * applied). Borrows both; returns a +1 string[]. */
 void scr_str_split_cursor_init(ScrSplitCursor *cursor, uint32_t limit) {
   cursor->offset = 0;
   cursor->remaining = limit;
@@ -4152,6 +4164,7 @@ ScrArr *scr_str_code_points(ScrStr *s) {
   out->filled = (uint32_t)count;
   return out;
 }
+
 
 /* ── the URI component codecs (encodeURIComponent/decodeURIComponent) ──
  * ECMA-262 Encode/Decode with the component sets, byte-wise over the

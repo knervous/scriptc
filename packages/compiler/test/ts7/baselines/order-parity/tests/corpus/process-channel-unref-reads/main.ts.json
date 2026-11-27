@@ -1,6 +1,0 @@
-{
- "order": [
-  "<repo>/tests/corpus/process-channel-unref-reads/main.ts"
- ],
- "diags": []
-}

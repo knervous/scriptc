@@ -1,3 +1,4 @@
+// This file was modified from scriptc (Apache-2.0); see MODIFICATIONS.md.
 import { emitPerKeyOrder } from "./key-orders.js";
 import { typedRefConstructor } from "./shapes.js";
 import { bindLiveArrayOps } from "./expr-stream-bridges.js";
@@ -69,7 +70,7 @@ import {
   releaseKeyTemporary,
 } from "./string-union-keys.js";
 import { llvmCommentText } from "./common.js";
-import { JS_BITS } from "./jsval-encoding.js";
+import { JS_BITS } from "./jsword-encoding.js";
 import {
   arrNewCall,
   elemAccess,
@@ -214,6 +215,7 @@ export const DYN_KIND = {
   FUNC: 8,
   HANDLE: 9,
   PROMISE: 10,
+  JSVAL: 11 /* SCR_DYN_JSVAL — island values held by reference */,
   TYPED_REF: 12 /* SCR_DYN_TYPED_REF — static Web-stream transit capsule */,
   PROXY: 13,
   BIGINT: 14,
@@ -333,8 +335,8 @@ export interface DynHost extends WalkerHost {
   classValueSubtypes(className: string): readonly string[];
   /** emitter.ts's pendingTestLines: the inline pending-exception test. */
   pendingTestLines(dest: string): string[];
-  /** The closures with a jsval body (IrFunction.jsEntry) on targets with
-   * jsval words, which the box builders give a jsval entry. */
+  /** The closures with a jsword body (IrFunction.jsEntry) on targets with
+   * jsword words, which the box builders give a jsword entry. */
   jsEntryClosures?(): readonly JsEntryClosure[];
   /** The view bodies whose closures box as the function they forward to
    * (IrFunction.boxesSource). */
@@ -354,13 +356,13 @@ export interface DynHost extends WalkerHost {
   pendingBailReleaseLines(type: IrType, value: string): string[];
 }
 
-/** A closure with a jsval body (IrFunction.jsEntry), for the box builders. */
+/** A closure with a jsword body (IrFunction.jsEntry), for the box builders. */
 export interface JsEntryClosure {
   /** The closure's entry symbol (ScrClosure.fn) and signature. */
   closure: string;
   params: readonly IrType[];
   ret: IrType;
-  /** The jsval body's entry symbol and signature. */
+  /** The jsword body's entry symbol and signature. */
   body: string;
   bodyParams: readonly IrType[];
   bodyRet: IrType;
@@ -1006,9 +1008,7 @@ export class LlDyn {
     B.condBr(matches, yes, no);
   }
 
-  private get S(): "i32" | "i64" {
-    return this.host.sizeType;
-  }
+  private get S(): "i32" | "i64" { return this.host.sizeType; }
   private abiOffset(native64: number, wasm32: number): number {
     return this.S === "i32" ? wasm32 : native64;
   }
@@ -2297,6 +2297,23 @@ export class LlDyn {
     return matched;
   }
 
+  /** An island array (`%d` a JSVAL node) is tested and checked as the dyn array its own iteration drains to: `again`
+   * runs this helper on that view, whose answer the block returns; other values fall through. */
+  private islandArrayView(B: BlockBuilder, again: (view: string) => string, retTy: "i1" | "ptr"): void {
+    this.host.declare(`declare ptr @scr_dyn_isl_array_view(ptr)`);
+    this.host.declare(`declare void @scr_dyn_release_v(ptr)`);
+    const view = B.tmp(), found = B.tmp();
+    const lView = B.newLabel("isl.arr"), lNot = B.newLabel("isl.not");
+    B.line(`${view} = call ptr @scr_dyn_isl_array_view(ptr %d)`);
+    B.line(`${found} = icmp ne ptr ${view}, null`);
+    B.condBr(found, lView, lNot);
+    B.startBlock(lView);
+    const r = again(view);
+    B.line(`call void @scr_dyn_release_v(ptr ${view})`);
+    B.terminate(`ret ${retTy} ${r}`);
+    B.startBlock(lNot);
+  }
+
   /** `sc_dm_<n>(ptr d) -> i1` — does this dyn fit T? Never throws. */
   dynMatchHelper(t: IrType, preserveRefs = false): string {
     const key = checkedConversionKey(t);
@@ -2336,7 +2353,6 @@ export class LlDyn {
     // A union matches a capsule of another type through its arms below: a
     // class capsule in a `C | undefined` field matches the `C` arm.
     if (t.kind !== "dyn" && t.kind !== "union") {
-      const view = this.viewFn(wrapped);
       this.host.declare(`declare void @scr_dyn_release_v(ptr)`);
       const kind = this.kindOf(B, "%d");
       const capsule = B.tmp();
@@ -2361,11 +2377,35 @@ export class LlDyn {
         }
         B.terminate(`ret i1 false`);
       } else {
+        // A class instance's capsule has no view to test (its own type matched above, by identity): it does not fit.
+        this.host.declare(`declare ptr @scr_dyn_typed_ref_match_view(ptr)`);
         const materialized = B.tmp();
+        const viewless = B.tmp();
         const matched = B.tmp();
-        B.line(`${materialized} = call ptr @${view}(ptr %d)`);
+        const lView = B.newLabel("dm.tr.view");
+        const lNone = B.newLabel("dm.tr.none");
+        B.line(`${materialized} = call ptr @scr_dyn_typed_ref_match_view(ptr %d)`);
+        B.line(`${viewless} = icmp eq ptr ${materialized}, null`);
+        B.condBr(viewless, lNone, lView);
+        B.startBlock(lNone);
+        B.terminate(`ret i1 false`);
+        B.startBlock(lView);
+        // A cyclic graph reaches this object again through its own fields: the match in progress is assumed (the
+        // greatest fixpoint, as a structural type test of a recursive type is), or the walk never ends.
+        this.host.declare(`declare zeroext i1 @scr_dyn_typed_ref_enter(ptr, ptr)`);
+        this.host.declare(`declare void @scr_dyn_typed_ref_leave()`);
+        const entered = B.tmp();
+        const lWalk = B.newLabel("dm.tr.walk");
+        const lAgain = B.newLabel("dm.tr.again");
+        B.line(`${entered} = call zeroext i1 @scr_dyn_typed_ref_enter(ptr %d, ptr @${name})`);
+        B.condBr(entered, lWalk, lAgain);
+        B.startBlock(lAgain);
+        B.line(`call void @scr_dyn_release_v(ptr ${materialized})`);
+        B.terminate(`ret i1 true`);
+        B.startBlock(lWalk);
         B.line(`${matched} = call zeroext i1 @${name}(ptr ${materialized})`);
         B.line(`call void @scr_dyn_release_v(ptr ${materialized})`);
+        B.line(`call void @scr_dyn_typed_ref_leave()`);
         B.terminate(`ret i1 ${matched}`);
       }
       B.startBlock(lPlain);
@@ -2398,6 +2438,12 @@ export class LlDyn {
         const r = B.tmp();
         B.line(`${r} = call zeroext i1 @scr_dyn_native_regex_is(ptr %d)`);
         B.terminate(`ret i1 ${r}`);
+        break;
+      }
+      // A host value (the native host island's objects and functions): the dyn holds it as a JSVAL node. Scalars
+      // normalize to their own kinds on entry (scr_dyn_from_jsval), so they match their own arms first.
+      case "jsval": {
+        kindIs(DYN_KIND.JSVAL);
         break;
       }
       case "map":
@@ -2565,10 +2611,13 @@ export class LlDyn {
         const l0 = B.newLabel("dm.o");
         let readable = isObj;
         if (!shape.indexValue) {
-          const proxy = B.tmp();
+          // A proxy, or an island value (its declared fields read by property get).
+          const proxy = B.tmp(), island = B.tmp(), either = B.tmp();
           readable = B.tmp();
           B.line(`${proxy} = icmp eq i32 ${kind}, ${DYN_KIND.PROXY}`);
-          B.line(`${readable} = or i1 ${isObj}, ${proxy}`);
+          B.line(`${island} = icmp eq i32 ${kind}, ${DYN_KIND.JSVAL}`);
+          B.line(`${either} = or i1 ${proxy}, ${island}`);
+          B.line(`${readable} = or i1 ${isObj}, ${either}`);
           // A native handle (a URL, a MIMEType, a Set) is a JavaScript
           // object: Node answers its members through the handle's getters,
           // so a record shape matches it like a plain object.
@@ -2578,10 +2627,11 @@ export class LlDyn {
           B.line(`${withHandle} = or i1 ${readable}, ${handle}`);
           readable = withHandle;
           if (this.islandReads()) {
-            const island = this.isIslandValue(B);
+            // A value upstream's Node island made (its handle tag).
+            const nodeIsland = this.isIslandValue(B);
             const objectOrProxy = readable;
             readable = B.tmp();
-            B.line(`${readable} = or i1 ${objectOrProxy}, ${island}`);
+            B.line(`${readable} = or i1 ${objectOrProxy}, ${nodeIsland}`);
           }
         }
         B.condBr(readable, l0, fail);
@@ -2657,6 +2707,11 @@ export class LlDyn {
       case "array": {
         const m = this.dynMatchHelper(t.elem, preserveRefs);
         const fail = B.newLabel("dm.f");
+        this.islandArrayView(B, (view) => {
+          const r = B.tmp();
+          B.line(`${r} = call zeroext i1 @${name}(ptr ${view})`);
+          return r;
+        }, "i1");
         const { source, owned } = this.arraySource(B, () => B.terminate(`ret i1 false`));
         const isArr = B.tmp();
         B.line(`${isArr} = icmp eq i32 ${this.kindOf(B, source)}, ${DYN_KIND.ARR}`);
@@ -2738,6 +2793,12 @@ export class LlDyn {
         B.terminate(`ret i1 false`);
         B.startBlock(yes);
         B.terminate(`ret i1 true`);
+        break;
+      }
+      // No dyn value is a module namespace on this lane (a namespace boxes as its token string, which no check
+      // takes back), so a namespace arm never matches.
+      case "moduleNs": {
+        B.terminate(`ret i1 false`);
         break;
       }
       default: {
@@ -4114,18 +4175,24 @@ export class LlDyn {
           srcOwned = picked.owned;
           requireKind(DYN_KIND.OBJ, "dcr", src);
         } else {
+          // An object, a proxy, or an island (JSVAL) value: its declared fields read by property get (a DOM element's
+          // width, a DOMRect's height).
           const kind = this.kindOf(B, "%d"),
             object = B.tmp(),
             proxy = B.tmp(),
+            jsval = B.tmp(),
+            either = B.tmp(),
             handle = B.tmp(),
             readable = B.tmp(),
             withHandle = B.tmp();
           B.line(`${object} = icmp eq i32 ${kind}, ${DYN_KIND.OBJ}`);
           B.line(`${proxy} = icmp eq i32 ${kind}, ${DYN_KIND.PROXY}`);
+          B.line(`${jsval} = icmp eq i32 ${kind}, ${DYN_KIND.JSVAL}`);
+          B.line(`${either} = or i1 ${proxy}, ${jsval}`);
           // A native handle is a JavaScript object whose members its getters
           // answer, so a record shape checks it like a plain object.
           B.line(`${handle} = icmp eq i32 ${kind}, ${DYN_KIND.HANDLE}`);
-          B.line(`${readable} = or i1 ${object}, ${proxy}`);
+          B.line(`${readable} = or i1 ${object}, ${either}`);
           B.line(`${withHandle} = or i1 ${readable}, ${handle}`);
           let accepts = withHandle;
           if (this.islandReads()) {
@@ -4349,6 +4416,11 @@ export class LlDyn {
       case "array": {
         const elem = t.elem;
         const c = this.dynCheckHelper(elem, preserveRefs, sole);
+        this.islandArrayView(B, (view) => {
+          const r = B.tmp();
+          B.line(`${r} = call ptr @${name}(ptr ${view}, ptr %path)`);
+          return r;
+        }, "ptr");
         const { source, owned } = this.arraySource(B, () => B.terminate(`ret ptr null`));
         requireKind(DYN_KIND.ARR, "dca", source);
         const n = this.lenOf(B, source);
@@ -4730,6 +4802,23 @@ export class LlDyn {
         B.terminate(`ret ptr ${a}`);
         break;
       }
+      // No dyn value is a module namespace on this lane (dynMatch's moduleNs arm): the check fails with its
+      // path-annotated TypeError.
+      case "moduleNs": {
+        host.declare(`declare void @scr_dyn_check_fail(ptr, ptr, ptr)`);
+        B.line(`call void @scr_dyn_check_fail(ptr %path, ptr ${host.cstr("module namespace")}, ptr %d)`);
+        B.terminate(`ret ptr null`);
+        break;
+      }
+      case "jsval": {
+        // An island (host) value held as dyn data: the same value back (a JSVAL node unwraps by reference, data
+        // rebuilds as island values; NULL with the TypeError pending for kinds that cannot cross).
+        host.declare(`declare ptr @scr_jsval_from_dyn(ptr)`);
+        const r = B.tmp();
+        B.line(`${r} = call ptr @scr_jsval_from_dyn(ptr %d)`);
+        B.terminate(`ret ptr ${r}`);
+        break;
+      }
       default: {
         // Runtime HANDLE targets: a tag-checked reference unwrap (+1 —
         // identity, no copy; the runtime throws the path-annotated
@@ -5062,6 +5151,9 @@ export class LlDyn {
         B.terminate(`ret ptr ${r}`);
         break;
       }
+      // A module namespace is held as its token string; it enters dyn as that string (WasmGC's rule: a namespace
+      // crosses as its module id), and nothing checks it back into a namespace (the moduleNs dynCheck fails).
+      case "moduleNs":
       case "string": {
         host.declare(`declare ptr @scr_dyn_new_str(ptr)`);
         const r = B.tmp();
@@ -5250,7 +5342,7 @@ export class LlDyn {
           const flags = B.tmp();
           const np = B.tmp();
           const alloc = B.tmp();
-          B.line(`${ovfp} = getelementptr inbounds %${struct}, ptr %v, i64 0, i32 1`);
+          B.line(`${ovfp} = getelementptr inbounds %${struct}, ptr %v, i64 0, i32 ${base}`);
           B.line(`${ovf} = load ptr, ptr ${ovfp} ; overflow map`);
           B.line(
             `${flagsp} = getelementptr inbounds i8, ptr ${ovf}, i64 ${mapFlagsOffset(host.sizeType)}`,
@@ -5438,6 +5530,11 @@ export class LlDyn {
           snapshot = B.tmp();
           B.line(`${snapshot} = call ptr @scr_record_source_apply(ptr ${d}, ptr %v)`);
         }
+        // A frozen record's copy is frozen (frozen-records.ts), before it is marked a native snapshot.
+        if (host.freezableShapes.has(t.shapeId)) {
+          host.declare(`declare void @scr_record_freeze_view(ptr, ptr)`);
+          B.line(`call void @scr_record_freeze_view(ptr %v, ptr ${snapshot})`);
+        }
         host.declare(`declare ptr @scr_dyn_mark_snapshot(ptr)`);
         B.line(`call ptr @scr_dyn_mark_snapshot(ptr ${snapshot})`);
         B.terminate(`ret ptr ${snapshot}`);
@@ -5613,6 +5710,14 @@ export class LlDyn {
         const adapter = this.promiseDynAdapterHelper(t.inner);
         const r = B.tmp();
         B.line(`${r} = call ptr @scr_dyn_new_promise_adapting(ptr %v, ptr @${adapter})`);
+        B.terminate(`ret ptr ${r}`);
+        break;
+      }
+      case "jsval": {
+        // An island (host) value entering dyn data: scalars normalize, objects wrap by reference (a JSVAL node).
+        host.declare(`declare ptr @scr_dyn_from_jsval(ptr)`);
+        const r = B.tmp();
+        B.line(`${r} = call ptr @scr_dyn_from_jsval(ptr %v)`);
         B.terminate(`ret ptr ${r}`);
         break;
       }
@@ -5802,6 +5907,7 @@ export class LlDyn {
         DYN_KIND.FUNC,
         DYN_KIND.HANDLE,
         DYN_KIND.PROMISE,
+        DYN_KIND.JSVAL,
         DYN_KIND.TYPED_REF,
         DYN_KIND.PROXY,
         DYN_KIND.BIGINT,
@@ -5828,6 +5934,14 @@ export class LlDyn {
         B.startBlock(lPut);
         this.putScrStr(B, "%b", text);
         B.line(`call void @scr_str_release(ptr ${text})`);
+        B.br(done);
+      }
+      B.startBlock(labels.get(DYN_KIND.JSVAL)!);
+      {
+        // Island-held: the engine's own ToString (a bridged failure
+        // leaves the exception pending and appends nothing).
+        host.declare(`declare void @scr_dyn_isl_tostr_buf(ptr, ptr)`);
+        B.line(`call void @scr_dyn_isl_tostr_buf(ptr %b, ptr %d)`);
         B.br(done);
       }
       B.startBlock(labels.get(DYN_KIND.TYPED_REF)!);
@@ -6392,7 +6506,9 @@ export class LlDyn {
       B.terminate(`ret ptr ${r}`);
       B.startBlock(lNext);
     }
-
+    // ISLAND-held receivers: o[k] reads the REAL engine property (getters
+    // included, throws bridged catchably) and the result wraps back
+    // scalar-normalized — the routed keyed read that retired the fence.
     {
       const isProxy = B.tmp();
       B.line(`${isProxy} = icmp eq i32 ${kd}, ${DYN_KIND.PROXY}`);
@@ -6406,7 +6522,19 @@ export class LlDyn {
       B.terminate(`ret ptr ${r}`);
       B.startBlock(lNext);
     }
-
+    {
+      const isJv = B.tmp();
+      B.line(`${isJv} = icmp eq i32 ${kd}, ${DYN_KIND.JSVAL}`);
+      const lJv = B.newLabel("kg.jv");
+      const lNext = B.newLabel("kg.n");
+      B.condBr(isJv, lJv, lNext);
+      B.startBlock(lJv);
+      host.declare(`declare ptr @scr_dyn_isl_key_get(ptr, ptr)`);
+      const r = B.tmp();
+      B.line(`${r} = call ptr @scr_dyn_isl_key_get(ptr %d, ptr %k)`);
+      B.terminate(`ret ptr ${r}`);
+      B.startBlock(lNext);
+    }
     // OBJ: the own member or the inherited builtin Error constructor.
     {
       const isObj = B.tmp();
@@ -6829,7 +6957,48 @@ export class LlDyn {
       B.terminate(`ret ptr ${out}`);
       B.startBlock(lNext);
     }
-
+    // Native collections (Map, Set and the other runtime handles with an iteration pack) iterate their entries in
+    // order; a collection cannot change while a pattern takes its first N, so taking them from the pack is exact.
+    // A handle with no pack throws the not-iterable TypeError there.
+    {
+      const isHandle = B.tmp();
+      B.line(`${isHandle} = icmp eq i32 ${kd}, ${DYN_KIND.HANDLE}`);
+      const lHandle = B.newLabel("din.h");
+      const lNotHandle = B.newLabel("din.nh");
+      B.condBr(isHandle, lHandle, lNotHandle);
+      B.startBlock(lHandle);
+      host.declare(`declare ptr @scr_dyn_iter_pack(ptr, ptr)`);
+      host.declare(`declare void @scr_dyn_release_v(ptr)`);
+      const packed = B.tmp(), none = B.tmp(), lPacked = B.newLabel("din.hp"), lFailed = B.newLabel("din.hf");
+      B.line(`${packed} = call ptr @scr_dyn_iter_pack(ptr %d, ptr null)`);
+      B.line(`${none} = icmp eq ptr ${packed}, null`);
+      B.condBr(none, lFailed, lPacked);
+      B.startBlock(lFailed);
+      B.terminate(`ret ptr null`);
+      B.startBlock(lPacked);
+      const out = B.tmp();
+      B.line(`${out} = call ptr @${name}(ptr ${packed}, ${host.sizeType} %n, ptr %spelling)`);
+      B.line(`call void @scr_dyn_release_v(ptr ${packed})`);
+      B.terminate(`ret ptr ${out}`);
+      B.startBlock(lNotHandle);
+    }
+    // Island-held sources keep the engine's iterator and IteratorClose
+    // behavior while returning checked values for the destructuring slots.
+    {
+      const isJv = B.tmp();
+      B.line(`${isJv} = icmp eq i32 ${kd}, ${DYN_KIND.JSVAL}`);
+      const lJv = B.newLabel("din.jv");
+      const lNotJv = B.newLabel("din.njv");
+      B.condBr(isJv, lJv, lNotJv);
+      B.startBlock(lJv);
+      host.declare(`declare ptr @scr_dyn_jsval_iter_n(ptr, double)`);
+      const count = B.tmp();
+      const out = B.tmp();
+      B.line(`${count} = sitofp ${host.sizeType} %n to double`);
+      B.line(`${out} = call ptr @scr_dyn_jsval_iter_n(ptr %d, double ${count})`);
+      B.terminate(`ret ptr ${out}`);
+      B.startBlock(lNotJv);
+    }
     const okA = B.tmp();
     const okS = B.tmp();
     const okB = B.tmp();
@@ -7059,7 +7228,14 @@ export class LlDyn {
       B.line(`${r} = ${this.unnamedFuncBoxCall(t, expr)}`);
       return r;
     }
-
+    if (t.kind === "jsval") {
+      // An island value wraps by reference (scalar-normalizing) — the
+      // jsval-returning callback shape of the routed-dispatch lane.
+      this.host.declare(`declare ptr @scr_dyn_from_jsval(ptr)`);
+      const r = B.tmp();
+      B.line(`${r} = call ptr @scr_dyn_from_jsval(ptr ${expr})`);
+      return r;
+    }
     const r = B.tmp();
     B.line(`${r} = call ptr @${this.toDynHelper(t)}(${this.valTy(t)} ${expr})`);
     return r;
@@ -7159,6 +7335,26 @@ export class LlDyn {
       B.line(`${ad} = load ptr, ptr ${adSlot}`);
       if (p.kind === "dyn") {
         argNames.push(this.retainDyn(B, ad));
+      } else if (p.kind === "jsval") {
+        // A checker-'any' param: the dyn argument enters the island —
+        // wrapped cells unwrap by reference, data deep-copies, boxed
+        // functions cross through the host shim; a kind with no crossing
+        // throws the catchable TypeError (null + pending).
+        host.declare(`declare ptr @scr_jsval_from_dyn(ptr)`);
+        const a = B.tmp();
+        B.line(`${a} = call ptr @scr_jsval_from_dyn(ptr ${ad})`);
+        const isNull = B.tmp();
+        B.line(`${isNull} = icmp eq ptr ${a}, null`);
+        const lFail = B.newLabel("dfk.jf");
+        const lOk = B.newLabel("dfk.jo");
+        B.condBr(isNull, lFail, lOk);
+        B.startBlock(lFail);
+        t.params.slice(0, i).forEach((q, j) => {
+          if (isRefCounted(q)) B.line(`call void ${releaseSym(host, q)}(ptr ${argNames[j]})`);
+        });
+        B.terminate(`ret ptr null`);
+        B.startBlock(lOk);
+        argNames.push(a);
       } else {
         const pathSlot = B.slot();
         B.entryAllocas.push(`${pathSlot} = alloca %ScrDynPath`);
@@ -7274,7 +7470,7 @@ export class LlDyn {
   }
 
   /** `sc_jt_<n>(ptr c, ptr args, size argc) -> ptr`, a function value's
-   * jsval entry (ScrDynJsEntry) into a closure's jsval body `target`
+   * jsword entry (ScrDynJsEntry) into a closure's jsword body `target`
    * (IrFunction.jsEntry, 64-bit targets): passes each argument word to the
    * body, a missing one as undefined and a dyn parameter's boxed, and
    * returns the body's result as an owned word. Like the closure's own
@@ -7309,14 +7505,14 @@ export class LlDyn {
       const word = B.tmp();
       B.line(`${word} = load ptr, ptr ${slot}`);
       const owned = B.tmp();
-      if (p.kind === "jsval") {
+      if (p.kind === "jsword") {
         host.declare(`declare ptr @scr_js_retain(ptr)`);
         B.line(`${owned} = call ptr @scr_js_retain(ptr ${word})`);
       } else if (p.kind === "dyn") {
         host.declare(`declare ptr @scr_js_to_dyn_borrow(ptr)`);
         B.line(`${owned} = call ptr @scr_js_to_dyn_borrow(ptr ${word})`);
       } else {
-        throw new InternalCompilerError(`llvm emitter bug: jsval entry parameter ${p.kind}`);
+        throw new InternalCompilerError(`llvm emitter bug: jsword entry parameter ${p.kind}`);
       }
       return `ptr ${owned}`;
     });
@@ -7329,7 +7525,7 @@ export class LlDyn {
       const r = B.tmp();
       B.line(`${r} = call ${this.valTy(ret)} @${target}(${callArgs})`);
       this.pendingBail(B, "jtr", () => {}, `ptr ${undefinedWord}`, ret, r, true);
-      if (ret.kind === "jsval") {
+      if (ret.kind === "jsword") {
         B.terminate(`ret ptr ${r}`);
       } else if (ret.kind === "f64") {
         const raw = B.tmp();
@@ -7359,7 +7555,7 @@ export class LlDyn {
       }
     }
     this.defs.push(
-      `define internal ptr @${name}(ptr %c, ptr %args, ${host.sizeType} %argc) ${FN_ATTRS} { ; jsval entry into ${llvmCommentText(target)}`,
+      `define internal ptr @${name}(ptr %c, ptr %args, ${host.sizeType} %argc) ${FN_ATTRS} { ; jsword entry into ${llvmCommentText(target)}`,
       B.render(),
       `}`,
       ``,
@@ -7554,21 +7750,24 @@ export class LlDyn {
       : `call ptr @${named}(ptr ${value})`;
   }
 
-  /** The box builder dynFrom emits for one closure signature. */
-  dynFuncBoxHelper(t: IrType & { kind: "func" }): string {
+  /** The box builder dynFrom emits for one closure signature. `jsLength` is the function's own `length` when it
+   * differs from its parameter count (a lifted builtin such as Array.of, whose IrFunction says so). */
+  dynFuncBoxHelper(t: IrType & { kind: "func" }, jsLength?: number): string {
+    const arity = jsLength ?? t.params.length - (t.restAbi === "typed" ? 1 : 0);
     const key = typeKey(t);
-    const existing = this.dynFuncBoxes.get(key);
+    const memo = jsLength === undefined ? key : `${key}#length=${jsLength}`;
+    const existing = this.dynFuncBoxes.get(memo);
     if (existing) return existing;
-    const name = this.host.contentSymbol("sc_dfb_", key);
-    this.dynFuncBoxes.set(key, name);
+    const name = this.host.contentSymbol("sc_dfb_", memo);
+    this.dynFuncBoxes.set(memo, name);
     this.host.journalAllocated?.(name, "dyn.dynFuncBoxHelper", [t]);
     const host = this.host;
     const thunk = this.dynFuncThunkHelper(t);
     host.declare(`declare ptr @scr_closure_retain_v(ptr)`);
     host.declare(`declare ptr @scr_dyn_new_func(ptr, ptr, i32, ptr, ptr)`);
     const sigLit = host.cstr(key);
-    // A closure of this signature with a jsval body gets the function
-    // value's jsval entry, however the value is boxed: the closure's
+    // A closure of this signature with a jsword body gets the function
+    // value's jsword entry, however the value is boxed: the closure's
     // entry pointer names it.
     const entries =
       t.rest === true
@@ -7637,7 +7836,7 @@ export class LlDyn {
       `entry:`,
       ...through,
       `  %c = call ptr @scr_closure_retain_v(ptr %v)`,
-      `  %r = call ptr @scr_dyn_new_func(ptr %c, ptr @${thunk}, i32 ${t.params.length - (t.restAbi === "typed" ? 1 : 0)}, ptr ${sigLit}, ptr %fname)`,
+      `  %r = call ptr @scr_dyn_new_func(ptr %c, ptr @${thunk}, i32 ${arity}, ptr ${sigLit}, ptr %fname)`,
       ...register,
       `  ret ptr %r`,
       `}`,

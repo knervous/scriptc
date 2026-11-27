@@ -1,10 +1,14 @@
+// This file was modified from scriptc (Apache-2.0); see MODIFICATIONS.md.
+import { batchRoots, browserTarget, wasmGcLaneTarget, isBundlerSpecifier, isHostModule, projectDeclarationRoots, strictFrontend } from "./browser-target.js";
+import { readdirSync as browserReaddir, readFileSync as browserRead, statSync as browserStat } from "node:fs";
 /* THE program lifecycle: load → preflight — tsconfig adoption, the tsc
  * gate with its project-world second chance, the import/export form
  * fences, CommonJS require discipline, and the module evaluation order —
  * on the native TypeScript compiler (one spawned tsgo server behind
  * Ts7Host, through the ts7/ adapter) with scriptc's OWN resolver
  * (resolve.ts) standing in for ts.resolveModuleName /
- * ts.resolveTypeReferenceDirective.
+ * ts.resolveTypeReferenceDirective, which typescript@7.0.2 no longer
+ * ships.
  *
  * HISTORY. This began as a deliberately MECHANICAL PORT of the
  * typescript@5.9.3 checkPreflight (the adapter's design: swap the ts
@@ -12,7 +16,7 @@
  * the order-parity suite holding both lanes to identical diagnostics and
  * module order over the whole corpus. The phase-4 flip deleted the 5.9.3
  * pipeline; its recorded verdicts live on as the canary baselines
- * (test/ts7/baselines/order-parity/), and the rationale prose the old
+ * (test/ts7/baselines/order-parity.json), and the rationale prose the old
  * program.ts carried was folded in here where behavior demands it.
  *
  * Differences from the retired 5.9.3 lane, each deliberate and each
@@ -20,7 +24,7 @@
  *  - Module resolution is resolve.ts (answer-parity proven by its suite).
  *  - Diagnostics carry pos/end and flat text + messageChain; toPassthrough
  *    renders through the adapter's flattenDiagnosticMessageText, whose
- *    output is identical to 5.9.3's flattener output.
+ *    output shape matches 5.9.3's flattener byte for byte.
  *  - Finding 5 (tsgo models CommonJS strictly): TS2309 joins the JS-file
  *    relaxation here — 5.9.3 never fires it on JS CJS files, tsgo does on
  *    the table-then-member pattern. The EXPORT-IDENTITY fences do not live
@@ -38,200 +42,75 @@
  *    JSON.parse's wording rather than tsc's, the one message-text delta on
  *    that path (no snapshot pins it). */
 
-import { isFrontendIsland } from "../node-islands/boundary.js";
 import { builtinModules } from "node:module";
 import { dirname, isAbsolute, resolve } from "node:path";
 import * as ts from "./ts7/adapter.js";
-import { withoutParenthesesTypeWrappers } from "./outer-expressions.js";
-import { padded } from "./define-branches.js";
-import { InternalCompilerError } from "../errors.js";
-import { moduleKindName, scriptTargetName } from "./ts7/enums.js";
-import { isSourcePhaseImport } from "./ts7/ast-node.js";
 import type { ScrDiagnostic } from "../diagnostics/diagnostic.js";
 import {
   commonJsModuleSyntaxDiag,
-  inlinedImportKeptDiag,
   invalidPackageConfigDiag,
   strictNullChecksFloorDiag,
+  strictFamilyFloorDiag,
   tscPassthroughDiag,
-  unfollowedSettingDiag,
   unsupportedDiag,
 } from "../diagnostics/diagnostic.js";
-import {
-  isInstalledPackagePath,
-  isInstalledSourcePackage,
-  isNodeModulesPath,
-  isSourcePackagePath,
-  isPathSpecifier,
-  nearestInvalidPackageJsonPath,
-  nearestPackageType,
-  nearestPkgJsonPath,
-  packageImportTarget,
-  projectDtsRuntimeSibling,
-  resolveBareModule,
-  resolveNodeRuntimeModule,
-  resolveProjectModule,
-  resolveWorkspaceSourceModule,
-  rememberProjectTypes,
-  rememberedProjectTypes,
-  resolveInTypeRoots,
-  resolveTypeDirective,
-  resolveTypesAsProject,
-  type ProjectTypeResolution,
-  setProjectPathMappings,
-  setProjectRealm,
-} from "./resolve.js";
+import { compileConditions, isNodeModulesPath, nearestInvalidPackageJsonPath, nearestPackageType, nearestPkgJsonPath, projectDtsRuntimeSibling, resolveBareModule, resolveProjectModule, resolveTypeDirective, setProjectPathMappings, setProjectRealm } from "./resolve.js";
 import { probeNodeImportRefusal, probeNodeRequireRefusal } from "./npm.js";
-import { boundSpecifier, specifierBoundContextOf } from "./specifier-bounds.js";
-import type { SpecifierBoundContext } from "./specifier-bounds.js";
-import {
-  isNpmStaticPackage,
-  npmStaticActive,
-  npmStaticFsShadow,
-  programBuiltinAliasSource,
-  clearProgramBuiltinAliasCache,
-  definedSource,
-  setProgramDefines,
-  npmStaticLexerVisibleNames,
-  npmStaticLiveExportTable,
-  npmStaticPackageOfPath,
-  reportNpmStaticOffender,
-  setNpmStaticDeclarationOverloads,
-  setNpmStaticPackages,
-  setNpmStaticTypeExports,
-} from "./npm-static.js";
-import type { Defines } from "./defines.js";
-import { isPrunedNpmReexport, planNpmStaticReexports } from "./npm-static-prune.js";
-import { npmStaticTypeExportPlan } from "./npm-static-type-exports-host.js";
+import { isNpmStaticPackage, npmStaticActive, npmStaticFsShadow, npmStaticPackageOfPath, reportNpmStaticOffender, setNpmStaticDeclarationFunctions, setNpmStaticDeclarationOverloads, setNpmStaticPackages } from "./npm-static.js";
+import { hasPrunableSourcePackage, isPrunedNpmReexport, planNpmStaticReexports } from "./npm-static-prune.js";
 import { isNpmStaticSubclassArgument } from "./npm-static-subtyping.js";
-import {
-  npmStaticDeclarationReexports,
-  npmStaticRuntimeClassTargets,
-  parseNpmStaticDeclarationOverloads,
-  parseNpmStaticDeclarationProperties,
-} from "./npm-static-declaration-syntax.js";
+import { npmStaticDeclarationReexports, npmStaticRuntimeClassTargets, parseNpmStaticDeclarationFunctions, parseNpmStaticDeclarationOverloads, parseNpmStaticDeclarationProperties } from "./npm-static-declaration-syntax.js";
 import type { FrontendServices } from "./services.js";
-import type {
-  NpmStaticDeclarationOverloads,
-  NpmStaticDeclarationProperties,
-  NpmStaticOverloadSignature,
-} from "./npm-static-declaration-syntax.js";
-import {
-  configurePackageShims,
-  isPackageShimFile,
-  isShimmedImport,
-  isUnloadedPackage,
-  npmStaticOmitsPackage,
-} from "./package-shims.js";
+import type { NpmStaticDeclarationFunctions, NpmStaticDeclarationOverloads, NpmStaticDeclarationProperties, NpmStaticOverloadSignature } from "./npm-static-declaration-syntax.js";
 import { provenanceEntryFor, provenancePaths } from "./provenance-registry.js";
 import { cjsLexedExportsOfFile, cjsVisibleNames } from "./cjs-syntax.js";
 import {
   ambientDtsPath,
-  domExceptionDtsPath,
   fallbackDtsPath,
-  fallbackModulesNamedIn,
-  isFallbackDtsPath,
   isNodeTypesPath,
   overridesDtsPath,
-  packageShimRoot,
   tsgoPath,
 } from "./dts-paths.js";
 import {
   builtinDefaultImportModule,
   canonicalBuiltinModule,
-  npmBuiltinAliasOf,
   SUPPORTED_NODE_MODULES,
   unsupportedModuleFeatureOf,
-  TEMPORAL_GLOBAL,
 } from "./builtin-modules.js";
-import { builtinModuleHasMember } from "./lowering/builtin-module-members.js";
 import {
   clearWorkspacePackages,
   isRelativeSpecifier,
   isWorkspacePackageName,
-  isWorkspaceSourcePath,
   npmPackageNameOf,
-  packageNameOfSpecifier,
   registerWorkspacePackage,
-  registerWorkspaceSourcePackage,
   workspacePackageOfPath,
 } from "./workspace-registry.js";
 import {
   ADOPTED_OPTIONS,
-  type AdmittedOpinion,
-  isCheckedJsSourceFile,
   isJsSourceFileName,
-  jsOpinion,
-  jsTscCodeTriage,
-  type Opinion,
-  type OpinionView,
+  JS_ANY_OPERATOR_CODES,
+  JS_RELAXED_TSC_CODES,
 } from "./tsc-codes.js";
-import {
-  trackedAccessibleEntries,
-  trackedFileExists,
-  trackedReadFile,
-  trackedReadSource,
-  trackedRealpath,
-} from "./input-tracker.js";
-import { scriptcConditionManifestAt } from "./scriptc-condition.js";
-import { NODE_GLOBAL_NAMES } from "./node-global-names.js";
-import { earlyErrorDiagnostics7 } from "./early-errors.js";
-import { isBundledLibraryFile } from "./default-library.js";
+import { trackedFileExists, trackedReadFile, trackedRealpath } from "./input-tracker.js";
 import { forkTargetPaths } from "./fork-target.js";
-import { workerTargetPaths } from "./worker-target.js";
-import {
-  erasedTypeOnlyImport,
-  typeOnlyNamedImport,
-  typeOnlyReachedFiles,
-} from "./type-only-imports.js";
-import { moduleSourceCandidates } from "./module-source-candidates.js";
-import {
-  elideProgramImports,
-  importElisionOptions,
-  type ImportElisionOptions,
-  type ProgramImportElision,
-} from "./import-elision.js";
-import {
-  planDeclProjection,
-  resetDeclBoundaryOrigins,
-  type DeclProjection,
-} from "./decl-projection.js";
-import { importTypeIndexedAccessSources } from "./import-type-indexed-access.js";
-import { configureTypePatches, packageSourceText } from "./type-patches/layer.js";
-import {
-  isVoidInitializerFile,
-  resetVoidInitializerCasts,
-  voidInitializerShadow,
-} from "./js-void-initializers.js";
-import { resetDeclOriginVersions } from "./lowering/decl-origin.js";
-import {
-  reportShapes,
-  resetShapeOverlay,
-  shapeOverlayDone,
-  shapeOverlayEnabled,
-  shapeOverlayer,
-  captureShapeOverlayState,
-  type ShapeOverlayLoadState,
-} from "./shape-inference/index.js";
-import { jsInferenceEnabled } from "./js-inference.js";
 import { inferredJsDiagnosticSuppressed } from "./inferred-js-diagnostics.js";
-import {
-  containsJsx,
-  firstJsx,
-  jsxEmitName,
-  jsxEmitPlan,
-  jsxPragmas,
-  isIntrinsicJsxName,
-  jsxSlotNeedsContext,
-  lowerJsx,
-  type JsxContextTypes,
-  type JsxTypeHelpers,
-  type LoweredJsx,
-} from "./jsx-source.js";
 
 const BASE_OPTIONS: ts.Ts7CompilerOptions = {
   strict: true,
 };
+
+/** The strict family's members the lowering relies on (each defaults to `strict`, which BASE_OPTIONS sets): a project
+ * value of `false` is refused with SC0002, and the member is never adopted, so `strict: true` holds it. noImplicitAny
+ * and strictBuiltinIteratorReturn are adopted (strictFrontend forces the first). */
+export const REQUIRED_STRICT_FLAGS = [
+  "strictNullChecks",
+  "strictFunctionTypes",
+  "strictBindCallApply",
+  "strictPropertyInitialization",
+  "noImplicitThis",
+  "alwaysStrict",
+  "useUnknownInCatchVariables",
+] as const;
 
 const FORCED_OPTIONS: ts.Ts7CompilerOptions = {
   target: ts.ScriptTarget.ESNext as number,
@@ -245,16 +124,10 @@ const FORCED_OPTIONS: ts.Ts7CompilerOptions = {
   // classification is intentionally independent below; this option is only
   // the binder's scope decision.
   moduleDetection: ts.ModuleDetectionKind.Force,
-  // Explicit resource management, Array.fromAsync and Error.isError are
-  // ESNext library slices in TS 7 even though Node 24 ships them. Include
-  // those focused libs without widening the rest of the standard-library
-  // target past ES2025.
-  lib: [
-    "lib.es2025.d.ts",
-    "lib.esnext.disposable.d.ts",
-    "lib.esnext.array.d.ts",
-    "lib.esnext.error.d.ts",
-  ],
+  // Explicit resource management is an ESNext library slice in TS 7 even
+  // though Node 24 ships the runtime protocol. Include that focused lib
+  // without widening the rest of the standard-library target past ES2025.
+  lib: ["lib.es2025.d.ts", "lib.esnext.disposable.d.ts"],
   types: [],
   allowImportingTsExtensions: true,
   allowJs: true,
@@ -263,106 +136,34 @@ const FORCED_OPTIONS: ts.Ts7CompilerOptions = {
   noEmit: true,
 };
 
-/** A tsconfig `lib` entry as the tsconfig spells it (`dom`), whichever
- * spelling the config parser answers (`lib.dom.d.ts` is tsc's file name). */
-function libraryName(entry: string): string {
-  const lower = entry.toLowerCase();
-  return lower.startsWith("lib.") && lower.endsWith(".d.ts") ? lower.slice(4, -5) : lower;
+/** The tsconfig's compilerOptions as JSONC (browser target adoption). */
+function parsedBrowserOptions(configFile: string): Record<string, unknown> | null {
+  try {
+    const text = (ts.sys.readFile(configFile) ?? "").replace(/\/\*[\s\S]*?\*\//g, "").replace(/(^|[^:"])\/\/.*$/gm, "$1").replace(/,(\s*[}\]])/g, "$1");
+    return (JSON.parse(text) as { compilerOptions?: Record<string, unknown> }).compilerOptions ?? null;
+  } catch { return null; }
 }
 
-/** The libraries FORCED_OPTIONS.lib already holds: ES2025 with every
- * earlier year and their slices (each year's library includes the one
- * before it), the decorator declarations ES5 includes, and the three
- * ESNext slices named there. */
-const OWN_LIBRARY = /^(?:es(?:[5-7]|201[5-9]|202[0-5])(?:\..+)?|decorators(?:\.legacy)?)$/;
-const OWN_ESNEXT_SLICES: ReadonlySet<string> = new Set([
-  "esnext.disposable",
-  "esnext.array",
-  "esnext.error",
-]);
-
-/** The libraries a project's `lib` names that scriptc's own set does not
- * hold (`dom`, `dom.iterable`, `webworker`, `esnext`, …), as file names.
- * They never join the program the lowering compiles; they answer which
- * names the project's own tsc resolves (LoadResult.libraryWorld). */
-export function projectOnlyLibraries(projectLib: readonly string[] | undefined): string[] {
-  const out: string[] = [];
-  for (const entry of projectLib ?? []) {
-    const name = libraryName(entry);
-    if (OWN_LIBRARY.test(name) || OWN_ESNEXT_SLICES.has(name)) continue;
-    const file = `lib.${name}.d.ts`;
-    if (!out.includes(file)) out.push(file);
-  }
-  return out;
-}
-
-/** TypeScript's "cannot find name" family: TS2304, its did-you-mean
- * spelling TS2552, its spelling for a name another library declares
- * TS2584, and TS2503 for a namespace. */
-const LIBRARY_NAME_CODES: ReadonlySet<number> = new Set([2304, 2552, 2584, 2503]);
-
-/** The errors of the lowering world that a library of the project's `lib`
- * can answer (preflightGate7, projectLibraryName), by what the error's span
- * names: an unresolved name; a property of the global object (TS7017,
- * "Element implicitly has an 'any' type because type 'typeof globalThis' has
- * no index signature", under `noImplicitAny`); a parameter, binding element
- * or rest parameter that is implicitly `any` (TS7006, TS7031, TS7019). Null
- * for every other code. */
-function libraryErrorFamily(code: number): "name" | "member" | "implicit" | null {
-  if (LIBRARY_NAME_CODES.has(code)) return "name";
-  if (code === 7017) return "member";
-  if (code === 7006 || code === 7031 || code === 7019) return "implicit";
-  return null;
-}
-
-/** Whether the name at `node` is read as a type: the entity name of a type
- * reference, of a `typeof` type query, or of an `implements` or interface
- * `extends` clause. A class's `extends` clause evaluates its expression. */
-function namesType(node: ts.Node): boolean {
-  let name = node;
-  while (
-    name.parent !== undefined &&
-    (ts.isQualifiedName(name.parent) || ts.isPropertyAccessExpression(name.parent))
-  )
-    name = name.parent;
-  const user = name.parent;
-  if (user === undefined) return false;
-  if (ts.isExpressionWithTypeArguments(user)) {
-    const clause = user.parent;
-    return !(
-      clause !== undefined &&
-      ts.isHeritageClause(clause) &&
-      clause.token === ts.SyntaxKind.ExtendsKeyword &&
-      clause.parent !== undefined &&
-      (ts.isClassDeclaration(clause.parent) || ts.isClassExpression(clause.parent))
-    );
-  }
-  return ts.isTypeReferenceNode(user) || ts.isTypeQueryNode(user);
-}
+/** The browser target adds TypeScript's DOM library; the compile's extra
+ * resolution conditions reach the checker as its customConditions. */
+const browserLib = (): Partial<ts.Ts7CompilerOptions> => ({
+  ...(browserTarget() ? { lib: ["lib.esnext.d.ts", "lib.dom.d.ts", "lib.dom.iterable.d.ts", "lib.dom.asynciterable.d.ts"], ...browserAdopted } : {}),
+  ...(compileConditions().length > 0 ? { customConditions: [...compileConditions()] } : {}),
+});
+/** Browser target: project options that change checking semantics and are
+ * honoured by the lowering (class field semantics). Set from the tsconfig. */
+let browserAdopted: Partial<ts.Ts7CompilerOptions> = {};
 
 /** JSONC syntax validation for a tsconfig text: tsgo's parseConfigFile
- * RECOVERS over syntax errors without reporting them (probed: a hard-broken
- * file answers empty options, no diagnostic), where 5.9.3's readConfigFile
- * reported the first parse error — a preflight-visible difference (a broken
- * config fails the build instead of being adopted). tsconfig's grammar is
- * JSON plus comments and trailing commas, so stripping exactly those and
- * handing the rest to JSON.parse decides validity without either
- * TypeScript's parser. The
+ * RECOVERS silently over syntax errors (probed: a hard-broken file answers
+ * empty options, no diagnostic), where 5.9.3's readConfigFile reported the
+ * first parse error — a preflight-visible difference (broken config: fail
+ * loudly, never adopt silently). tsconfig's grammar is JSON plus comments
+ * and trailing commas, so stripping exactly those and handing the rest to
+ * JSON.parse decides validity without either TypeScript's parser. The
  * MESSAGE is JSON.parse's, not 5.9.3's ("'}' expected.") — the one
  * remaining wording delta on this path, unpinned by any snapshot. */
 function jsoncSyntaxError(text: string): string | null {
-  const out = jsoncAsJson(text);
-  if (out.trim() === "") return null; // an empty config file is legal
-  try {
-    JSON.parse(out);
-    return null;
-  } catch (e) {
-    return e instanceof Error ? e.message : String(e);
-  }
-}
-
-/** A JSONC text with its comments and trailing commas removed. */
-function jsoncAsJson(text: string): string {
   let out = "";
   for (let i = 0; i < text.length; i++) {
     const ch = text[i]!;
@@ -386,29 +187,13 @@ function jsoncAsJson(text: string): string {
     out += ch;
   }
   // Trailing commas: `,` followed only by whitespace before } or ].
-  return out.replace(/,(\s*[}\]])/g, "$1");
-}
-
-/** The two import settings TypeScript 5.5 removed, which tsgo's config
- * parser no longer reports: read from the tsconfig's own text (a project
- * that still sets them compiles with an older tsc, whose output keeps the
- * imports they name). Values an `extends` chain supplies are not seen. */
-function removedImportOptions(configText: string): Record<string, unknown> {
+  out = out.replace(/,(\s*[}\]])/g, "$1");
+  if (out.trim() === "") return null; // an empty config file is legal
   try {
-    const config = JSON.parse(jsoncAsJson(configText)) as { compilerOptions?: unknown };
-    const options = config.compilerOptions;
-    if (typeof options !== "object" || options === null) return {};
-    const own = options as Record<string, unknown>;
-    return {
-      ...(own["importsNotUsedAsValues"] === undefined
-        ? {}
-        : { importsNotUsedAsValues: own["importsNotUsedAsValues"] }),
-      ...(own["preserveValueImports"] === undefined
-        ? {}
-        : { preserveValueImports: own["preserveValueImports"] }),
-    };
-  } catch {
-    return {};
+    JSON.parse(out);
+    return null;
+  } catch (e) {
+    return e instanceof Error ? e.message : String(e);
   }
 }
 
@@ -418,23 +203,17 @@ function removedImportOptions(configText: string): Record<string, unknown> {
  * import forms were legal in the original project. */
 function projectAllowsSyntheticDefaultImports(options: Record<string, unknown>): boolean {
   const explicitSyntheticDefaultImports = options["allowSyntheticDefaultImports"];
-  if (explicitSyntheticDefaultImports !== undefined)
-    return explicitSyntheticDefaultImports === true;
+  if (explicitSyntheticDefaultImports !== undefined) return explicitSyntheticDefaultImports === true;
   const moduleKind = options["module"];
   const explicitEsModuleInterop = options["esModuleInterop"];
-  const esModuleInterop =
-    explicitEsModuleInterop !== undefined
-      ? explicitEsModuleInterop === true
-      : moduleKind === ts.ModuleKind.Node16 ||
-        moduleKind === ts.ModuleKind.Node18 ||
-        moduleKind === ts.ModuleKind.Node20 ||
-        moduleKind === ts.ModuleKind.NodeNext ||
-        moduleKind === ts.ModuleKind.Preserve;
-  return (
-    esModuleInterop ||
-    moduleKind === ts.ModuleKind.System ||
-    options["moduleResolution"] === ts.ModuleResolutionKind.Bundler
-  );
+  const esModuleInterop = explicitEsModuleInterop !== undefined
+    ? explicitEsModuleInterop === true
+    : moduleKind === ts.ModuleKind.Node16 ||
+      moduleKind === ts.ModuleKind.Node18 ||
+      moduleKind === ts.ModuleKind.Node20 ||
+      moduleKind === ts.ModuleKind.NodeNext ||
+      moduleKind === ts.ModuleKind.Preserve;
+  return esModuleInterop || moduleKind === ts.ModuleKind.System || options["moduleResolution"] === ts.ModuleResolutionKind.Bundler;
 }
 
 /** The project's tsconfig adoption in the 7 world: tsgo's own config parser
@@ -443,39 +222,16 @@ function projectAllowsSyntheticDefaultImports(options: Record<string, unknown>):
 function adoptProjectConfig7(
   host: ts.Ts7Host,
   entryPath: string,
-): {
-  configFile: string | null;
-  options: ts.Ts7CompilerOptions;
-  diags: ScrDiagnostic[];
-  projectLib?: readonly string[];
-  forcedStrictNullChecks?: boolean;
-  checkJs?: boolean;
-  /** The project's own sources: the files its `files` and `include` name
-   * outside node_modules, which tsc compiles as the project itself rather
-   * than as a dependency it merely imports. */
-  sources?: readonly string[];
-  /** The project's own declarations: the `.d.ts` files its `files` and
-   * `include` name, and the entry declarations of the packages its `types`
-   * names. They join the program as roots. */
-  declarations?: readonly string[];
-  /** The project's `module` setting, as the tsconfig spells it. */
-  module?: string;
-  /** How the project's tsc finds declarations where scriptc's own
-   * resolution finds none (typesAsProject7): its `typeRoots`, and whether
-   * it compiles under `moduleResolution: node10` (spelled `node` too, and
-   * tsc's choice through 5.9 for `module: commonjs` when the setting is
-   * absent). Absent when the tsconfig sets neither. */
-  typeResolution?: ProjectTypeResolution;
-} {
+): { configFile: string | null; options: ts.Ts7CompilerOptions; diags: ScrDiagnostic[] } {
   const configFile = ts.findConfigFile(dirname(entryPath), ts.sys.fileExists) ?? null;
   if (!configFile) {
-    return { configFile, options: { ...BASE_OPTIONS, ...FORCED_OPTIONS }, diags: [] };
+    return { configFile, options: { ...BASE_OPTIONS, ...strictFrontendForced(), ...FORCED_OPTIONS, ...browserLib() }, diags: [] };
   }
   const diags: ScrDiagnostic[] = [];
   const syntaxError = jsoncSyntaxError(ts.sys.readFile(configFile) ?? "");
   if (syntaxError !== null) {
     diags.push(tscPassthroughDiag(syntaxError, { file: configFile, start: 0, end: 0 }));
-    return { configFile, options: { ...BASE_OPTIONS, ...FORCED_OPTIONS }, diags };
+    return { configFile, options: { ...BASE_OPTIONS, ...strictFrontendForced(), ...FORCED_OPTIONS, ...browserLib() }, diags };
   }
   const parsed = host.parseConfigFile(configFile);
   const adopted: Record<string, unknown> = {};
@@ -489,211 +245,58 @@ function adoptProjectConfig7(
   // TS 7 accepts `paths`, but no longer accepts `baseUrl` as a compiler
   // option. Translate the established baseUrl+paths spelling into absolute
   // targets: the synthesized config lives beside the entry rather than the
-  // real config, so preserving relative targets would change their meaning
-  // without a diagnostic. The absolute map is also the own resolver's
-  // configuration.
+  // real config, so preserving relative targets would silently change their
+  // meaning. The absolute map is also the own resolver's configuration.
   const rawPaths = parsed.options["paths"];
   if (rawPaths !== undefined && typeof rawPaths === "object" && rawPaths !== null) {
     const configDir = dirname(configFile);
     const rawBaseUrl = parsed.options["baseUrl"];
-    const base =
-      typeof rawBaseUrl === "string"
-        ? isAbsolute(rawBaseUrl)
-          ? rawBaseUrl
-          : resolve(configDir, rawBaseUrl)
-        : configDir;
+    const base = typeof rawBaseUrl === "string"
+      ? (isAbsolute(rawBaseUrl) ? rawBaseUrl : resolve(configDir, rawBaseUrl))
+      : configDir;
     const paths: Record<string, string[]> = {};
     for (const [key, targets] of Object.entries(rawPaths as Record<string, unknown>)) {
       if (!Array.isArray(targets)) continue;
       paths[key] = targets
         .filter((target): target is string => typeof target === "string")
-        .map((target) => (isAbsolute(target) ? target : resolve(base, target)));
+        .map((target) => isAbsolute(target) ? target : resolve(base, target));
     }
     adopted["paths"] = paths;
   }
-  const nullChecks = adopted["strictNullChecks"] ?? adopted["strict"] ?? false;
-  const forcedStrictNullChecks = nullChecks !== true;
-  if (forcedStrictNullChecks) {
-    diags.push(
-      strictNullChecksFloorDiag(
-        configFile,
-        adopted["strictNullChecks"] !== undefined || adopted["strict"] !== undefined,
-      ),
-    );
-    adopted["strictNullChecks"] = true;
+  // The strict family the lowering depends on is required, not adopted: a tsconfig that turns a member off (itself or
+  // through `strict: false`) fails with SC0002 naming it, and the checker runs with it on. strictNullChecks keeps its own
+  // wording (the original floor).
+  const strictOff = adopted["strict"] === false;
+  if (strictOff) {
+    diags.push(strictFamilyFloorDiag(configFile, "strict"));
+    adopted["strict"] = true;
+    // The adopted members keep what `strict: false` gave them.
+    adopted["noImplicitAny"] ??= false;
+    adopted["strictBuiltinIteratorReturn"] ??= false;
   }
-  // The project's own ambient declarations (global augmentations, module
-  // declarations for assets, members a library version lacks): tsc loads
-  // every file `files` and `include` name, where scriptc's program grows
-  // from the entry's imports and would never meet them.
-  const declarations = parsed.fileNames.filter(
-    (file) => /\.d\.[mc]?ts$/.test(file) && !isNodeModulesPath(file),
-  );
-  // The project's own source files, as its `files`/`include` naming decides
-  // them. A JavaScript file that is not one of them reached the program
-  // through an import: it is a dependency's shipped code, which tsc compiles
-  // as an external library rather than as project source.
-  const sources = parsed.fileNames.filter((file) => !isNodeModulesPath(file));
-  // `types`: the type packages whose globals the project asks for. "node"
-  // is resolved on its own (resolveNodeTypes7); a name that resolves to
-  // nothing is tsc's error to report, not a reason to stop here.
-  const rawTypeRoots = parsed.options["typeRoots"];
-  const typeRoots = Array.isArray(rawTypeRoots)
-    ? rawTypeRoots
-        .filter((root): root is string => typeof root === "string")
-        .map((root) => (isAbsolute(root) ? root : resolve(dirname(configFile), root)))
-    : null;
-  // The checker resolves a `/// <reference types="…" />` directive through
-  // the project's type roots, as the project's tsc does. Which packages
-  // load without being named stays decided here (FORCED_OPTIONS.types).
-  if (typeRoots !== null) adopted["typeRoots"] = typeRoots;
-  const types = parsed.options["types"];
-  const typeNames: string[] = [];
-  if (Array.isArray(types)) {
-    for (const name of types) if (typeof name === "string") typeNames.push(name);
-  } else if (typeRoots !== null) {
-    // Without `types`, tsc (through 5.9) loads every package directory of
-    // every type root. The directories the project keeps itself are its
-    // own declarations, like the files `include` names; a type root under
-    // node_modules holds installed packages, which load when a module or a
-    // directive names them.
-    for (const root of typeRoots) {
-      if (isNodeModulesPath(root)) continue;
-      for (const name of trackedAccessibleEntries(root)?.directories ?? []) {
-        if (name.startsWith(".") || typeNames.includes(name)) continue;
-        // `"typings": null` in the directory's package.json: tsc's mark of
-        // a package that needs no types.
-        const manifest = trackedReadFile(resolve(root, name, "package.json"));
-        if (manifest !== null && typingsDeclaredNull(manifest)) continue;
-        typeNames.push(name);
-      }
-    }
+  for (const flag of REQUIRED_STRICT_FLAGS) {
+    // (Under `strict: false` the members it switched off are covered by the one `strict` diagnostic.)
+    if (adopted[flag] === false || (adopted[flag] === undefined && strictOff && flag === "strictNullChecks")) diags.push(flag === "strictNullChecks" ? strictNullChecksFloorDiag(configFile) : strictFamilyFloorDiag(configFile, flag));
+    delete adopted[flag];
   }
-  for (const name of typeNames) {
-    if (name === "node") continue;
-    const entry =
-      resolveInTypeRoots(typeRoots ?? [], name) ??
-      (Array.isArray(types) ? resolveTypeDirective(name, configFile) : null);
-    if (entry !== null && !declarations.includes(entry)) declarations.push(entry);
+
+  browserAdopted = {};
+  if (browserTarget()) {
+    const raw = (parsedBrowserOptions(configFile) ?? {}) as { useDefineForClassFields?: boolean };
+    if (raw.useDefineForClassFields === false) browserAdopted = { useDefineForClassFields: false } as Partial<ts.Ts7CompilerOptions>;
   }
-  const byPath =
-    parsed.options["moduleResolution"] === ts.ModuleResolutionKind.Node10 ||
-    (parsed.options["moduleResolution"] === undefined &&
-      parsed.options["module"] === ts.ModuleKind.CommonJS);
-  // The project's own library selection, kept only to explain errors: the
-  // checker always uses scriptc's fixed library set (FORCED_OPTIONS).
-  const rawLib = parsed.options["lib"];
-  const projectLib = Array.isArray(rawLib)
-    ? rawLib.filter((entry): entry is string => typeof entry === "string")
-    : undefined;
+  return { configFile, options: { ...BASE_OPTIONS, ...adopted, ...strictFrontendForced(), ...FORCED_OPTIONS, ...browserLib() }, diags };
+}
+
+/** What a strict-frontend compile forces over the project's values (CompileBaseOptions.strictFrontend); the checker's own
+ * errors then name each site. */
+function strictFrontendForced(): Partial<ts.Ts7CompilerOptions> {
+  const sf = strictFrontend();
   return {
-    configFile,
-    options: { ...BASE_OPTIONS, ...adopted, ...FORCED_OPTIONS },
-    diags,
-    ...(projectLib === undefined ? {} : { projectLib }),
-    forcedStrictNullChecks,
-    checkJs: parsed.options["checkJs"] === true,
-    ...(sources.length > 0 ? { sources } : {}),
-    ...(declarations.length > 0 ? { declarations } : {}),
-    ...(parsed.options["module"] === undefined
-      ? {}
-      : { module: moduleSettingName(parsed.options["module"]) }),
-    ...(typeRoots !== null || byPath
-      ? { typeResolution: { typeRoots: typeRoots ?? [], byPath } }
-      : {}),
-  };
-}
-
-/** A tsconfig `module` value as the tsconfig spells it (the parser answers
- * the name or the enum's number). */
-function moduleSettingName(value: unknown): string {
-  return typeof value === "number"
-    ? (moduleKindName(value) ?? String(value)).toLowerCase()
-    : String(value).toLowerCase();
-}
-
-/** Whether a package.json text sets `typings` to null. */
-function typingsDeclaredNull(manifest: string): boolean {
-  try {
-    const parsed = JSON.parse(manifest) as { typings?: unknown } | null;
-    return parsed !== null && typeof parsed === "object" && parsed.typings === null;
-  } catch {
-    return false;
-  }
-}
-
-/** What the tsconfig that governs a TypeScript file says about how tsc
- * compiles it, where that changes the program. */
-interface FileDialect {
-  /** tsc's import elision settings (import-elision.ts), or null when the
-   * tsconfig sets `verbatimModuleSyntax`: Node's rule for imports. */
-  elision: ImportElisionOptions | null;
-  /** Class fields are initialized in the constructor, after its parameter
-   * properties: `target` below ES2022, or `useDefineForClassFields: false`.
-   * ES2022 class fields run their initializers first. */
-  parameterPropertiesFirst: boolean;
-  /** `experimentalDecorators`: decorators have the legacy semantics. A
-   * class decorator of one parameter is called the same way under both
-   * semantics, so only the others differ ("members": method, property,
-   * accessor and parameter decorators), unless `emitDecoratorMetadata` makes
-   * every decorated class carry metadata the program can read ("all"). */
-  legacyDecorators: "all" | "members" | null;
-}
-
-/** `target` values below ES2022, as the config parser answers them (the
- * name, or the enum's number). */
-function targetBelowEs2022(target: unknown): boolean {
-  const name = typeof target === "number" ? scriptTargetName(target) : target;
-  if (typeof name !== "string") return false;
-  const year = /^es(\d+)$/i.exec(name)?.[1];
-  // ES3, ES5 and ES6 are the pre-year spellings.
-  return year !== undefined && (year.length < 4 || Number(year) < 2022);
-}
-
-/** The dialect of the tsconfig that governs each file: the nearest
- * `tsconfig.json` above it, as for tsc's editors and for single-file
- * transpilers. A file with no tsconfig above it and a file under
- * `node_modules` are written for Node's type stripping and have none
- * (null). Each directory and each tsconfig is read once. */
-function fileDialects7(host: ts.Ts7Host): (fileName: string) => FileDialect | null {
-  const byDirectory = new Map<string, FileDialect | null>();
-  const byConfig = new Map<string, FileDialect | null>();
-  const ofConfig = (configFile: string): FileDialect | null => {
-    let dialect = byConfig.get(configFile);
-    if (dialect === undefined) {
-      dialect = null;
-      // A config that does not parse selects nothing: the entry's own is
-      // reported by adoptProjectConfig7, and a file keeps Node's rule.
-      const text = ts.sys.readFile(configFile) ?? "";
-      if (jsoncSyntaxError(text) === null) {
-        const options = host.parseConfigFile(configFile).options;
-        dialect = {
-          elision: importElisionOptions({ ...options, ...removedImportOptions(text) }),
-          parameterPropertiesFirst:
-            options["useDefineForClassFields"] === false || targetBelowEs2022(options["target"]),
-          legacyDecorators:
-            options["experimentalDecorators"] !== true
-              ? null
-              : options["emitDecoratorMetadata"] === true
-                ? "all"
-                : "members",
-        };
-      }
-      byConfig.set(configFile, dialect);
-    }
-    return dialect;
-  };
-  return (fileName) => {
-    if (isInstalledPackagePath(fileName)) return null;
-    const directory = dirname(fileName);
-    let dialect = byDirectory.get(directory);
-    if (dialect === undefined) {
-      const configFile = ts.findConfigFile(directory, ts.sys.fileExists) ?? null;
-      dialect = configFile === null ? null : ofConfig(configFile);
-      byDirectory.set(directory, dialect);
-    }
-    return dialect;
-  };
+    ...(sf.noImplicitAny ? { noImplicitAny: true } : {}),
+    ...(sf.noUncheckedIndexedAccess ? { noUncheckedIndexedAccess: true } : {}),
+    ...(sf.exactOptionalPropertyTypes ? { exactOptionalPropertyTypes: true } : {}),
+  } as Partial<ts.Ts7CompilerOptions>;
 }
 
 /** The target project's @types/node, resolved with the OWN resolver's
@@ -704,70 +307,14 @@ function resolveNodeTypes7(entryPath: string): string | null {
   return file !== null && isNodeTypesPath(file) ? file : null;
 }
 
-export interface TypeWorldDifferences {
-  /** No @types/node: the bundled fallback declarations type Node. */
-  nodeFallback: boolean;
-  /** The project tsconfig's "lib" entries (scriptc checks with its own). */
-  projectLib: readonly string[] | null;
-  /** The project disables strictNullChecks; scriptc forces it on. */
-  forcedStrictNullChecks: boolean;
-  /** The project's tsconfig sets `checkJs` (scriptc's own checker always
-   * reads JavaScript files; this records whether the project's does). */
-  projectCheckJs: boolean;
-  /** The project's own source files, from its tsconfig's `files`/`include`
-   * (normalized paths), or null when the project has no tsconfig. A
-   * JavaScript file outside this set is a dependency's shipped code. */
-  projectSources: ReadonlySet<string> | null;
-  /** The files with decorators the project compiles under
-   * `experimentalDecorators`: refused by name (SC0016), which stands in for
-   * the checker's errors about those decorators' signatures. */
-  legacyDecoratorFiles: ReadonlySet<string>;
-  /** The project's `module` setting, or null. */
-  projectModule: string | null;
-}
-
 export interface LoadResult {
   program: ts.Program;
   entry: ts.SourceFile;
-  /** Shape inference's overlay state for this load (restored before its
-   * lowering: a later load resets the per-process registry). */
-  shapeOverlayState?: ShapeOverlayLoadState;
-  /** This load's structural preflight walk: the module order and the graph
-   * facts below, plus the walk's own fences. Computed once — a fixpoint that
-   * asked for the order first completes the same walk in checkPreflight
-   * instead of repeating it. The load owns the memo. */
-  preflightStructure?: PreflightStructure;
-  /** The workspace-edge probe below already ran for this load. */
-  workspaceProbed?: true;
   /** User source files in Node's evaluation order: depth-first postorder
    * of the import graph from the entry, each module once. The entry is
    * last. Empty until checkPreflight runs (and empty when preflight fails
    * structurally). */
   moduleOrder: ts.SourceFile[];
-  /** Inline require() calls whose edge closes a require cycle. Node answers
-   * them with the still-evaluating module's partial exports, which the
-   * static export globals do not model; their lowering refuses them by name
-   * at run time instead of refusing the whole program. Filled by
-   * checkPreflight. */
-  inlineRequireCycleCalls?: ReadonlySet<ts.Node>;
-  /** Every program file's module edges as preflight resolved them,
-   * require() edges included: the lowering orders the modules only a
-   * literal import(), fork() or Worker reaches with them. Filled by
-   * checkPreflight. */
-  moduleEdges?: ReadonlyMap<ts.SourceFile, readonly CycleEdge[]> | undefined;
-  /** Program modules only a literal import() loads whose static graph
-   * Node's resolution refuses: each such import() rejects with the refusal
-   * instead of failing the build, and the module never joins the compiled
-   * graph. Filled by checkPreflight. */
-  dynamicImportRejections?: ReadonlyMap<ts.SourceFile, StartupCrash> | undefined;
-  /** The JavaScript checker diagnostics preflight admitted under an opinion
-   * row (tsc-codes.ts, JS_OPINIONS), each recorded only where no other
-   * filter would have suppressed it, and the TypeScript diagnostics about
-   * names only the project's libraries declare (libraryWorld). Empty for
-   * every program that admits none — every TypeScript program whose
-   * tsconfig names no such library, and every JavaScript program that
-   * compiles without one. Filled by checkPreflight. */
-  admittedOpinions?: readonly AdmittedOpinion[];
   /** Node's startup refusal, when the graph carries an import edge Node
    * rejects before ANY module evaluates — a RESOLUTION refusal (a bare
    * specifier nothing installed resolves, an exports/imports map that
@@ -782,53 +329,6 @@ export interface LoadResult {
    * checkPreflight. */
   startupCrash?: StartupCrash | null;
   configDiags: ScrDiagnostic[];
-  /** SC6102 performance notes of the declaration-typed boundary
-   * (decl-projection.ts): files whose projection was dropped. */
-  declBoundaryNotes?: ScrDiagnostic[];
-  /** SC6008 warnings: imports the build keeps although tsc's output drops
-   * them (import-elision.ts, inlinedOnly). */
-  importWarnings?: ScrDiagnostic[];
-  /** The files the program holds with imports or exports elided
-   * (import-elision.ts), with the text each was rewritten from. The
-   * rewrite keeps every offset, so this text is the build's record of the
-   * source: diagnostics and debug positions point into it, and the frontend
-   * cache compares an edit with it. Absent when there is none. */
-  elidedSources?: ReadonlyMap<string, string>;
-  /** The TypeScript files whose tsconfig compiles class fields in the
-   * constructor (`target` below ES2022, or `useDefineForClassFields: false`):
-   * a class declared there assigns its parameter properties before its
-   * field initializers run. Absent when there is none. */
-  parameterPropertiesFirst?: ReadonlySet<string>;
-  /** The files whose JSX the program lowers (jsx-source.ts), by file name.
-   * The program holds their rewritten text; positions in diagnostics refer
-   * to it. */
-  jsxSources?: ReadonlyMap<string, LoweredJsx>;
-  /** With JSX sources: the program over the original text, whose TypeScript
-   * errors are the program's, and its project world when it has errors. */
-  tscWorld?: {
-    program: ts.Program;
-    /** The program's pre-emit diagnostics, computed once. The tsc gate is
-     * their one reader, so a load whose report nobody asks for (a rung of the
-     * npm-static fixpoint) never asks the checker for them. */
-    diagnostics: () => readonly ts.Diagnostic[];
-    projectWorld: ts.Program | null;
-    /** The declaration-typed boundary rewrote user files: errors fall
-     * back to the declaration world (load.projectWorld()), as without it. */
-    declWorldFallback?: true;
-  };
-  /** With JSX sources: the program the tsc gate reads. It is the original
-   * text, and in a build that compiles packages from their JavaScript it is
-   * the AUTHORED world, where the packages' declarations are visible: the
-   * JSX type surface (`JSX.IntrinsicElements`) exists only in those
-   * declarations, which the lowering world hides. */
-  jsxGateWorld?: () => ts.Program;
-  /** How scriptc's type world differs from the project's own tsc setup —
-   * used only to label the TypeScript errors those differences cause. */
-  typeWorld?: TypeWorldDifferences;
-  /** Whether a file is a dependency's shipped JavaScript (see
-   * dependencyJsPredicate): preflight reports no checker diagnostics for it,
-   * and the lowering compiles it as unchecked JavaScript. */
-  dependencyJs?: (file: string) => boolean;
   /** Coverage-only external host modules: exact bare specifier → local
    * declaration file. These participate in checker resolution but never
    * become runtime module edges. */
@@ -839,13 +339,6 @@ export interface LoadResult {
    * declaration surface. */
   externalTypeSpecifiersByFile: ReadonlyMap<string, readonly string[]>;
   projectWorld: () => ts.Program;
-  /** The program checked with the libraries the project's `lib` names
-   * beside scriptc's own (projectOnlyLibraries): the world in which the
-   * project's own tsc resolves a name such as `HTMLElement`. Preflight asks
-   * it which "cannot find name" errors of the lowering world are names
-   * those libraries declare; nothing is lowered from it. Absent when the
-   * tsconfig names no such library. */
-  libraryWorld?: () => ts.Program;
 }
 
 function declarationReexportTarget(fromFile: string, specifier: string): string | null {
@@ -879,9 +372,7 @@ function runtimeReexportTarget(fromFile: string, specifier: string): string | nu
     resolve(base, "index.mjs"),
     resolve(base, "index.cjs"),
   ];
-  const target = candidates.find(
-    (candidate) => trackedFileExists(candidate) && isJsSourceFileName(candidate),
-  );
+  const target = candidates.find((candidate) => trackedFileExists(candidate) && isJsSourceFileName(candidate));
   return target === undefined ? null : (trackedRealpath(target) ?? target);
 }
 
@@ -895,16 +386,14 @@ function visitNpmStaticDeclarationClosure(
 ): void {
   const seen = new Set<string>();
   const packageJson = nearestPkgJsonPath(entryPath);
-  const packageRoot = (packageJson === null ? dirname(entryPath) : dirname(packageJson))
-    .split("\\")
-    .join("/");
+  const packageRoot = (packageJson === null ? dirname(entryPath) : dirname(packageJson)).split("\\").join("/");
   const visit = (path: string): void => {
     path = resolve(path);
     const normalized = path.split("\\").join("/");
     if (normalized !== packageRoot && !normalized.startsWith(packageRoot + "/")) return;
     if (seen.has(path)) return;
     seen.add(path);
-    const source = packageSourceText(path);
+    const source = trackedReadFile(path);
     if (source === null) return;
     onSource(path, source);
     for (const specifier of npmStaticDeclarationReexports(services.parse(path, source, "ts"))) {
@@ -915,33 +404,42 @@ function visitNpmStaticDeclarationClosure(
   visit(entryPath);
 }
 
-/** The overloads and properties of the classes a package's declaration
- * closure declares, read from one parse of each declaration file. */
-function npmStaticDeclarationMetadataOf(
-  services: FrontendServices,
-  entryPath: string,
-): { overloads: NpmStaticDeclarationOverloads; properties: NpmStaticDeclarationProperties } {
-  const overloads = new Map<string, Map<string, readonly NpmStaticOverloadSignature[]>>();
-  const properties = new Map<string, Map<string, string>>();
+function npmStaticDeclarationOverloadsOf(services: FrontendServices, entryPath: string): NpmStaticDeclarationOverloads {
+  const classes = new Map<string, Map<string, readonly NpmStaticOverloadSignature[]>>();
   visitNpmStaticDeclarationClosure(services, entryPath, (path, source) => {
-    const sourceFile = services.parse(path, source, "ts");
-    for (const [className, methods] of parseNpmStaticDeclarationOverloads(sourceFile)) {
-      const target =
-        overloads.get(className) ?? new Map<string, readonly NpmStaticOverloadSignature[]>();
-      overloads.set(className, target);
+    for (const [className, methods] of parseNpmStaticDeclarationOverloads(services.parse(path, source, "ts"))) {
+      const target = classes.get(className) ?? new Map<string, readonly NpmStaticOverloadSignature[]>();
+      classes.set(className, target);
       for (const [methodName, signatures] of methods) {
         if (!target.has(methodName)) target.set(methodName, signatures);
       }
     }
-    for (const [className, fields] of parseNpmStaticDeclarationProperties(sourceFile)) {
-      const target = properties.get(className) ?? new Map<string, string>();
-      properties.set(className, target);
-      for (const [propertyName, type] of fields) {
+  });
+  return classes;
+}
+
+function npmStaticDeclarationFunctionsOf(services: FrontendServices, entryPath: string): NpmStaticDeclarationFunctions {
+  const functions = new Map<string, string>();
+  visitNpmStaticDeclarationClosure(services, entryPath, (path, source) => {
+    for (const [name, type] of parseNpmStaticDeclarationFunctions(services.parse(path, source, "ts"))) {
+      if (!functions.has(name)) functions.set(name, type);
+    }
+  });
+  return functions;
+}
+
+function npmStaticDeclarationPropertiesOf(services: FrontendServices, entryPath: string): NpmStaticDeclarationProperties {
+  const classes = new Map<string, Map<string, string>>();
+  visitNpmStaticDeclarationClosure(services, entryPath, (path, source) => {
+    for (const [className, properties] of parseNpmStaticDeclarationProperties(services.parse(path, source, "ts"))) {
+      const target = classes.get(className) ?? new Map<string, string>();
+      classes.set(className, target);
+      for (const [propertyName, type] of properties) {
         if (!target.has(propertyName)) target.set(propertyName, type);
       }
     }
   });
-  return { overloads, properties };
+  return classes;
 }
 
 /** See LoadResult.startupCrash: Node's exact error message, the IR error
@@ -953,19 +451,11 @@ export interface StartupCrash {
   message: string;
   className: "%Error" | "%TypeError" | "%SyntaxError";
   loc: { file: string; start: number; end: number };
-  /** Node's error code, for the refusals that carry one. */
-  code?: string;
-  /** The error's own `url` property: the missing file's URL, for Node's
-   * ERR_MODULE_NOT_FOUND of an import() whose target does not exist. */
-  url?: string;
-  /** How to change the source so Node accepts it, for the build's warning
-   * (SC6201). The compiled program never reads it. */
-  hint?: string;
 }
 
 /** True when a coverage mapping names one exact bare host module. TypeScript
  * gives `paths` keys containing `*` pattern semantics, so accepting one here
- * would broaden the mapping beyond the specifier the caller named. */
+ * would silently broaden the mapping beyond the specifier the caller named. */
 export function isExactExternalTypeSpecifier(specifier: string): boolean {
   return (
     specifier !== "" &&
@@ -1044,114 +534,9 @@ function externalTypeFileClosure7(
       admit(program.getSourceFile(depPath) ?? null);
     }
   }
-  return new Map([...ownersByFile].map(([file, owners]) => [file, [...owners]] as const));
-}
-
-/** The runtime implementations of the project's own declarations: a
- * declaration beside the JavaScript Node loads (`lib.d.ts` next to
- * `lib.js`) describes that module, and the JavaScript is the code that
- * compiles (resolve.ts's projectDtsRuntimeSibling). The checker resolves
- * the import to the declaration, so the implementation joins the program
- * as a root. */
-function declarationTwinRoots7(program: ts.Program): string[] {
-  const roots: string[] = [];
-  for (const sf of program.getSourceFiles()) {
-    if (!sf.isDeclarationFile) continue;
-    const sibling = projectDtsRuntimeSibling(sf.fileName);
-    if (sibling !== null) roots.push(sibling);
-  }
-  return roots;
-}
-
-/** The fallback declaration files of the Node modules the program's files
- * name (fallbackModulesNamedIn) that the program does not hold yet. Each
- * file is read as tsgo reads it; the TypeScript libraries and scriptc's own
- * declarations name no module that needs a file. */
-function fallbackModuleRoots7(program: ts.Program, host: ts.Ts7Host): string[] {
-  const names = program.getSourceFileNames();
-  const held = new Set(names.filter(isFallbackDtsPath).map((name) => tsgoPath(name)));
-  const ambient = ambientDtsPath();
-  const overrides = overridesDtsPath();
-  const roots = new Set<string>();
-  for (const name of names) {
-    const path = tsgoPath(name);
-    if (held.has(path) || path === ambient || path === overrides) continue;
-    if (isBundledLibraryFile(program, name)) continue;
-    for (const file of fallbackModulesNamedIn(host.sourceText(name) ?? ""))
-      if (!held.has(file)) roots.add(file);
-  }
-  return [...roots];
-}
-
-/** The specifiers the project's files name for which only the project's
- * own resolution settings find declarations (resolveTypesAsProject), with
- * the file each names, or null when the checker has them all. Read from
- * each file's import list: the declarations a project writes (the body of
- * a `declare module` block included) and its TypeScript files alike. */
-function typesAsProject7(
-  program: ts.Program,
-  configFile: string,
-  project: ProjectTypeResolution,
-  mapped: Readonly<Record<string, readonly string[]>> | undefined,
-): Map<string, string> | null {
-  const held = new Set(mapped === undefined ? [] : Object.keys(mapped));
-  const found = new Map<string, string>();
-  const asked = new Set<string>();
-  const ambient = ambientDtsPath();
-  const overrides = overridesDtsPath();
-  for (const name of program.getSourceFileNames()) {
-    if (isInstalledPackagePath(name) || isBundledLibraryFile(program, name)) continue;
-    const path = tsgoPath(name);
-    if (path === ambient || path === overrides || isFallbackDtsPath(name)) continue;
-    const sf = program.getSourceFile(name);
-    if (sf === undefined) continue;
-    const directory = dirname(name);
-    for (const node of sf.imports) {
-      if (!ts.isStringLiteralLike(node)) continue;
-      const specifier = node.text;
-      if (held.has(specifier) || found.has(specifier) || nodeBuiltinNames.has(specifier)) continue;
-      const erased = sf.isDeclarationFile || erasedSpecifier(node);
-      const key = `${directory}\0${erased ? "t" : "v"}\0${specifier}`;
-      if (asked.has(key)) continue;
-      asked.add(key);
-      const file = resolveTypesAsProject(name, specifier, project, erased);
-      if (file === null) continue;
-      found.set(specifier, file);
-      rememberProjectTypes(configFile, specifier, name, erased);
-    }
-  }
-  return found.size === 0 ? null : found;
-}
-
-/** Whether Node erases the import or export that names this specifier
- * (type-only-imports.ts), or the specifier stands in a type (`import("m")`
- * in a type position). */
-function erasedSpecifier(specifier: ts.Node): boolean {
-  const parent = specifier.parent;
-  if (parent === undefined) return false;
-  if (ts.isImportDeclaration(parent)) return erasedTypeOnlyImport(parent);
-  if (ts.isExportDeclaration(parent)) return parent.isTypeOnly;
-  return ts.isLiteralTypeNode(parent);
-}
-
-/** A global the runtime provides and scriptc's own package implementations
- * (packages/compiler/shims) name, which the project's @types/node is too old
- * to declare: DOMException, absent from @types/node 20.11 and earlier. Such a
- * project's own code cannot name the global (its tsc rejects it), but
- * scriptc's implementation of a package it imports does, and would not lower
- * (an aborted undici fetch rejects with one). The declaration joins the
- * program exactly then: a program file belongs to a package implementation
- * and no file of the adopted Node types declares the global. Decided from the
- * program's files, like the fallback module roots. */
-function nodeTypesSupplementRoots7(program: ts.Program, host: ts.Ts7Host): string[] {
-  const names = program.getSourceFileNames();
-  const shims = tsgoPath(packageShimRoot()) + "/";
-  if (!names.some((name) => tsgoPath(name).startsWith(shims))) return [];
-  for (const name of names) {
-    if (isNodeTypesPath(name) && /\bvar\s+DOMException\b/.test(host.sourceText(name) ?? ""))
-      return [];
-  }
-  return [domExceptionDtsPath()];
+  return new Map(
+    [...ownersByFile].map(([file, owners]) => [file, [...owners]] as const),
+  );
 }
 
 /** Program roots hidden behind canonical createRequire bindings. tsgo
@@ -1161,22 +546,21 @@ function nodeTypesSupplementRoots7(program: ts.Program, host: ts.Ts7Host): strin
  * an explicit root, to a fixpoint, so the same TS 7 AST/checker world owns
  * their exports and transitive graph. */
 function createRequireProgramRoots7(program: ts.Program): string[] {
-  const known = new Set(program.getSourceFileNames().map((name) => tsgoPath(resolve(name))));
+  const known = new Set(program.getSourceFiles().map((sf) => tsgoPath(resolve(sf.fileName))));
   const roots = new Set<string>();
-  for (const sf of program.getImplementationSourceFiles()) {
+  for (const sf of program.getSourceFiles()) {
     if (sf.isDeclarationFile || sf.fileName.endsWith(".json")) continue;
     const calls: { callee: ts.Identifier; spec: string }[] = [];
-    for (const node of moduleSourceCandidates(program, sf).calls) {
+    ts.walkPreorder(sf, (node) => {
       if (
-        node.questionDotToken !== undefined ||
-        node.arguments.nodes.length !== 1 ||
-        !ts.isStringLiteralLike(node.arguments.nodes[0]!) ||
+        !ts.isCallExpression(node) || node.questionDotToken !== undefined ||
+        node.arguments.length !== 1 || !ts.isStringLiteralLike(node.arguments[0]!) ||
         !ts.isIdentifier(node.expression)
       ) {
-        continue;
+        return undefined;
       }
-      calls.push({ callee: node.expression, spec: node.arguments.nodes[0]!.text });
-    }
+      calls.push({ callee: node.expression, spec: node.arguments[0]!.text });
+    });
     // Root discovery only needs the callee's binding. A first-miss lookup
     // otherwise fetches symbols and types for every identifier in the file,
     // including all unreachable bodies in large published packages.
@@ -1187,11 +571,7 @@ function createRequireProgramRoots7(program: ts.Program): string[] {
       let target = resolveProjectModule(sf.fileName, spec);
       if (target === null && !spec.startsWith("#")) {
         const npm = resolveNpmImport7(sf.fileName, spec, "require");
-        if (
-          npm !== null &&
-          isNpmStaticPackage(npm.packageName) &&
-          isJsSourceFileName(npm.typesFile)
-        ) {
+        if (npm !== null && isNpmStaticPackage(npm.packageName) && isJsSourceFileName(npm.typesFile)) {
           target = npm.typesFile;
         }
       }
@@ -1206,675 +586,73 @@ function createRequireProgramRoots7(program: ts.Program): string[] {
   return [...roots].sort();
 }
 
-/** Program roots named only by a BOUNDED dynamic import() (SPEC §5.1 of
- * results/designs/island-dynamic-subgraphs): tsgo includes a literal
- * import()'s target in the program, but a computed specifier is opaque to it,
- * so the bound's path values must join the program as roots themselves. A
- * value resolves to the exact file it names, as Node resolves it at run time:
- * a `.js` spelling never answers with the `.ts` source beside it. */
-function boundedDynamicImportRoots7(program: ts.Program): string[] {
-  const known = new Set(program.getSourceFileNames().map((name) => tsgoPath(resolve(name))));
-  const roots = new Set<string>();
-  let ctx: SpecifierBoundContext | null = null;
-  for (const sf of program.getImplementationSourceFiles()) {
-    if (sf.isDeclarationFile || sf.fileName.endsWith(".json")) continue;
-    for (const call of moduleSourceCandidates(program, sf).calls) {
-      if (call.expression.kind !== ts.SyntaxKind.ImportKeyword) continue;
-      const arg = call.arguments.nodes[0];
-      if (arg === undefined || ts.isStringLiteralLike(arg)) continue;
-      ctx ??= specifierBoundContextOf(program);
-      const bound = boundSpecifier(ctx, arg as ts.Expression);
-      if (bound.kind !== "set") continue;
-      for (const value of bound.values) {
-        if (!isPathSpecifier(value)) continue;
-        const path = resolveNodeRuntimeModule(sf.fileName, value);
-        // A declaration file or a non-module artifact (JSON, native addon)
-        // keeps its run-time answer: the load never reaches a compiled module.
-        if (path === null || known.has(path) || !/\.(ts|tsx|mts|cts|js|jsx|mjs|cjs)$/.test(path))
-          continue;
-        roots.add(path);
-      }
-    }
-  }
-  return [...roots].sort();
-}
-
-/** Whether the tsc gate can keep a file's diagnostics when the program
- * loads: it drops all of an opted-in package's files and of the package
- * shims (keptErrors in preflight also drops unselected package JavaScript,
- * which is not known yet here, so those files are still checked). */
-function tscGateFileKept(fileName: string): boolean {
-  return npmStaticPackageOfPath(fileName) === null && !isPackageShimFile(fileName);
-}
-
 /** Classify the explicitly selected installed package's own sources. */
 export function entryPackageFilePredicate(entryPath: string): (file: string) => boolean {
   const entryFile = tsgoPath(entryPath);
   const installedAt = entryFile.lastIndexOf("/node_modules/");
-  const prefix =
-    installedAt < 0
-      ? null
-      : entryFile.slice(0, installedAt) + "/node_modules/" + npmPackageNameOf(entryFile) + "/";
+  const prefix = installedAt < 0
+    ? null
+    : entryFile.slice(0, installedAt) + "/node_modules/" + npmPackageNameOf(entryFile) + "/";
   return (file) => {
     const normalized = tsgoPath(file);
-    return (
-      normalized === entryFile ||
-      (prefix !== null &&
-        normalized.startsWith(prefix) &&
-        !normalized.slice(prefix.length).split("/").includes("node_modules"))
+    return normalized === entryFile || (
+      prefix !== null && normalized.startsWith(prefix) &&
+      !normalized.slice(prefix.length).split("/").includes("node_modules")
     );
   };
 }
 
-/** Whether `file` is a dependency's shipped JavaScript: not an explicit
- * entry package's own source, under node_modules or a workspace package's
- * shipped files, or outside the project's own sources (the files its
- * tsconfig's `files`/`include` names). Preflight reports no checker
- * diagnostics for such a file, and the lowering compiles it as unchecked
- * JavaScript so the two stances agree. The project's `checkJs` asks tsc to
- * check the project's own JavaScript, not a package's; `// @ts-check` is the
- * module author's own request to be checked and still applies. */
-export function dependencyJsPredicate(
-  entryFileName: string,
-  projectSources: ReadonlySet<string> | null,
-): (file: string) => boolean {
-  const entryPackageFile = entryPackageFilePredicate(entryFileName);
-  return (file) => {
-    if (entryPackageFile(file)) return false;
-    if (isNodeModulesPath(file)) return true;
-    if (workspacePackageOfPath(file) !== null && !isWorkspaceSourcePath(file)) return true;
-    return projectSources !== null && !projectSources.has(tsgoPath(resolve(file)));
-  };
-}
-
-/** A module edge of a file: its specifier and the resolution kind preflight
- * uses for it. */
-export interface ModuleEdge {
-  specifier: string;
-  kind: "import" | "require";
-}
-
-/** The module edges tsgo counts in a JavaScript file: import and export
- * declarations, `import x = require()`, and every literal `require()` and
- * `import()` call. Read from the file's syntax alone, for a file no program
- * holds yet. */
-export function moduleEdgesOfSyntax(sf: ts.SourceFile): ModuleEdge[] {
-  const edges: ModuleEdge[] = [];
-  const literal = (node: ts.Node | undefined): string | null =>
-    node !== undefined && ts.isStringLiteralLike(node) ? node.text : null;
-  const visit = (node: ts.Node): void => {
-    if (ts.isImportDeclaration(node) || ts.isExportDeclaration(node)) {
-      const specifier = literal(node.moduleSpecifier);
-      if (specifier !== null) edges.push({ specifier, kind: "import" });
-      return;
-    }
-    if (ts.isImportEqualsDeclaration(node)) {
-      const reference = node.moduleReference;
-      const specifier = ts.isExternalModuleReference(reference)
-        ? literal(reference.expression)
-        : null;
-      if (specifier !== null) edges.push({ specifier, kind: "require" });
-      return;
-    }
-    if (ts.isCallExpression(node)) {
-      const specifier = literal(node.arguments.nodes[0]);
-      if (specifier !== null) {
-        if (node.expression.kind === ts.SyntaxKind.ImportKeyword)
-          edges.push({ specifier, kind: "import" });
-        else if (ts.isIdentifier(node.expression) && node.expression.text === "require")
-          edges.push({ specifier, kind: "require" });
-      }
-    }
-    ts.forEachChild(node, visit);
-  };
-  visit(sf);
-  return edges;
-}
-
-/** How a load roots opted-in packages' JavaScript. */
-export interface PackageRoots {
-  /** The module edges of a package file no program holds yet, read from
-   * the text the load's host serves. */
-  edges: (file: string) => readonly ModuleEdge[];
-  /** The project world, which checks authored code against the packages'
-   * published declarations: an edge roots its runtime file only where no
-   * declaration answers the specifier (a package that ships none is typed
-   * from its JavaScript there too). The lowering world roots every edge. */
-  declared: boolean;
-}
-
-/** The runtime JavaScript the program compiles that tsgo's own import walk
- * does not load. tsgo adds a JavaScript file under node_modules only as a
- * root (maxNodeModuleJsDepth stays 0, so a package that is not compiled is
- * typed exactly as it is without any compiled package), so the files of the
- * packages that DO compile are named here: the entry package's own
- * JavaScript, an opted-in package's internal edges, and the runtime file of
- * every bare edge into an opted-in package.
- *
- * `packageRoots` is null for a load with no opted-in package. Its `edges`
- * reads the edges of a file the program does not hold yet, so one call
- * follows an opted-in package's whole import graph instead of one level of
- * it per program. The caller's fixpoint over rebuilt programs stays the
- * authority: an edge the syntax read misses is found in the next program's
- * own import list. */
-function entryPackageProgramRoots7(
-  program: ts.Program,
-  entryPath: string,
-  packageRoots: PackageRoots | null,
-  jsxOptions: ts.Ts7CompilerOptions,
-): string[] {
+/** maxNodeModuleJsDepth can omit relative imports within an admitted
+ * package. Discover its runtime sources to a fixpoint so the checker and
+ * module resolver see the same graph regardless of import traversal order. */
+function entryPackageProgramRoots7(program: ts.Program, entryPath: string): string[] {
   const belongsToEntry = entryPackageFilePredicate(entryPath);
   const roots = new Set<string>();
-  /** The file an edge adds to the roots, or null: a file the program
-   * already holds, or an edge that names no compiled JavaScript. */
-  const rootOf = (from: string, spec: string, kind: "import" | "require"): string | null => {
-    // The project edge, from any program file: a relative import, or a
-    // tsconfig path, that lands on the entry package's JavaScript, on an
-    // opted-in package's, or on a source package's (tsgo's own walk loads
-    // no JavaScript under node_modules).
-    const target = resolveProjectModule(from, spec);
-    if (
-      target !== null &&
-      (belongsToEntry(target) ||
-        npmStaticPackageOfPath(target) !== null ||
-        isSourcePackagePath(target)) &&
-      isJsSourceFileName(target)
-    )
-      return program.getSourceFile(target) === undefined ? target : null;
-    // A bare edge into an opted-in package, from any program file (a
-    // program module, a workspace source package, another opted-in
-    // package): root the runtime file the edge lowers to (preflight's own
-    // resolution and miss rule), however deep in the dependency graph the
-    // importer sits. A project answer that is the package's declaration
-    // file (a tsconfig path mapped onto an installed package) is the same
-    // edge. The project world asks for the declaration first and roots
-    // the JavaScript only where there is none.
-    // (resolveBareModule directly: resolveNpmImport7's workspace
-    // registration stays with preflight's own walk.)
-    if (packageRoots === null || isRelativeSpecifier(spec)) return null;
-    if (target !== null && !(isNodeModulesPath(target) && !isJsSourceFileName(target))) return null;
-    if (spec.startsWith("#") || canonicalBuiltinModule(spec) !== null) return null;
-    if (packageRoots.declared && resolveBareModule(from, spec, "types-only", kind) !== null)
-      return null;
-    const npm = resolveBareModule(from, spec, undefined, kind);
-    return npm !== null &&
-      isNpmStaticPackage(npm.packageName) &&
-      (isNodeModulesPath(npm.typesFile) || npm.workspaceDir !== undefined) &&
-      isJsSourceFileName(npm.typesFile) &&
-      npmStaticProgramFile(program, npm.typesFile) === null
-      ? tsgoPath(resolve(npm.typesFile))
-      : null;
-  };
-  for (const sf of program.getImplementationSourceFiles()) {
-    if (sf.isDeclarationFile) continue;
+  for (const sf of program.getSourceFiles()) {
+    if (sf.isDeclarationFile || (!belongsToEntry(sf.fileName) && npmStaticPackageOfPath(sf.fileName) === null)) continue;
     for (const specifier of sf.imports) {
       if (!ts.isStringLiteralLike(specifier)) continue;
-      const root = rootOf(sf.fileName, specifier.text, moduleSpecifierKind7(specifier));
-      if (root !== null) roots.add(root);
-    }
-  }
-  // JSX with the automatic runtime imports `react/jsx-runtime` (or the
-  // project's jsxImportSource), an edge the file's own import list does not
-  // name: the rewrite that adds it runs after this discovery. Rooting the
-  // runtime module here is what lets the package compile statically instead
-  // of becoming a Node island.
-  const jsxMode = jsxEmitName(jsxOptions.jsx as string | number | undefined);
-  if (jsxMode !== undefined) {
-    for (const sf of program.getImplementationSourceFiles()) {
-      if (sf.isDeclarationFile || /\.[mc]?ts$/i.test(sf.fileName) || !containsJsx(sf)) continue;
-      const plan = jsxEmitPlan(
-        {
-          jsx: jsxMode,
-          jsxFactory: jsxOptions.jsxFactory as string | undefined,
-          jsxFragmentFactory: jsxOptions.jsxFragmentFactory as string | undefined,
-          jsxImportSource: jsxOptions.jsxImportSource as string | undefined,
-          reactNamespace: jsxOptions.reactNamespace as string | undefined,
-        },
-        jsxPragmas(sf.text),
-      );
-      if (plan.runtime !== "automatic") continue;
-      const spec = `${plan.importSource}/${plan.development ? "jsx-dev-runtime" : "jsx-runtime"}`;
-      const root = rootOf(sf.fileName, spec, "import");
-      if (root !== null) roots.add(root);
-    }
-  }
-  if (packageRoots !== null) {
-    // Insertion order: the set grows while it is walked.
-    for (const file of roots) {
-      if (npmStaticPackageOfPath(file) === null) continue;
-      for (const edge of packageRoots.edges(file)) {
-        const root = rootOf(file, edge.specifier, edge.kind);
-        if (root !== null) roots.add(root);
-      }
+      const target = resolveProjectModule(sf.fileName, specifier.text);
+      if (
+        target !== null && (belongsToEntry(target) || npmStaticPackageOfPath(target) !== null) && isJsSourceFileName(target) &&
+        program.getSourceFile(target) === undefined
+      ) roots.add(target);
     }
   }
   return [...roots].sort();
-}
-
-/** TS 7's ESNext temporal declarations: a lib slice scriptc adds only for
- * programs whose sources name the global (programNamesTemporal7). */
-const TEMPORAL_LIB = "lib.esnext.temporal.d.ts";
-
-const DECORATORS: ReadonlySet<ts.SyntaxKind> = new Set([ts.SyntaxKind.Decorator]);
-
-/** True when a program source (user code or compiled npm JavaScript)
- * contains the temporal global's name as a whole word. A cheap syntactic
- * scan of the implementation files root discovery already materialized; a
- * mention in a comment or string also counts, which only adds the lib
- * slice. */
-function programNamesTemporal7(program: ts.Program): boolean {
-  for (const sf of program.getImplementationSourceFiles())
-    if (ts.sourceTextMatches(sf, TEMPORAL_WORD)) return true;
-  return false;
-}
-
-/** The temporal global's name with no identifier character on either side:
- * an ASCII letter, digit, `$` or `_`, or any code unit outside ASCII. */
-const TEMPORAL_WORD = new RegExp(
-  `(?<![0-9A-Za-z$_\\u0080-\\uffff])${TEMPORAL_GLOBAL}(?![0-9A-Za-z$_\\u0080-\\uffff])`,
-);
-
-/** "require" for a CommonJS edge (`require("x")`, `import x = require("x")`),
- * "import" for every ESM form — the resolution kind preflight uses. */
-function moduleSpecifierKind7(specifier: ts.StringLiteralLike): "import" | "require" {
-  const parent = specifier.parent;
-  if (ts.isExternalModuleReference(parent)) return "require";
-  return ts.isCallExpression(parent) &&
-    ts.isIdentifier(parent.expression) &&
-    parent.expression.text === "require"
-    ? "require"
-    : "import";
-}
-
-/** The program's files with JSX, lowered with the project's jsx settings
- * and each file's pragmas, or the refusal of a setting that emits no calls.
- * TypeScript files (.ts, .mts, .cts) cannot hold JSX; without a jsx setting
- * the checker already rejects any JSX (TS17004). */
-function lowerProgramJsx7(
-  program: ts.Program,
-  options: ts.Ts7CompilerOptions,
-): { sources: Map<string, LoweredJsx>; refusal: ScrDiagnostic | null } {
-  const sources = new Map<string, LoweredJsx>();
-  const mode = jsxEmitName(options.jsx as string | number | undefined);
-  if (mode === undefined) return { sources, refusal: null };
-  const contextTypes = jsxContextTypes7(program);
-  for (const sf of program.getImplementationSourceFiles()) {
-    if (sf.isDeclarationFile || /\.[mc]?ts$/.test(sf.fileName) || !containsJsx(sf)) continue;
-    const at = firstJsx(sf)!;
-    const loc = { file: sf.fileName, start: ts.tokenStartOfNode(at), end: at.end };
-    if (mode === "preserve" || mode === "react-native") {
-      return {
-        sources,
-        refusal: {
-          code: "SC1090",
-          message: `JSX with "jsx": "${mode}" is not supported: that setting keeps JSX in the output instead of lowering it to calls`,
-          loc,
-          hint: 'set "jsx" to "react", "react-jsx" or "react-jsxdev" in the project tsconfig',
-        },
-      };
-    }
-    const plan = jsxEmitPlan(
-      {
-        jsx: mode,
-        jsxFactory: options.jsxFactory as string | undefined,
-        jsxFragmentFactory: options.jsxFragmentFactory as string | undefined,
-        jsxImportSource: options.jsxImportSource as string | undefined,
-        reactNamespace: options.reactNamespace as string | undefined,
-      },
-      jsxPragmas(sf.text),
-    );
-    sources.set(sf.fileName, lowerJsx(sf, plan, contextTypes));
-  }
-  return { sources, refusal: null };
-}
-
-/** The constraint the rewrite places on a JSX slot expression that needs
- * one, or undefined. A TypeScript file's implicit-any report stops the
- * build; a JavaScript file admits it (the JS_OPINIONS rows), so it keeps the
- * lowering it had. A component's slot is read through the component's own
- * props type, which names a module-private prop type the site cannot spell;
- * elsewhere the slot's contextual type is printed with fully qualified names
- * (`import("react").MouseEventHandler<HTMLButtonElement>`) so the text reads
- * the same from the rewritten file. A spread is constrained to the partial
- * props type, since the element's other attributes supply the rest. The
- * checker is asked only for the sites whose functions need it, and is built
- * on the first such site. */
-function jsxContextTypes7(program: ts.Program): JsxContextTypes {
-  let checker: ReturnType<ts.Program["getTypeChecker"]> | null = null;
-  const cached = new Map<ts.Expression, string | undefined>();
-  return (expression, helpers) => {
-    if (!/\.[mc]?tsx$/i.test(expression.getSourceFile().fileName)) return undefined;
-    if (cached.has(expression)) return cached.get(expression);
-    let text: string | undefined;
-    if (jsxSlotNeedsContext(expression)) {
-      try {
-        checker ??= program.getTypeChecker();
-        const slot = jsxSlot7(expression);
-        text = slot === null ? undefined : jsxElementSlotText7(checker, slot, helpers);
-        if (text === undefined) {
-          const contextual = jsxContextTypeText7(checker, expression);
-          // A spread supplies only the props its object has: the element's
-          // other attributes supply the rest.
-          text =
-            contextual === undefined
-              ? undefined
-              : slot !== null && slot.name === null
-                ? `${helpers.partial()}<${contextual}>`
-                : contextual;
-        }
-      } catch {
-        text = undefined;
-      }
-    }
-    cached.set(expression, text);
-    return text;
-  };
-}
-
-type JsxChecker = ReturnType<ts.Program["getTypeChecker"]>;
-
-/** The slot's constraint read from the element: the props member the
- * expression fills, or the partial props type for a spread. Reading it
- * through the tag keeps a type whose name the site cannot see (a component's
- * module-private prop type) usable, because the indexed access resolves where
- * the component is declared. A union props type is narrowed to the arm the
- * element's discriminant selects, since indexing the union itself would lose
- * it. Undefined for an intrinsic tag, a tag that is not an entity name, a
- * `key` or `ref` (which JSX types itself), a union no single discriminant
- * selects, and a generic component (whose instantiated props the printed
- * contextual type names). */
-function jsxElementSlotText7(
-  checker: JsxChecker,
-  slot: JsxSlot7,
-  helpers: JsxTypeHelpers,
-): string | undefined {
-  const element = jsxElementPropsTag7(checker, slot.opening);
-  if (element === undefined) return undefined;
-  const props = `${helpers.known()}<${helpers.props()}<typeof ${element.tagText}>>`;
-  // A spread provides only some props; the element's other attributes supply
-  // the rest, and which union arm they select is the printed contextual type.
-  if (slot.name === null)
-    return element.arm === undefined
-      ? `${helpers.partial()}<${props} & { ref?: any; key?: any }>`
-      : undefined;
-  const target =
-    element.arm === undefined ? props : `${helpers.arm()}<${props}, ${element.arm.text}>`;
-  if (slot.name === "children" && slot.index !== undefined) {
-    // One child of several is typed by one member of the children prop, and
-    // the element passes them as an array or a tuple in source order.
-    const children = jsxPropertyType7(
-      checker,
-      element.arm?.type ?? element.props,
-      "children",
-      slot.opening,
-    );
-    if (children === undefined || !(checker.isArrayType(children) || checker.isTupleType(children)))
-      return undefined;
-    return `${target}["children"][${slot.index}]`;
-  }
-  return `${target}[${JSON.stringify(slot.name)}]`;
-}
-
-/** A named property's type on `type`, or undefined. */
-function jsxPropertyType7(
-  checker: JsxChecker,
-  type: ts.Type,
-  name: string,
-  location: ts.Node,
-): ts.Type | undefined {
-  const symbol = checker.getPropertyOfType(type, name);
-  return symbol === undefined ? undefined : checker.getTypeOfSymbolAtLocation(symbol, location);
-}
-
-/** The tag of a value-based element whose props type the tag names exactly:
- * a function component checked against one non-generic call signature, or a
- * class component. A union props type carries the discriminant the element
- * provides, so the selected arm names the callback the site checked. */
-function jsxElementPropsTag7(
-  checker: JsxChecker,
-  opening: ts.JsxOpeningElement | ts.JsxSelfClosingElement,
-): { tagText: string; props: ts.Type; arm?: { type: ts.Type; text: string } } | undefined {
-  const tagText = jsxValueTagText(opening.tagName);
-  if (tagText === undefined) return undefined;
-  const tagType = checker.getTypeAtLocation(opening.tagName);
-  const construct = checker.getConstructSignatures(tagType);
-  const call = checker.getCallSignatures(tagType);
-  const classLike = construct.length > 0;
-  const signatures = classLike ? construct : call;
-  // JSX checks a function component against one call signature; an overload
-  // set would name a different one.
-  if (!classLike && call.length !== 1) return undefined;
-  // A generic component instantiates its props at the JSX site; naming the
-  // component's own type would name another instantiation.
-  if (signatures.some((signature) => signature.getTypeParameters().length > 0)) return undefined;
-  const signature = signatures[0];
-  if (signature === undefined) return undefined;
-  const props = jsxSignaturePropsType7(checker, signature, opening, classLike);
-  if (props === undefined) return undefined;
-  if (!props.isUnionType()) return { tagText, props };
-  // Indexing the union would lose the arm the element's discriminant selects.
-  const arm = jsxDiscriminant7(checker, props, opening);
-  return arm === undefined ? undefined : { tagText, props, arm };
-}
-
-/** The type literal an element's literal attribute uses to select one arm of
- * a union props type, or undefined when no single arm is selected. */
-function jsxDiscriminant7(
-  checker: JsxChecker,
-  props: ts.Type,
-  opening: ts.JsxOpeningElement | ts.JsxSelfClosingElement,
-): { type: ts.Type; text: string } | undefined {
-  for (const property of opening.attributes.properties.nodes) {
-    if (!ts.isJsxAttribute(property) || !ts.isIdentifier(property.name)) continue;
-    const attribute = property.name.text;
-    if (attribute === undefined) continue;
-    const literal = jsxAttributeLiteral7(property.initializer);
-    if (literal === undefined) continue;
-    const name = /^[A-Za-z_$][\w$]*$/.test(attribute) ? attribute : JSON.stringify(attribute);
-    const matches = props.getTypes().filter((arm) => {
-      const member = checker.getPropertyOfType(arm, attribute);
-      if (member === undefined) return false;
-      const type = checker.getTypeOfSymbolAtLocation(member, opening);
-      return checker
-        .typeToString(type)
-        .split(" | ")
-        .some((part) => part === literal);
-    });
-    if (matches.length === 1) return { type: matches[0]!, text: `{ ${name}: ${literal} }` };
-  }
-  return undefined;
-}
-
-/** A JSX attribute value that is a literal type, as type text. */
-function jsxAttributeLiteral7(value: ts.JsxAttributeValue | undefined): string | undefined {
-  if (value === undefined) return "true";
-  if (ts.isStringLiteral(value)) return JSON.stringify(value.text);
-  if (!ts.isJsxExpression(value) || value.expression === undefined) return undefined;
-  const expression = value.expression;
-  if (ts.isStringLiteral(expression)) return JSON.stringify(expression.text);
-  if (ts.isNumericLiteral(expression)) return expression.text;
-  if (expression.kind === ts.SyntaxKind.TrueKeyword) return "true";
-  if (expression.kind === ts.SyntaxKind.FalseKeyword) return "false";
-  return undefined;
-}
-
-/** The props type a component signature declares: a class instance's `props`
- * member, or a function component's first parameter. */
-function jsxSignaturePropsType7(
-  checker: JsxChecker,
-  signature: ReturnType<JsxChecker["getSignaturesOfType"]>[number],
-  location: ts.Node,
-  classLike: boolean,
-): ts.Type | undefined {
-  if (classLike) {
-    const instance = checker.getReturnTypeOfSignature(signature);
-    const props = checker.getPropertyOfType(instance, "props");
-    return props === undefined ? undefined : checker.getTypeOfSymbolAtLocation(props, location);
-  }
-  const parameter = signature.getParameters()[0];
-  return parameter === undefined
-    ? undefined
-    : checker.getTypeOfSymbolAtLocation(parameter, location);
-}
-
-/** The contextual type the as-written program gives the expression. */
-function jsxContextTypeText7(checker: JsxChecker, expression: ts.Expression): string | undefined {
-  const type = checker.getContextualType(expression);
-  if (type === undefined) return undefined;
-  const text = checker.typeToString(
-    type,
-    expression,
-    ts.TypeFormatFlags.NoTruncation | ts.TypeFormatFlags.UseFullyQualifiedType,
-  );
-  // A type without a call signature gives the functions no parameter type,
-  // and printer comments (`/*unresolved*/`) do not parse.
-  if (
-    text === "" ||
-    text === "any" ||
-    text === "unknown" ||
-    text === "never" ||
-    text === "error" ||
-    text.includes("/*")
-  )
-    return undefined;
-  return text;
-}
-
-/** The JSX slot an expression fills, and the element whose attributes type
- * gives it its type, or null when the expression is not in a slot a
- * component's props type answers (an intrinsic tag's attribute is answered
- * by JSX.IntrinsicElements; a fragment has no tag; a ref, a key and one of
- * several children keep the contextual type the checker reported). */
-interface JsxSlot7 {
-  opening: ts.JsxOpeningElement | ts.JsxSelfClosingElement;
-  /** The props member the expression fills; null for a spread of props. */
-  name: string | null;
-  /** For one child of several: its position among the element's children. */
-  index?: number;
-}
-
-function jsxSlot7(expression: ts.Expression): JsxSlot7 | null {
-  const holder = expression.parent;
-  if (holder === undefined) return null;
-  if (ts.isJsxSpreadAttribute(holder)) return jsxSlotOfAttributes(holder.parent, null);
-  if (!ts.isJsxExpression(holder) || holder.parent === undefined) return null;
-  const parent = holder.parent;
-  if (ts.isJsxAttribute(parent)) {
-    const name = jsxAttributeNameText(parent.name);
-    // JSX types a key and a ref through its own attributes as well as props.
-    if (name === undefined || name === "key" || name === "ref") return null;
-    return jsxSlotOfAttributes(parent.parent, name);
-  }
-  if (ts.isJsxElement(parent)) {
-    // A spread child shifts the positions the rest fill, and an element with
-    // one child passes that child itself rather than an array or a tuple.
-    const position = jsxChildPosition7(parent, holder);
-    if (position === undefined) return null;
-    return {
-      opening: parent.openingElement,
-      name: "children",
-      ...(position.count > 1 ? { index: position.index } : {}),
-    };
-  }
-  return null;
-}
-
-/** The child's zero-based position among the element's value-emitting
- * children, and how many there are; undefined when a spread child makes the
- * positions the type does not fix. */
-function jsxChildPosition7(
-  node: ts.JsxElement,
-  child: ts.JsxChild,
-): { index: number; count: number } | undefined {
-  let count = 0;
-  let position: number | undefined;
-  for (const candidate of node.children.nodes) {
-    if (ts.isJsxExpression(candidate) && candidate.dotDotDotToken !== undefined) return undefined;
-    if (!jsxChildEmits7(candidate)) continue;
-    if (candidate === child) position = count;
-    count++;
-  }
-  return position === undefined ? undefined : { index: position, count };
-}
-
-function jsxChildEmits7(child: ts.JsxChild): boolean {
-  if (ts.isJsxText(child)) return !child.containsOnlyTriviaWhiteSpaces;
-  if (ts.isJsxExpression(child)) return child.expression !== undefined;
-  return true;
-}
-
-function jsxSlotOfAttributes(node: ts.Node | undefined, name: string | null): JsxSlot7 | null {
-  const parent = node?.parent;
-  if (parent === undefined) return null;
-  if (ts.isJsxOpeningElement(parent) || ts.isJsxSelfClosingElement(parent))
-    return { opening: parent, name };
-  return null;
-}
-
-function jsxAttributeNameText(name: ts.JsxAttributeName): string | undefined {
-  if (ts.isIdentifier(name)) return name.text;
-  if (ts.isJsxNamespacedName(name)) return `${name.namespace.text}:${name.name.text}`;
-  return undefined;
-}
-
-/** The tag's text when it names a value a type query can read
- * (`Tag`, `UI.Tag`), or undefined for an intrinsic tag, a namespaced one, and
- * an expression such as `this.Tag`. */
-function jsxValueTagText(tag: ts.JsxTagNameExpression): string | undefined {
-  if (ts.isIdentifier(tag)) return isIntrinsicJsxName(tag.text) ? undefined : tag.text;
-  if (ts.isPropertyAccessExpression(tag)) return jsxEntityText(tag);
-  return undefined;
-}
-
-function jsxEntityText(node: ts.Expression): string | undefined {
-  if (ts.isIdentifier(node)) return node.text;
-  if (ts.isPropertyAccessExpression(node)) {
-    const left = jsxEntityText(node.expression);
-    return left === undefined ? undefined : `${left}.${node.name.text}`;
-  }
-  return undefined;
 }
 
 function loadProgram7(
   host: ts.Ts7Host,
   entryPath: string,
   externalTypes: ReadonlyMap<string, string> = new Map(),
-  /** How this load roots opted-in packages' JavaScript
-   * (entryPackageProgramRoots7); null with no opted-in package. */
-  packageRoots: PackageRoots | null = null,
-  /** The declaration-typed boundary's projection (decl-projection.ts):
-   * answers rewritten user files for the lowering world, or null. */
-  projector?: (program: ts.Program) => DeclProjection | null,
-  /** Shape inference's typed overlay (shape-inference/overlay.ts):
-   * rewritten package JavaScript for the lowering world, or null. */
-  overlayer?: (program: ts.Program, round: number) => ReadonlyMap<string, string> | null,
+  /** A program that is only checked for diagnostics (the npm-static authored world), never lowered: static root discovery then
+   * asks for just the symbols it reads, not the whole-file symbol sweeps lowering relies on. */
+  diagnosticsOnly = false,
 ): LoadResult & { disposeAll: () => void } {
   const config = adoptProjectConfig7(host, entryPath);
   const configuredPaths = config.options["paths"];
   setProjectPathMappings(
     configuredPaths !== undefined && typeof configuredPaths === "object" && configuredPaths !== null
-      ? (configuredPaths as Record<string, string[]>)
+      ? configuredPaths as Record<string, string[]>
       : null,
   );
   const nodeTypes = config.configFile ? resolveNodeTypes7(entryPath) : null;
-  // skipLibCheck is FORCED for every program: checking a third-party lib's
-  // internals against OUR lib choice (es2025, no dyn, and the bundled Node
-  // declarations when the project has no @types/node) is not scriptc's
-  // fence and drowns real diagnostics in hundreds of .d.ts-internal
-  // errors. An error inside an INSTALLED package's declarations (glob's
-  // `NodeJS.Platform`, say) must not fail that package's island build —
-  // its own tsconfig checks it, and our reduced ambient cannot declare
-  // every type name a published .d.ts spells. Uses of those types in
-  // program code stay checked, as under tsc. Fence discipline never
-  // depended on it: the lowerer checks provenance and forms at every use
-  // site.
-  let options: ts.Ts7CompilerOptions = { ...config.options, skipLibCheck: true };
-  // Opted-in packages' shipped JavaScript must be TYPE-INCLUDED (not just
-  // resolved): otherwise it types as an implicit-any module (TS7016) and
-  // nothing infers. It joins as program roots (entryPackageProgramRoots7),
-  // never through maxNodeModuleJsDepth: that option is program-wide, and
-  // would type every other package's JavaScript too, so compiling one
-  // package would change how the rest of the program checks.
+  // skipLibCheck is FORCED with @types/node in the program: checking a
+  // third-party lib's internals against OUR lib choice (es2025, no dyn) is
+  // not scriptc's fence and drowns real diagnostics in hundreds of
+  // .d.ts-internal errors. Fence discipline never depended on it: the
+  // lowerer checks provenance and forms at every use site.
+  // Browser target: lib.dom and the ES libs are trusted declarations (the
+  // standard skipLibCheck posture); checking them dominated every compile.
+  let options: ts.Ts7CompilerOptions = nodeTypes || browserTarget() ? { ...config.options, skipLibCheck: true } : { ...config.options };
+  // --npm-static: opted-in packages' shipped JS must be TYPE-INCLUDED (not
+  // just resolved) — without maxNodeModuleJsDepth, node_modules JS types as
+  // an implicit-any module (TS7016) and nothing infers. Only flagged
+  // compiles pay this; flagless builds keep the exact historical options.
+  // Eight levels retain package-internal re-export chains such as Effect's;
+  // the former four-level cap left valid bindings outside the checker graph.
+  if (npmStaticActive()) options.maxNodeModuleJsDepth = 8;
   // --provenance-sources: the registered entries become tsconfig "paths"
   // so tsgo's OWN resolution of the bare specifiers lands on the same
   // source files the preflight resolver answers — the checker types the
@@ -1883,8 +661,6 @@ function loadProgram7(
   if (provenance !== null || externalTypes.size > 0) {
     const paths: Record<string, string[]> = {
       ...(configuredPaths as Record<string, string[]> | undefined),
-      // Keep an index-signature source for native lowering when provenance is absent.
-      // oxlint-disable-next-line unicorn/no-useless-fallback-in-spread
       ...(provenance ?? {}),
     };
     for (const [specifier, declarationPath] of externalTypes) {
@@ -1892,443 +668,83 @@ function loadProgram7(
     }
     options = { ...options, paths };
   }
-  // The declarations only the project's own resolution settings find
-  // (typesAsProject7), as far as an earlier load of this compile learned
-  // them: this load's first program then has them, and the root discovery
-  // below adds what is new.
-  if (config.typeResolution !== undefined && config.configFile !== null) {
-    const remembered = rememberedProjectTypes(config.configFile, config.typeResolution);
-    if (remembered.size > 0) {
-      // The project's own mappings and the entries above keep their keys.
-      const paths: Record<string, string[]> = { ...options.paths };
-      for (const [specifier, file] of remembered)
-        if (paths[specifier] === undefined) paths[specifier] = [file];
-      options = { ...options, paths };
-    }
-  }
-  // Without @types/node the fallback declarations stand in: the core file,
-  // and a Node module's file once a program file names the module
-  // (fallbackModuleRoots7). The modules the entry names join the first
-  // program.
-  const coreRoots = [
-    entryPath,
-    ambientDtsPath(),
-    ...(nodeTypes === null
-      ? [fallbackDtsPath(), ...fallbackModulesNamedIn(host.sourceText(entryPath) ?? "")]
-      : [nodeTypes]),
-    ...(config.declarations ?? []),
-  ];
+  // Browser target: lib.dom is the ambient world; Scriptc's Node-flavoured
+  // ambients (TextEncoder, process, ...) would merge over the DOM's.
+  const coreRoots = browserTarget() ? [entryPath] : [entryPath, ambientDtsPath(), nodeTypes ?? fallbackDtsPath()];
   const programRoots = [...coreRoots];
-  // One project lineage for the whole load: the root-discovery passes and
-  // every rewrite update the same synthesized project, so the session
-  // carries every unchanged file's syntax tree into the next program.
-  const lineage: ts.Ts7ProjectLineage = {};
-  let program: ts.Program;
-  try {
-    program = host.createProgram([...programRoots, overridesDtsPath()], options, false, lineage);
-  } catch (error) {
-    host.releaseLineage(lineage);
-    throw error;
+  // Browser target: the project's own .d.ts files (Window augmentations, Vite env types).
+  if (browserTarget()) {
+    const configFile = ts.findConfigFile(dirname(entryPath), ts.sys.fileExists) ?? null;
+    const list = (dir: string) => { try { return browserReaddir(dir).map(name => ({ name, dir: browserStat(`${dir}/${name}`).isDirectory() })); } catch { return []; } };
+    programRoots.push(...projectDeclarationRoots(configFile, p => { try { return browserRead(p, "utf8"); } catch { return undefined; } }, list));
   }
+  // Batch (shared host only): one program rooted at every batch entry serves
+  // each compile of the batch; the entry is this compile's own file.
+  const batch = batchRoots();
+  if (batch !== null && sharedHostSet.has(host)) {
+    for (const r of batch) { const abs = resolve(r); if (!programRoots.includes(abs)) programRoots.push(abs); }
+    const key = JSON.stringify([programRoots.slice().sort(), options]);
+    let cached = batchPrograms.get(key);
+    if (!cached) {
+      let p = host.createProgram([...programRoots, overridesDtsPath()], options);
+      for (let pass = 0; pass < 32; pass++) {
+        const candidates = [...entryPackageProgramRoots7(p, entryPath), ...createRequireProgramRoots7(p), ...forkTargetPaths(p, p.getSourceFiles())];
+        const extra = candidates.filter((root, index) => !programRoots.includes(root) && candidates.indexOf(root) === index);
+        if (extra.length === 0) break;
+        p.dispose();
+        programRoots.push(...extra);
+        p = host.createProgram([...programRoots, overridesDtsPath()], options);
+      }
+      let world: ts.Program | null = null;
+      const roots = [...programRoots];
+      cached = { host, program: p, projectWorld: () => (world ??= host.createProgram(roots, options)) };
+      batchPrograms.set(key, cached);
+    }
+    const entry = cached.program.getSourceFile(entryPath);
+    if (!entry) throw new Error(`could not load ${entryPath}`);
+    return {
+      program: cached.program, entry, moduleOrder: [], configDiags: config.diags, externalTypes,
+      externalTypeSpecifiersByFile: externalTypeFileClosure7(cached.program, externalTypes),
+      projectWorld: cached.projectWorld,
+      disposeAll: () => {},
+    };
+  }
+  let program = host.createProgram([...programRoots, overridesDtsPath()], options);
   try {
     for (let pass = 0; pass < 32; pass++) {
       const candidates = [
-        ...(nodeTypes === null
-          ? fallbackModuleRoots7(program, host)
-          : nodeTypesSupplementRoots7(program, host)),
-        ...declarationTwinRoots7(program),
-        ...entryPackageProgramRoots7(program, entryPath, packageRoots, options),
+        ...entryPackageProgramRoots7(program, entryPath),
         ...createRequireProgramRoots7(program),
-        ...boundedDynamicImportRoots7(program),
-        ...forkTargetPaths(program, program.getImplementationSourceFiles()),
-        ...workerTargetPaths(program, program.getImplementationSourceFiles()),
+        ...forkTargetPaths(program, program.getSourceFiles(), diagnosticsOnly),
       ];
       const extraRoots = candidates.filter(
         (root, index) => !programRoots.includes(root) && candidates.indexOf(root) === index,
       );
-      // The declarations only the project's own resolution settings find
-      // reach the checker as `paths` entries: it resolves as a bundler does,
-      // has no node10 mode, and finds a package's JavaScript before a type
-      // root. The project's own mappings and the entries above keep their
-      // keys.
-      const asProject =
-        config.typeResolution === undefined || config.configFile === null
-          ? null
-          : typesAsProject7(program, config.configFile, config.typeResolution, options.paths);
-      if (extraRoots.length === 0 && asProject === null) break;
-      for (const root of extraRoots) programRoots.push(root);
-      if (asProject !== null) {
-        const paths: Record<string, string[]> = { ...options.paths };
-        for (const [specifier, file] of asProject) paths[specifier] = [file];
-        options = { ...options, paths };
-      }
-      // Create before disposing: the session retains the unchanged files
-      // from the snapshot the new program replaces, and the server's
-      // change-tracking baseline for the shared project stays alive.
-      const previous = program;
-      program = host.createProgram([...programRoots, overridesDtsPath()], options, false, lineage);
-      previous.dispose();
+      if (extraRoots.length === 0) break;
+      program.dispose();
+      programRoots.push(...extraRoots);
+      program = host.createProgram([...programRoots, overridesDtsPath()], options);
       if (pass === 31) throw new Error("static program-root discovery did not converge");
-    }
-    // Node 24 ships no temporal global, but TS 7 types it in an ESNext
-    // lib slice. Programs that name it (feature probes such as smol-toml's
-    // typeof check) get that slice so they type-check, and lower to Node's
-    // answers (typeof "undefined", ReferenceError on use). Every other
-    // program keeps the identical lib set: the slice would add globals to
-    // the checker's world for everyone.
-    if (programNamesTemporal7(program)) {
-      options = {
-        ...options,
-        lib: [...((options.lib as string[] | undefined) ?? []), TEMPORAL_LIB],
-      };
-      const previous = program;
-      program = host.createProgram([...programRoots, overridesDtsPath()], options, false, lineage);
-      previous.dispose();
-    }
-    // A type-position `import('spec')['name']` (import-type-indexed-access.ts)
-    // names the type of the member's value, the type `typeof import('spec')['name']`
-    // names. The checker refuses the form as written (TS1340) and types it
-    // `any`, so every world below, the tsc gate included, reads the file with
-    // `typeof ` before the import type: a diagnostic the refused type would
-    // have caused (`const g: F = (x) => x + 1`, F typed `any`) is the one tsc
-    // reports for the spelled-out form, and a program without a site is
-    // served its files untouched.
-    const importTypeSources = importTypeIndexedAccessSources(program);
-    if (importTypeSources.size > 0) {
-      const previous = program;
-      for (const [file, text] of importTypeSources) host.addVirtualFile(file, text);
-      program = host.createProgram([...programRoots, overridesDtsPath()], options, false, lineage);
-      previous.dispose();
-    }
-    // `export * from` a CommonJS module: Node forwards the module's lexer
-    // facade, which TypeScript does not model as a star source (an
-    // `export =` target is refused outright with TS2498). The rewrite gives
-    // the checker the names Node serves (cjsStarReexportSources). Rewriting
-    // before the JSX world below keeps both worlds on one text, and the
-    // rewrite keeps every existing offset in place.
-    for (let pass = 0; ; pass++) {
-      const starSources = cjsStarReexportSources(program);
-      if (starSources.size === 0) break;
-      if (pass === 8) throw new Error("CommonJS star re-export rewriting did not converge");
-      const previous = program;
-      for (const [file, text] of starSources) host.addVirtualFile(file, text);
-      program = host.createProgram([...programRoots, overridesDtsPath()], options, false, lineage);
-      previous.dispose();
-    }
-    // JSX: the program above checks the files as written; the program the
-    // lowering compiles holds them with their JSX lowered.
-    const jsx = lowerProgramJsx7(program, options);
-    let tscWorld: LoadResult["tscWorld"];
-    const declBoundaryNotes: ScrDiagnostic[] = [];
-    if (jsx.refusal !== null) {
-      config.diags.push(jsx.refusal);
-    } else if (jsx.sources.size > 0) {
-      const original = program;
-      // The project world must read the original text too, so it is built
-      // before the rewritten files are served, and only when it is needed.
-      const diagnostics = ts.getPreEmitDiagnostics(original, tscGateFileKept);
-      const errors = diagnostics.some((d) => d.category === ts.DiagnosticCategory.Error);
-      tscWorld = {
-        program: original,
-        diagnostics: () => diagnostics,
-        projectWorld: errors ? host.createProgram(programRoots, options, false, lineage) : null,
-      };
-      for (const [file, lowered] of jsx.sources) host.addVirtualFile(file, lowered.text);
-      program = host.createProgram([...programRoots, overridesDtsPath()], options, false, lineage);
-    } else if (projector !== undefined) {
-      // The declaration-typed boundary: user files typed from package
-      // declarations (decl-projection.ts). The tsc gate reads the original
-      // text; the lowering compiles the rewritten files.
-      const projection = projector(program);
-      if (projection !== null) {
-        const original = program;
-        const baseline = new Map<string, number>();
-        for (const file of projection.files.keys()) {
-          const sf = original.getSourceFile(file);
-          if (sf !== undefined) baseline.set(file, original.getSemanticDiagnostics(sf).length);
-        }
-        for (const [file, text] of projection.files) host.addVirtualFile(file, text);
-        host.addVirtualFile(projection.declFile, projection.declText);
-        programRoots.push(projection.declFile);
-        program = host.createProgram(
-          [...programRoots, overridesDtsPath()],
-          options,
-          false,
-          lineage,
-        );
-        // A rewrite the lowering world disagrees with (new errors) is
-        // dropped for that file: the file lowers as it would without it.
-        const dropped: string[] = [];
-        for (const file of projection.files.keys()) {
-          const sf = program.getSourceFile(file);
-          if (sf === undefined) continue;
-          if (program.getSemanticDiagnostics(sf).length > (baseline.get(file) ?? 0)) {
-            dropped.push(file);
-            host.addVirtualFile(file, original.getSourceFile(file)!.text);
-          }
-        }
-        if (dropped.length > 0) {
-          // Create before disposing (see the root-discovery loop).
-          const replacement = program;
-          program = host.createProgram(
-            [...programRoots, overridesDtsPath()],
-            options,
-            false,
-            lineage,
-          );
-          replacement.dispose();
-          for (const file of dropped) declBoundaryNotes.push(declBoundaryDroppedDiag(file));
-        }
-        if (dropped.length === projection.files.size) {
-          program.dispose();
-          programRoots.pop();
-          program = original;
-        } else {
-          let diagnostics: readonly ts.Diagnostic[] | null = null;
-          tscWorld = {
-            program: original,
-            diagnostics: () =>
-              (diagnostics ??= ts.getPreEmitDiagnostics(original, tscGateFileKept)),
-            projectWorld: null,
-            declWorldFallback: true,
-          };
-        }
-      }
-    }
-    // Shape inference's overlay: package files typed from proven facts. The
-    // tsc gate keeps reading the files as written. loadProgram resets the
-    // overlay registry before the lowering world's load.
-    const overlayOriginals = new Map<string, string | null>();
-    if (overlayer !== undefined && jsx.refusal === null) {
-      // Rounds: structural rewrites, then the typed overlay of the rebuilt
-      // program (shape-inference/index.ts).
-      const timeShapes = process.env["SCRIPTC_DEBUG_SHAPE_TIME"] !== undefined;
-      for (let round = 0; round < 3; round++) {
-        const t0 = timeShapes ? performance.now() : 0;
-        const overlay = overlayer(program, round);
-        if (timeShapes)
-          process.stderr.write(
-            `[shape-time] round ${round} overlayer ${(performance.now() - t0).toFixed(0)} ms\n`,
-          );
-        if (overlay === null || overlay.size === 0) break;
-        const t1 = timeShapes ? performance.now() : 0;
-        const before = program;
-        // The tsc gate reads the files as written: its diagnostics are
-        // taken before the overlay's files replace them on the host, and
-        // its project world (load.projectWorld()) is built over the files
-        // as written.
-        if (tscWorld === undefined) {
-          const diagnostics = ts.getPreEmitDiagnostics(before);
-          tscWorld = {
-            program: before,
-            diagnostics: () => diagnostics,
-            projectWorld: null,
-            declWorldFallback: true,
-          };
-        } else {
-          // The gate's diagnostics are taken before the overlay's files
-          // replace the files as written on the host.
-          tscWorld.diagnostics();
-        }
-        for (const file of overlay.keys())
-          if (!overlayOriginals.has(file))
-            overlayOriginals.set(file, before.getSourceFile(file)?.text ?? null);
-        for (const [file, text] of overlay) host.addVirtualFile(file, text);
-        program = host.createProgram(
-          [...programRoots, overridesDtsPath()],
-          options,
-          false,
-          lineage,
-        );
-        if (tscWorld.program !== before) before.dispose();
-        if (timeShapes)
-          process.stderr.write(
-            `[shape-time] round ${round} gate+program ${(performance.now() - t1).toFixed(0)} ms\n`,
-          );
-        if (shapeOverlayDone()) break;
-      }
-    }
-    // tsc's import elision (import-elision.ts): a TypeScript file of a
-    // project that does not set `verbatimModuleSyntax` is compiled with the
-    // imports and exports tsc keeps. The tsc gate reads the files as
-    // written; the rewrite keeps their offsets.
-    //
-    // The authored world (PackageRoots.declared) is never compiled: it types
-    // the files as written for the declaration projection, which pairs each
-    // of its files with the lowering world's file of the same text and
-    // skips a file whose texts differ, and for the gate's project world,
-    // which is built over the files as written. It holds no elided file,
-    // so it asks the checker nothing about the program's imports.
-    const dialectOf = fileDialects7(host);
-    const elision: ProgramImportElision =
-      packageRoots?.declared === true
-        ? { texts: new Map(), inlinedOnly: [] }
-        : elideProgramImports(program, (file) => dialectOf(file)?.elision ?? null);
-    const elisions = elision.texts;
-    const importWarnings = elision.inlinedOnly.map((kept) =>
-      inlinedImportKeptDiag(kept.specifier, { file: kept.file, start: kept.start, end: kept.end }),
-    );
-    const elidedSources = new Map<string, string>();
-    if (elisions.size > 0) {
-      const before = program;
-      // The gate's diagnostics are taken before the rewritten files replace
-      // the files as written on the host.
-      let gateWorld = tscWorld;
-      if (gateWorld === undefined) {
-        const diagnostics = ts.getPreEmitDiagnostics(before, tscGateFileKept);
-        gateWorld = {
-          program: before,
-          diagnostics: () => diagnostics,
-          projectWorld: null,
-          declWorldFallback: true,
-        };
-        tscWorld = gateWorld;
-      } else {
-        gateWorld.diagnostics();
-      }
-      // A type-only import the program itself uses as a value is the
-      // program's own error (TS1361, TS1362 in the file as written; the gate
-      // reports it): the check after the rewrite must not take it for a
-      // binding the elision dropped. The gate's diagnostics are the files as
-      // written and are already computed: nothing is checked a second time.
-      const writtenTypeOnlyValueUses = new Set<string>();
-      for (const d of gateWorld.diagnostics()) {
-        if ((d.code === 1361 || d.code === 1362) && d.fileName !== undefined)
-          writtenTypeOnlyValueUses.add(`${d.fileName}:${d.pos}`);
-      }
-      for (const [file, text] of elisions) {
-        // The text is carried, not inspected: what the elision took from it
-        // is the rewrite it reported.
-        const written = before.getSourceFile(file);
-        const original = written === undefined ? null : ts.carriedSourceText(written);
-        if (original !== null) elidedSources.set(file, original);
-        if (!overlayOriginals.has(file)) overlayOriginals.set(file, original);
-        host.addVirtualFile(file, text);
-      }
-      program = host.createProgram([...programRoots, overridesDtsPath()], options, false, lineage);
-      if (gateWorld.program !== before) before.dispose();
-      assertElisionKeptValues7(program, elisions.keys(), writtenTypeOnlyValueUses);
-    }
-    // The other two things a file's tsconfig decides: the order of class
-    // field initializers and parameter properties, which the lowering
-    // follows, and legacy decorators, which it refuses by name.
-    const parameterPropertiesFirst = new Set<string>();
-    const legacyDecoratorFiles = new Set<string>();
-    let legacyDecorators = 0;
-    let firstLegacyDecorator: ts.Node | null = null;
-    for (const sf of program.getImplementationSourceFiles()) {
-      if (sf.isDeclarationFile || !/\.(?:[mc]?ts|tsx)$/.test(sf.fileName)) continue;
-      const dialect = dialectOf(sf.fileName);
-      if (dialect === null) continue;
-      if (dialect.parameterPropertiesFirst) parameterPropertiesFirst.add(sf.fileName);
-      const legacy = dialect.legacyDecorators;
-      if (legacy === null) continue;
-      ts.walkPreorder(
-        sf,
-        (node) => {
-          const decorated = node.parent;
-          if (
-            legacy === "members" &&
-            decorated !== undefined &&
-            (ts.isClassDeclaration(decorated) || ts.isClassExpression(decorated))
-          )
-            return;
-          legacyDecorators++;
-          legacyDecoratorFiles.add(sf.fileName);
-          firstLegacyDecorator ??= node;
-        },
-        DECORATORS,
-      );
-    }
-    if (firstLegacyDecorator !== null) {
-      const at: ts.Node = firstLegacyDecorator;
-      config.diags.push(
-        unfollowedSettingDiag(
-          '"experimentalDecorators"',
-          "a decorator here has the legacy semantics (it is called with the target, the member name and a descriptor, in another order), and scriptc compiles standard decorators only",
-          {
-            file: ts.getSourceFileOfNode(at).fileName,
-            start: ts.tokenStartOfNode(at),
-            end: at.end,
-          },
-          legacyDecorators,
-          "remove the decorators from the compiled program, or write them as standard decorators and drop the setting",
-        ),
-      );
     }
     const entry = program.getSourceFile(entryPath);
     if (!entry) throw new Error(`could not load ${entryPath}`);
     const externalTypeSpecifiersByFile = externalTypeFileClosure7(program, externalTypes);
-    const projectSources =
-      config.sources === undefined
-        ? null
-        : new Set(config.sources.map((file) => tsgoPath(resolve(file))));
     let projectWorld: ts.Program | null = null;
-    const projectLibraries = projectOnlyLibraries(config.projectLib);
-    let libraryWorld: ts.Program | null = null;
     return {
       program,
       entry,
-      ...(projectLibraries.length === 0
-        ? {}
-        : {
-            libraryWorld: () =>
-              (libraryWorld ??= host.createProgram(
-                [...programRoots, overridesDtsPath()],
-                {
-                  ...options,
-                  lib: [...((options.lib as string[] | undefined) ?? []), ...projectLibraries],
-                },
-                false,
-                lineage,
-              )),
-          }),
-      shapeOverlayState: captureShapeOverlayState(),
       moduleOrder: [],
       configDiags: config.diags,
-      ...(declBoundaryNotes.length > 0 ? { declBoundaryNotes } : {}),
-      ...(importWarnings.length > 0 ? { importWarnings } : {}),
-      ...(elidedSources.size > 0 ? { elidedSources } : {}),
-      ...(parameterPropertiesFirst.size > 0 ? { parameterPropertiesFirst } : {}),
-      dependencyJs: dependencyJsPredicate(entry.fileName, projectSources),
-      typeWorld: {
-        nodeFallback: nodeTypes === null,
-        projectLib: config.projectLib ?? null,
-        forcedStrictNullChecks: config.forcedStrictNullChecks ?? false,
-        projectCheckJs: config.checkJs ?? false,
-        projectSources,
-        legacyDecoratorFiles,
-        projectModule: config.module ?? null,
-      },
       externalTypes,
       externalTypeSpecifiersByFile,
-      ...(tscWorld === undefined ? {} : { jsxSources: jsx.sources }),
-      ...(tscWorld === undefined ? {} : { tscWorld }),
-      ...(tscWorld === undefined || jsx.sources.size === 0
-        ? {}
-        : { jsxGateWorld: () => tscWorld.program }),
-      projectWorld: () =>
-        (projectWorld ??= withFilesAsWritten(host, overlayOriginals, () =>
-          host.createProgram(programRoots, options, false, lineage),
-        )),
+      projectWorld: () => (projectWorld ??= host.createProgram(programRoots, options)),
       disposeAll: () => {
-        try {
-          libraryWorld?.dispose();
-          projectWorld?.dispose();
-          tscWorld?.projectWorld?.dispose();
-          tscWorld?.program.dispose();
-        } finally {
-          try {
-            program.dispose();
-          } finally {
-            host.releaseLineage(lineage);
-          }
-        }
+        try { projectWorld?.dispose(); }
+        finally { program.dispose(); }
       },
     };
   } catch (error) {
     program.dispose();
-    host.releaseLineage(lineage);
     throw error;
   }
 }
@@ -2342,56 +758,6 @@ export interface ProgramLoadOptions {
   npmStatic?: readonly string[];
   /** Exact host module specifiers paired with their declaration paths. */
   externalTypes?: readonly (readonly [string, string])[];
-  /** `--define` values: JavaScript files' `if` statements they decide
-   * resolve to their taken branches. */
-  define?: Defines | undefined;
-}
-
-/** A binding the elision dropped is declared type-only, so a value use of
- * it that the analysis missed is a TypeScript error in the rewritten file
- * (TS1361, TS1362) where the file as written has none. That is a compiler
- * bug to report, never a program to lower with the import missing. A use
- * the file as written already reports (`written`, by file and offset: the
- * rewrite keeps every offset; taken from the gate's diagnostics) is the
- * program's own type-only import used as a value, which the gate reports
- * as the program's error. */
-function assertElisionKeptValues7(
-  program: ts.Program,
-  files: Iterable<string>,
-  written: ReadonlySet<string>,
-): void {
-  for (const file of files) {
-    const sf = program.getSourceFile(file);
-    if (sf === undefined) continue;
-    for (const d of program.getSemanticDiagnostics(sf)) {
-      if (d.code !== 1361 && d.code !== 1362) continue;
-      if (written.has(`${d.fileName ?? file}:${d.pos}`)) continue;
-      throw new InternalCompilerError(
-        `import elision dropped a binding that ${file} uses as a value: ${ts.flattenDiagnosticMessageText(d, "\n")}`,
-      );
-    }
-  }
-}
-
-/** Runs `build` with the overlay's files served as written (their original
- * texts), then serves the overlay's texts again. */
-function withFilesAsWritten<T>(
-  host: ts.Ts7Host,
-  originals: ReadonlyMap<string, string | null>,
-  build: () => T,
-): T {
-  if (originals.size === 0) return build();
-  const overlaid = new Map<string, string>();
-  for (const [file, text] of originals) {
-    const current = host.virtualFileText(file);
-    if (current !== undefined) overlaid.set(file, current);
-    if (text !== null) host.addVirtualFile(file, text);
-  }
-  try {
-    return build();
-  } finally {
-    for (const [file, text] of overlaid) host.addVirtualFile(file, text);
-  }
 }
 
 export function loadProgram(
@@ -2421,21 +787,7 @@ export function loadProgram(
     }
     externalTypes.set(specifier, declarationPath);
   }
-  // Packages scriptc implements itself, and packages the project marks
-  // never loaded (package-shims.ts), never compile their published
-  // JavaScript, even when named. A registry entry's `sourceVersions`
-  // (chalk 6) compile from their own source.
-  configurePackageShims(entryPath);
-  resetDeclBoundaryOrigins();
-  resetDeclOriginVersions();
-  // The project's type patches (type-patches/layer.ts), read by every host
-  // this load creates; nothing at all without `scriptc.typePatches`.
-  configureTypePatches(entryPath, (path, text, kind) => services.parse(path, text, kind));
-  // A source package compiles from its TypeScript (isSourcePackagePath), never
-  // from published JavaScript, even when named.
-  const npmStaticPackages = [...new Set(opts?.npmStatic ?? [])].filter(
-    (name) => !npmStaticOmitsPackage(entryPath, name) && !isInstalledSourcePackage(entryPath, name),
-  );
+  const npmStaticPackages = [...new Set(opts?.npmStatic ?? [])];
   // Resolve authored declaration entries before enabling the JS-only
   // package resolver. Safe overload metadata binds through the runtime
   // entry to one exact implementation file; it never contributes values
@@ -2452,31 +804,24 @@ export function loadProgram(
     ) {
       continue;
     }
-    const { overloads, properties } = npmStaticDeclarationMetadataOf(services, resolved.typesFile);
+    const overloads = npmStaticDeclarationOverloadsOf(services, resolved.typesFile);
+    const properties = npmStaticDeclarationPropertiesOf(services, resolved.typesFile);
     const classNames = new Set([...overloads.keys(), ...properties.keys()]);
     if (classNames.size === 0) continue;
     const runtime = resolveBareModule(entryPath, pkg, "js-only");
     if (runtime === null || !isJsSourceFileName(runtime.typesFile)) continue;
     const runtimeSource = trackedReadFile(runtime.typesFile);
     if (runtimeSource === null) continue;
-    const targets = npmStaticRuntimeClassTargets(
-      services.parse(runtime.typesFile, runtimeSource, "js"),
-      runtimeSource,
-      classNames,
-    );
+    const targets = npmStaticRuntimeClassTargets(services.parse(runtime.typesFile, runtimeSource, "js"), runtimeSource, classNames);
     for (const [className, { specifier, localName }] of targets) {
       const methods = overloads.get(className);
       const fields = properties.get(className);
       if (methods === undefined && fields === undefined) continue;
-      const target =
-        specifier === null
-          ? runtime.typesFile
-          : runtimeReexportTarget(runtime.typesFile, specifier);
+      const target = specifier === null ? runtime.typesFile : runtimeReexportTarget(runtime.typesFile, specifier);
       if (target === null) continue;
       const targetPackage = npmPackageNameOf(target);
       const targetNorm = target.split("\\").join("/");
-      const insideWorkspace =
-        runtime.workspaceDir !== undefined &&
+      const insideWorkspace = runtime.workspaceDir !== undefined &&
         targetNorm.startsWith(runtime.workspaceDir.split("\\").join("/") + "/");
       if (targetPackage !== pkg && !insideWorkspace) continue;
       const projectionKey = JSON.stringify([targetNorm, localName]);
@@ -2496,47 +841,46 @@ export function loadProgram(
       projectionOwners.set(projectionKey, className);
       // The safe declaration grammar can name only its own class. Bind
       // that type to the actual runtime class after a named ESM alias.
-      const renameSelf = (type: string): string =>
-        type
-          .split(/([\s[\]<>()|,]+)/)
-          .map((name) => (name === className ? localName : name))
-          .join("");
+      const renameSelf = (type: string): string => type.split(/([\s[\]<>()|,]+)/).map((name) => name === className ? localName : name).join("");
       if (methods !== undefined) {
         const byClass = new Map(declarationOverloads.get(targetNorm) ?? []);
-        byClass.set(
-          localName,
-          new Map(
-            [...methods].map(([name, signatures]) => [
-              name,
-              signatures.map((signature) => ({
-                parameters: signature.parameters.map((parameter) => ({
-                  name: parameter.name,
-                  type: renameSelf(parameter.type),
-                  optional: parameter.optional,
-                })),
-                returnType: renameSelf(signature.returnType),
-              })),
-            ]),
-          ),
-        );
+        byClass.set(localName, new Map([...methods].map(([name, signatures]) => [name, signatures.map((signature) => ({
+          parameters: signature.parameters.map((parameter) => ({
+            name: parameter.name,
+            type: renameSelf(parameter.type),
+            optional: parameter.optional,
+          })),
+          returnType: renameSelf(signature.returnType),
+        }))])));
         declarationOverloads.set(targetNorm, byClass);
       }
       if (fields !== undefined) {
         const byClass = new Map(declarationProperties.get(targetNorm) ?? []);
-        byClass.set(
-          localName,
-          new Map([...fields].map(([name, type]) => [name, renameSelf(type)])),
-        );
+        byClass.set(localName, new Map([...fields].map(([name, type]) => [name, renameSelf(type)])));
         declarationProperties.set(targetNorm, byClass);
       }
     }
   }
   setNpmStaticPackages(npmStaticPackages);
   setNpmStaticDeclarationOverloads(declarationOverloads, declarationProperties);
-  // Types only the packages' .d.ts declares keep their declarations
-  // (npm-static-type-exports.ts).
-  const typeExports = npmStaticTypeExportPlan(services, entryPath, npmStaticPackages);
-  setNpmStaticTypeExports(typeExports.copies, typeExports.typedefs);
+  // Declared function signatures (generic hooks, overload groups) project
+  // onto the runtime entry's exported functions. An explicit opt-in may
+  // take them from the package's DefinitelyTyped twin: the projection only
+  // types calls, and results still meet the declared types at the checked
+  // return boundary.
+  const declarationFunctions = new Map<string, NpmStaticDeclarationFunctions>();
+  for (const pkg of npmStaticPackages) {
+    const resolved = resolveBareModule(entryPath, pkg, "types-only");
+    const typesTwin = `@types/${pkg.startsWith("@") ? pkg.slice(1).replace("/", "__") : pkg}`;
+    if (resolved === null || (resolved.packageName !== pkg && resolved.packageName !== typesTwin) ||
+        !/\.d\.(?:ts|mts|cts)$/.test(resolved.typesFile)) continue;
+    const functions = npmStaticDeclarationFunctionsOf(services, resolved.typesFile);
+    if (functions.size === 0) continue;
+    const runtime = resolveBareModule(entryPath, pkg, "js-only");
+    if (runtime === null || !isJsSourceFileName(runtime.typesFile)) continue;
+    declarationFunctions.set(runtime.typesFile.split("\\").join("/"), functions);
+  }
+  setNpmStaticDeclarationFunctions(declarationFunctions);
   // Workspace-package registrations reset per load (same discipline as the
   // npm-static set), then the opted-in names are probed UP FRONT: a
   // workspace-linked opt-in resolves to files whose realpaths carry no
@@ -2548,221 +892,145 @@ export function loadProgram(
   clearWorkspacePackages();
   for (const pkg of opts?.npmStatic ?? []) {
     const probe = resolveBareModule(entryPath, pkg);
-    if (probe?.workspaceDir !== undefined)
-      registerWorkspacePackage(probe.packageName, probe.workspaceDir);
+    if (probe?.workspaceDir !== undefined) registerWorkspacePackage(probe.packageName, probe.workspaceDir);
   }
-  // The project package realm (see projectDtsRuntimeSibling) is set before
-  // the host exists, so the twin roots below answer for this program's
-  // entry realm.
+  // Declaration-twin hiding is scoped to the entry's own package realm
+  // (see projectDtsRuntimeSibling) — set before the host exists so the
+  // program never sees an out-of-realm twin hidden.
   setProjectRealm(entryPath);
-  // --npm-static's per-package hiding: an opted-in package's declaration
-  // entry points must not exist for the checker, so its resolution lands on
-  // the JavaScript Node actually loads. A PROJECT declaration twin (.d.ts
-  // beside runtime JS outside node_modules) is not hidden: TypeScript
-  // resolves the import to the declaration, and the JavaScript joins the
-  // program as the module's implementation (declarationTwinRoots7).
+  // Two fs shadows compose: --npm-static's per-package hiding, and the
+  // always-on project declaration-TWIN hiding (a .d.ts beside runtime JS
+  // outside node_modules — the classic typed-JS-library entry — must not exist for
+  // the checker, so its resolution lands on the JS Node actually loads;
+  // resolve.ts answers the same sibling for scriptc's own edges).
   const npmShadow = npmStaticFsShadow(services);
-  clearProgramBuiltinAliasCache();
-  setProgramDefines(opts?.define);
-  resetVoidInitializerCasts();
-  // The casts of `void <literal>` initializers (js-void-initializers.ts) are
-  // written into whatever text a world serves for a JavaScript file: the
-  // other shadows' text in the lowering world, the file's own in the
-  // project world, so both type such a binding the same way.
-  const castVoid = (source: string, path: string) => services.voidInitializerCasts(source, path);
-  const voidCasts = (path: string, shadowed: string | undefined): string | undefined => {
-    if (!isVoidInitializerFile(path)) return shadowed;
-    const source = shadowed ?? packageSourceText(path);
-    if (source === null) return shadowed;
-    return voidInitializerShadow(path, source, castVoid) ?? shadowed;
-  };
-  // A manifest whose condition objects name scriptc's own condition serves
-  // with that branch first (scriptc-condition.ts) in both worlds, so the
-  // checker types the file scriptc compiles for the import.
-  const scriptcManifest = (path: string): string | undefined => {
-    if (!path.endsWith("package.json")) return undefined;
-    const source = trackedReadSource(path);
-    return source === null ? undefined : (scriptcConditionManifestAt(path, source) ?? undefined);
-  };
   const fsShadow = {
-    readFile: (path: string) =>
-      voidCasts(
-        path,
-        npmShadow?.readFile(path) ??
-          scriptcManifest(path) ??
-          programBuiltinAliasSource(services, path) ??
-          definedSource(services, path) ??
-          undefined,
-      ),
-    hideFile: (path: string) => npmShadow?.hideFile(path) ?? false,
+    readFile: (path: string) => npmShadow?.readFile(path),
+    hideFile: (path: string) =>
+      (npmShadow?.hideFile(path) ?? false) || projectDtsRuntimeSibling(path) !== null,
   };
-  const authoredShadow = {
-    readFile: (path: string) => voidCasts(path, scriptcManifest(path)),
-    hideFile: () => false,
-  };
-  const host = services.createProgramHost({ cwd: dirname(entryPath), fsShadow });
-  // The edges of a package file as a host serves it (the lowering world's
-  // rewritten text, the project world's text as written), read once per
-  // load and host.
-  const edgesOfUnloaded = (from: ts.Ts7Host): ((file: string) => readonly ModuleEdge[]) => {
-    const known = new Map<string, readonly ModuleEdge[]>();
-    return (file) => {
-      let edges = known.get(file);
-      if (edges === undefined) {
-        const text = from.sourceText(file);
-        edges = text === null ? [] : moduleEdgesOfSyntax(services.parse(file, text, "js"));
-        known.set(file, edges);
-      }
-      return edges;
-    };
-  };
-  let authoredHost: ts.Ts7Host | null = null;
-  let authoredLoad: ReturnType<typeof loadProgram7> | null = null;
-  const authored = (): ReturnType<typeof loadProgram7> => {
-    if (!authoredLoad) {
-      authoredHost = services.createProgramHost({
-        cwd: dirname(entryPath),
-        fsShadow: authoredShadow,
-      });
-      authoredLoad = loadProgram7(
-        authoredHost,
-        entryPath,
-        externalTypes,
-        npmStaticPackages.length > 0
-          ? { edges: edgesOfUnloaded(authoredHost), declared: true }
-          : null,
-      );
-    }
-    return authoredLoad;
-  };
-  const declPackages = npmStaticPackages.filter((pkg) => {
-    const resolved = resolveBareModule(entryPath, pkg, "types-only");
-    return resolved !== null && /\.d\.(?:ts|mts|cts)$/.test(resolved.typesFile);
-  });
-  const projector =
-    declPackages.length === 0
-      ? undefined
-      : (program: ts.Program): DeclProjection | null => {
-          const userFiles = declBoundaryUserFiles(program, declPackages);
-          if (userFiles.length === 0) return null;
-          let projection: DeclProjection | null;
-          try {
-            projection = planDeclProjection({
-              jsProgram: program,
-              declProgram: authored().program,
-              userFiles,
-              outDir: dirname(entryPath),
-            });
-          } catch (error) {
-            if (process.env["SCRIPTC_DEBUG_DECL_BOUNDARY"] === "1") throw error;
-            return null;
-          }
-          if (process.env["SCRIPTC_DEBUG_DECL_BOUNDARY"] === "1") {
-            process.stderr.write(
-              `[decl-boundary] ${projection === null ? "no projection" : projection.plan.join("\n[decl-boundary] ")}\n`,
-            );
-            if (projection !== null) process.stderr.write(projection.declText);
-          }
-          return projection;
-        };
+  // Opt-in for serial test runners (SCRIPTC_SHARE_TS7_HOST=1): one tsgo
+  // server per directory serves every compile, so lib.dom and the rest of the
+  // ambient world parse once instead of per fixture. Only without npm-static
+  // shadowing (whose per-compile file view a shared server cannot honour);
+  // a changed source file retires the server and its programs (sharedHostCurrent).
+  const shareKey = process.env.SCRIPTC_SHARE_TS7_HOST === "1" && npmShadow === null ? `${dirname(entryPath)}|${browserTarget()}` : null;
+  let shared = shareKey !== null ? sharedHosts.get(shareKey) : undefined;
+  // A source revision boundary: the host and its batch programs hold the text they read, so a changed file retires them.
+  if (shared && !sharedHostCurrent(shared)) { retireSharedHost(shareKey!, shared); shared = undefined; }
+  if (shareKey !== null && !shared) { shared = services.createProgramHost({ cwd: dirname(entryPath), fsShadow }); sharedHosts.set(shareKey, shared); sharedHostSet.add(shared); }
+  frontendStamp("start");
+  const host = shared ?? services.createProgramHost({ cwd: dirname(entryPath), fsShadow });
+  frontendStamp("host");
+  const closeHost = () => { if (!shared) host.close(); };
   try {
-    // The overlay registry is per process and describes the lowering
-    // world's load: a load without the overlay must not see an earlier
-    // load's overlay files. The authored world (authored()) is a second load
-    // of the same build, which preflight can create after the overlay
-    // rounds, so it leaves the registry as this load set it.
-    resetShapeOverlay();
-    const load = loadProgram7(
-      host,
-      entryPath,
-      externalTypes,
-      npmStaticPackages.length > 0 ? { edges: edgesOfUnloaded(host), declared: false } : null,
-      projector,
-      (npmStaticPackages.length > 0 && shapeOverlayEnabled()) ||
-        (jsInferenceEnabled() && process.env["SCRIPTC_SHAPE_OVERLAY"] !== "0")
-        ? shapeOverlayer
-        : undefined,
-    );
-    // Shape inference, stage S1: a report only (SCRIPTC_DEBUG_SHAPES).
-    const shapes = process.env["SCRIPTC_DEBUG_SHAPES"];
-    if (shapes !== undefined && shapes !== "" && shapes !== "0" && npmStaticPackages.length > 0)
-      reportShapes(load.program, shapes);
+    const load = loadProgram7(host, entryPath, externalTypes);
+    if (shared) recordSharedHostFiles(shared, load.program);
+    frontendStamp("load");
+    let authoredHost: ts.Ts7Host | null = null;
+    let authoredLoad: ReturnType<typeof loadProgram7> | null = null;
     return {
       ...load,
       services,
-      projectWorld:
-        npmStaticPackages.length === 0
-          ? load.projectWorld
-          : () =>
-              // Check authored code against the package's published declarations.
-              // Runtime bodies still lower from JavaScript in the original world;
-              // inference there must not manufacture errors in valid user code.
-              authored().projectWorld(),
-      // A JSX file's types come from the packages' declarations, which the
-      // lowering world hides: the gate reads the authored world's copy of
-      // the file as written.
-      ...(load.jsxGateWorld === undefined
-        ? {}
-        : {
-            jsxGateWorld:
-              npmStaticPackages.length === 0
-                ? load.jsxGateWorld
-                : () => {
-                    const world = authored();
-                    return world.tscWorld?.program ?? world.program;
-                  },
-          }),
+      projectWorld: npmStaticPackages.length === 0 ? load.projectWorld : () => {
+        // Check authored code against the package's published declarations.
+        // Runtime bodies still lower from JavaScript in the original world;
+        // inference there must not manufacture errors in valid user code.
+        if (!authoredLoad) {
+          authoredHost = services.createProgramHost({ cwd: dirname(entryPath) });
+          authoredLoad = loadProgram7(authoredHost, entryPath, externalTypes, true);
+        }
+        return authoredLoad.projectWorld();
+      },
       dispose: () => {
-        try {
-          (authoredLoad as ReturnType<typeof loadProgram7> | null)?.disposeAll();
-        } finally {
-          (authoredHost as ts.Ts7Host | null)?.close();
-          try {
-            load.disposeAll();
-          } finally {
-            host.close();
-          }
+        try { authoredLoad?.disposeAll(); }
+        finally {
+          authoredHost?.close();
+          try { load.disposeAll(); }
+          finally { closeHost(); }
         }
       },
     };
   } catch (error) {
-    (authoredLoad as ReturnType<typeof loadProgram7> | null)?.disposeAll();
-    (authoredHost as ts.Ts7Host | null)?.close();
-    host.close();
+    closeHost();
     throw error;
   }
 }
+/** SCRIPTC_TIMING=1: the frontend's own phases (tsgo host, program load, the preflight's tsc gate), as the lowering's. */
+const frontendTiming = process.env["SCRIPTC_TIMING"] === "1";
+let frontendStampLast = 0;
+function frontendStamp(phase: string, detail: Record<string, unknown> = {}): void {
+  if (!frontendTiming) return;
+  const now = performance.now();
+  if (phase !== "start") process.stderr.write(`scriptc frontend ${JSON.stringify({ phase, phase_ms: Math.round((now - frontendStampLast) * 10) / 10, ...detail })}\n`);
+  frontendStampLast = now;
+}
+/** Shared tsgo servers (SCRIPTC_SHARE_TS7_HOST), by directory and target. */
+const sharedHosts = new Map<string, ts.Ts7Host>();
+const sharedHostSet = new Set<ts.Ts7Host>();
+/** Batch programs on shared hosts, by roots and options. */
+const batchPrograms = new Map<string, { host: ts.Ts7Host; program: ts.Program; projectWorld: () => ts.Program }>();
+/** The files each shared host's programs read, with the text read and the file's stat when it was checked against it.
+ * A host is current while every file still has that stat, or (the stat changed) that text. */
+const sharedHostFiles = new Map<ts.Ts7Host, Map<string, { text: string; mtimeMs: number; size: number }>>();
 
-/** User TypeScript files (outside node_modules) that import one of the
- * packages whose declarations the boundary projects from. */
-function declBoundaryUserFiles(program: ts.Program, packages: readonly string[]): string[] {
-  const out: string[] = [];
-  for (const sf of program.getImplementationSourceFiles()) {
-    const name = sf.fileName.split("\\").join("/");
-    if (isInstalledPackagePath(name) || !/\.[mc]?tsx?$/.test(name)) continue;
-    if (name.endsWith(".tsx")) continue; // JSX files: not projected yet
-    if (
-      packages.some(
-        (pkg) =>
-          ts.sourceTextIncludes(sf, `"${pkg}"`) ||
-          ts.sourceTextIncludes(sf, `'${pkg}'`) ||
-          ts.sourceTextIncludes(sf, `"${pkg}/`) ||
-          ts.sourceTextIncludes(sf, `'${pkg}/`),
-      )
-    )
-      out.push(sf.fileName);
-  }
-  return out;
+/** Resolution inputs of each shared host (Astra §15.6): for every directory holding a loaded source file, outside
+ * node_modules, its listing and the text of the package manifests and tsconfig files in it. A file added or removed
+ * there can change what an import resolves to without touching any loaded file; a host whose directories differ is
+ * retired with its programs. Package installs under node_modules are not watched: they need a fresh process. */
+const sharedHostDirs = new Map<ts.Ts7Host, Map<string, string>>();
+function directorySignature(dir: string): string {
+  let names: string[];
+  try { names = browserReaddir(dir).sort(); } catch { return "\0missing"; }
+  const manifests = names.filter((n) => n === "package.json" || /^tsconfig.*\.json$/.test(n))
+    .map((n) => { try { return `${n}\0${browserRead(`${dir}/${n}`, "utf8")}`; } catch { return `${n}\0?`; } });
+  return `${names.join("\0")}\0\0${manifests.join("\0")}`;
 }
 
-/** SC6102 — a projected file the lowering world disagreed with. */
-function declBoundaryDroppedDiag(file: string): ScrDiagnostic {
-  return {
-    code: "SC6102",
-    message:
-      "values from npm packages stay checked-dynamic in this file: the types projected from the packages' declarations do not type-check against their JavaScript",
-    loc: { file, start: 0, end: 0 },
-  };
+function recordSharedHostFiles(host: ts.Ts7Host, program: ts.Program): void {
+  let dirs = sharedHostDirs.get(host);
+  if (!dirs) sharedHostDirs.set(host, (dirs = new Map()));
+  for (const sf of program.getSourceFiles()) {
+    const dir = dirname(sf.fileName);
+    if (!dirs.has(dir) && !/[\\/]node_modules[\\/]/.test(dir)) dirs.set(dir, directorySignature(dir));
+  }
+  let files = sharedHostFiles.get(host);
+  if (!files) sharedHostFiles.set(host, (files = new Map()));
+  for (const sf of program.getSourceFiles()) {
+    if (files.has(sf.fileName)) continue;
+    // Checked once against the disk as recorded: an edit between the host's read and now marks the file changed
+    // (a stat no file has), so the next compile retires the host.
+    let mtimeMs = -1, size = -1;
+    try {
+      const st = browserStat(sf.fileName);
+      if (browserRead(sf.fileName, "utf8") === sf.text) { mtimeMs = st.mtimeMs; size = st.size; }
+    } catch { /* not on disk (a virtual file): only its stat can say it changed, and it has none */ }
+    files.set(sf.fileName, { text: sf.text, mtimeMs, size });
+  }
+}
+
+function sharedHostCurrent(host: ts.Ts7Host): boolean {
+  for (const [dir, signature] of sharedHostDirs.get(host) ?? []) if (directorySignature(dir) !== signature) return false;
+  for (const [path, file] of sharedHostFiles.get(host) ?? []) {
+    let st: { mtimeMs: number; size: number } | null = null;
+    try { st = browserStat(path); } catch { st = null; }
+    if (st === null) { if (file.size !== -1) return false; continue; }
+    if (st.mtimeMs === file.mtimeMs && st.size === file.size) continue;
+    let text: string | null = null;
+    try { text = browserRead(path, "utf8"); } catch { text = null; }
+    if (text !== file.text) return false;
+    file.mtimeMs = st.mtimeMs; file.size = st.size;
+  }
+  return true;
+}
+
+function retireSharedHost(key: string, host: ts.Ts7Host): void {
+  for (const [batchKey, cached] of batchPrograms) if (cached.host === host) batchPrograms.delete(batchKey);
+  sharedHostFiles.delete(host);
+  sharedHostDirs.delete(host);
+  sharedHosts.delete(key);
+  sharedHostSet.delete(host);
+  host.close();
 }
 
 /** tsc diagnostics (syntax + types), the supported-import fence, and the
@@ -2771,116 +1039,49 @@ function declBoundaryDroppedDiag(file: string): ScrDiagnostic {
  * preflight diagnostics. Preserve the caller's complete load shape when
  * mutating it, including its owned services and disposal callback. */
 export function checkPreflight<T extends LoadResult>(load: T): ScrDiagnostic[] {
-  const {
-    diags,
-    moduleOrder,
-    startupCrash,
-    inlineRequireCycleCalls,
-    moduleEdges,
-    dynamicImportRejections,
-    admittedOpinions,
-  } = preflight7(load);
+  const { diags, moduleOrder, startupCrash } = preflight7(load);
   load.moduleOrder = moduleOrder;
   load.startupCrash = startupCrash;
-  load.inlineRequireCycleCalls = inlineRequireCycleCalls;
-  load.moduleEdges = moduleEdges;
-  load.dynamicImportRejections = dynamicImportRejections;
-  load.admittedOpinions = admittedOpinions;
-  // Measurement aid: prints every opinion site this preflight admitted, so a
-  // corpus run can show which rows carry evidence (SCRIPTC_DEBUG_ADMITTED=1).
-  // Silent by default; no lowering reads the set.
-  if (process.env["SCRIPTC_DEBUG_ADMITTED"] === "1")
-    for (const site of admittedOpinions)
-      process.stderr.write(
-        `scriptc admitted TS${site.code} ${site.view} ${site.file}:${site.pos}-${site.end}\n`,
-      );
+  // Batch: the program also holds the other entries; only this entry's own
+  // module graph (and declaration files) may report.
+  if (batchRoots() !== null) {
+    const graph = new Set(moduleOrder.map((sf) => resolve(sf.fileName)));
+    graph.add(resolve(load.entry.fileName));
+    return diags.filter((d) => !d.loc?.file || graph.has(resolve(d.loc.file)) || /\.d\.[cm]?ts$/.test(d.loc.file));
+  }
   return diags;
 }
 
-/** The module evaluation order and the graph facts derived with it, without
- * the diagnostics. `--npm-static`'s library fixpoint reloads the program
- * once per package it discovers and reads the order alone (to find the next
- * package); only the last program's diagnostics are ever reported, and its
- * checkPreflight completes this walk instead of repeating it. */
-export function checkModuleOrder<T extends LoadResult>(load: T): void {
-  registerWorkspaceEdges(load);
-  fillPreflightFields(load, preflightStructure(load));
-}
+/* Finding 5: tsgo's strict CommonJS modeling fires checker codes on JS
+ * shapes 5.9.3 accepted, and the real hazards those shapes carry are fenced
+ * by scriptc's OWN analysis, never by these codes — so for JS FILES ONLY
+ * they join the relaxation (TS sources keep the full gate; the order-parity
+ * harness holds both lanes to identical verdicts, so a case where 5.9.3
+ * itself raises one of these on a JS file would fail there, not slip by):
+ *  - TS2309 ("export assignment with other exported elements") on the
+ *    table-then-member pattern — cjsExportDiscardReason names every export
+ *    Node actually discards.
+ *  - TS2323 ("cannot redeclare exported variable") on symbol-keyed expando
+ *    assignments in CJS classes (`this[kSym] = v` under `module.exports =
+ *    Class`) — 5.9.3 synthesized expando symbols, tsgo trips its
+ *    redeclaration check instead (the corpus's countdown fixture). */
+// Ordinary JavaScript functions are constructable even when the checker
+// retains only their call signature after a factory return. Heritage
+// lowering separately verifies the actual constructor implementation.
+const TS7_JS_RELAXED_EXTRA: ReadonlySet<number> = new Set([2309, 2323, 2507]);
 
-function fillPreflightFields(load: LoadResult, structure: PreflightStructure): void {
-  load.moduleOrder = structure.order;
-  load.inlineRequireCycleCalls = structure.inlineRequireCycleCalls;
-  load.moduleEdges = structure.moduleEdges;
-  load.dynamicImportRejections = structure.dynamicImportRejections;
-}
-
-/** The innermost node whose token span contains [pos, end): the node an
- * opinion row's site guard inspects, and the one `island` rows ask about
- * (a diagnostic carries no node). */
-function diagnosticNode7(sf: ts.SourceFile, pos: number, end: number): ts.Node {
-  let node: ts.Node = sf;
-  // The lowering's nesting fence is 200 levels; a recovered AST is never
-  // deeper than that on the path to one diagnostic.
-  for (let depth = 0; depth < 200; depth++) {
-    let next: ts.Node | undefined;
-    ts.forEachChild(node, (child) => {
-      if (ts.tokenStartOfNode(child) <= pos && end <= child.end) {
-        next = child;
-        return true;
-      }
-      return undefined;
-    });
-    if (next === undefined) break;
-    node = next;
+function suppressedJsStrictness7(d: ts.Diagnostic): boolean {
+  const file = d.fileName;
+  if (!file || !isJsSourceFileName(file)) return false;
+  if (JS_RELAXED_TSC_CODES.has(d.code) || TS7_JS_RELAXED_EXTRA.has(d.code)) return true;
+  // The 8xxx range is TypeScript's JSDoc-specific diagnostic family
+  // (malformed tags, signature/tag mismatches): comment semantics with no
+  // runtime meaning in a JS file.
+  if (d.code >= 8000 && d.code <= 8999) return true;
+  if (JS_ANY_OPERATOR_CODES.has(d.code)) {
+    return ts.flattenDiagnosticMessageText(d, "\n").includes("'any'");
   }
-  return node;
-}
-
-/** The JS_OPINIONS admission for one checker diagnostic (tsc-codes.ts), or
- * null when the diagnostic stays. Five conditions, in order:
- *
- *  1. the file is a JavaScript source (never .ts/.mts/.cts/.tsx/.d.ts);
- *  2. a row admits the code, and the file is unchecked JavaScript unless the
- *     row is one a checked project has always seen (`checkedJs: "enforce"`);
- *  3. the diagnostic is a checker diagnostic, not a parser one (a syntactic
- *     diagnostic leaves a recovered AST);
- *  4. the row's site guard accepts the diagnostic's node, if it has one;
- *  5. an `island` row does not apply in strict code (scriptc's own
- *     isStrictCode, never tsc's module opinion).
- *
- * Admission says nothing about the LOWERING: the caller records the site
- * (AdmittedOpinion) so a view's lowering path can be gated on it. */
-function jsOpinionOf7(
-  p: ts.Program,
-  d: ts.Diagnostic,
-  projectCheckJs: boolean,
-  syntacticOf: (sf: ts.SourceFile) => readonly ts.Diagnostic[],
-): Opinion | null {
-  if (d.fileName === undefined || !isJsSourceFileName(d.fileName)) return null;
-  const opinion = jsOpinion(d.code);
-  if (opinion === null) return null;
-  const sf = p.getSourceFile(d.fileName);
-  if (
-    sf !== undefined &&
-    opinion.checkedJs === "enforce" &&
-    isCheckedJsSourceFile(sf, projectCheckJs)
-  )
-    return null;
-  const pos = d.pos;
-  const end = d.end;
-  const spanless = pos === undefined || end === undefined;
-  // A diagnostic with no span, or one that names a file the program does
-  // not carry, cannot be placed in the AST. A row with no node guard needs
-  // no node, so the admission applies exactly as it always has; the caller
-  // records nothing (there is no site a view could be gated on).
-  const nodeFree = opinion.site === undefined && opinion.view !== "island";
-  if (spanless || sf === undefined) return nodeFree ? opinion : null;
-  if (syntacticOf(sf).some((s) => s.code === d.code && s.pos === pos && s.end === end)) return null;
-  if (nodeFree) return opinion;
-  const node = diagnosticNode7(sf, pos, end);
-  if (opinion.site !== undefined && !opinion.site(node, d, p, projectCheckJs)) return null;
-  if (opinion.view === "island" && isStrictCode(node)) return null;
-  return opinion;
+  return false;
 }
 
 /** The specifier of a `require("...")` call: the callee is the bare
@@ -2891,18 +1092,15 @@ function jsOpinionOf7(
 function requireSpecOf7(node: ts.Node): string | null {
   let value = node;
   while (
-    ts.isParenthesizedExpression(value) ||
-    ts.isAsExpression(value) ||
-    ts.isTypeAssertion(value) ||
-    ts.isSatisfiesExpression(value) ||
-    ts.isNonNullExpression(value)
+    ts.isParenthesizedExpression(value) || ts.isAsExpression(value) ||
+    ts.isTypeAssertion(value) || ts.isNonNullExpression(value)
   ) {
     value = value.expression;
   }
   if (!ts.isCallExpression(value)) return null;
   if (!ts.isIdentifier(value.expression) || value.expression.text !== "require") return null;
-  if (value.arguments.nodes.length !== 1) return null;
-  const arg = value.arguments.nodes[0]!;
+  if (value.arguments.length !== 1) return null;
+  const arg = value.arguments[0]!;
   return ts.isStringLiteral(arg) ? arg.text : null;
 }
 
@@ -2914,225 +1112,30 @@ function requireSpecOf7(node: ts.Node): string | null {
 function isRequireStatement7(stmt: ts.Statement): boolean {
   if (ts.isExpressionStatement(stmt)) return requireSpecOf7(stmt.expression) !== null;
   if (!ts.isVariableStatement(stmt)) return false;
-  const decls = stmt.declarationList.declarations.nodes;
-  return (
-    decls.length > 0 &&
-    decls.every((d) => d.initializer !== undefined && requireSpecOf7(d.initializer) !== null)
-  );
-}
-
-/** A require() occurrence of a top-level statement. `split` marks the
- * assignment of a split require binding (splitRequireBindings7): `node`
- * is its require call and `decl` the binding's declaration. */
-interface RequireOccurrence7 {
-  spec: string;
-  node: ts.Node;
-  decl: ts.VariableDeclaration | null;
-  split?: true;
+  const decls = stmt.declarationList.declarations;
+  return decls.length > 0 && decls.every((d) => d.initializer !== undefined && requireSpecOf7(d.initializer) !== null);
 }
 
 /** The require() occurrences of one top-level statement: the declaration
- * forms, the bare side-effect call, and the assignment of a split require
- * binding. Empty for everything else. */
-function requiresOf7(stmt: ts.Statement, program: ts.Program): RequireOccurrence7[] {
+ * forms and the bare side-effect call. Empty for everything else. */
+function requiresOf7(
+  stmt: ts.Statement,
+): { spec: string; node: ts.Node; decl: ts.VariableDeclaration | null }[] {
   if (ts.isExpressionStatement(stmt)) {
-    const split = splitRequireOfStatement7(program, stmt);
-    if (split !== null)
-      return [
-        { spec: requireSpecOf7(split.call)!, node: split.call, decl: split.decl, split: true },
-      ];
     const spec = requireSpecOf7(stmt.expression);
     return spec !== null ? [{ spec, node: stmt.expression, decl: null }] : [];
   }
   if (!ts.isVariableStatement(stmt)) return [];
-  const out: RequireOccurrence7[] = [];
-  for (const decl of stmt.declarationList.declarations.nodes) {
+  const out: { spec: string; node: ts.Node; decl: ts.VariableDeclaration | null }[] = [];
+  for (const decl of stmt.declarationList.declarations) {
     const spec = decl.initializer !== undefined ? requireSpecOf7(decl.initializer) : null;
     if (spec !== null) out.push({ spec, node: decl, decl });
   }
   return out;
 }
 
-/** CommonJS require bindings split into a declaration and one later
- * assignment (`var m; m = require("./x")`): a top-level `var` or `let`
- * declaration without initializer in a CommonJS file, assigned by exactly one
- * top-level `m = require("<literal>")` statement of the require global over
- * a compiled program module, and written nowhere else. The binding holds the
- * module's exports from the assignment on, as `const m = require("./x")`
- * does, so preflight treats the assignment as that require: its module edge,
- * its cycle admission and its early-read fence. The lowering's recognizer
- * (splitRequireBindingOf in cjs-inline-require.ts) accepts only these
- * bindings. Keyed by declaration, with the assignment's require call. */
-function splitRequireBindings7(
-  program: ts.Program,
-  sf: ts.SourceFile,
-): ReadonlyMap<ts.VariableDeclaration, ts.CallExpression> {
-  const memo = program.analysis.splitRequireBindings;
-  const cached = memo.get(sf);
-  if (cached !== undefined) return cached;
-  const out = new Map<ts.VariableDeclaration, ts.CallExpression>();
-  memo.set(sf, out);
-  if (sf.isDeclarationFile || !isCjsJsFile7(sf, program) || !ts.sourceTextIncludes(sf, "require"))
-    return out;
-  const checker = program.getTypeChecker();
-  const stmts = sf.statements.nodes;
-  const candidates = new Map<
-    ts.Symbol,
-    { decl: ts.VariableDeclaration; call: ts.CallExpression | null; assigns: number }
-  >();
-  for (const stmt of stmts) {
-    if (!ts.isVariableStatement(stmt)) continue;
-    if ((stmt.declarationList.flags & (ts.NodeFlags.Const | ts.NodeFlags.Using)) !== 0) continue;
-    for (const decl of stmt.declarationList.declarations.nodes) {
-      if (!ts.isIdentifier(decl.name) || decl.initializer !== undefined) continue;
-      const symbol = checker.getSymbolAtLocation(decl.name);
-      if (symbol === undefined || symbol.declarations.length !== 1) continue;
-      candidates.set(symbol, { decl, call: null, assigns: 0 });
-    }
-  }
-  if (candidates.size === 0) return out;
-  // The one top-level `m = ...` statement, whose right side is the require.
-  for (const stmt of stmts) {
-    if (!ts.isExpressionStatement(stmt) || !ts.isBinaryExpression(stmt.expression)) continue;
-    const assign = stmt.expression;
-    if (assign.operatorToken.kind !== ts.SyntaxKind.EqualsToken || !ts.isIdentifier(assign.left))
-      continue;
-    const symbol = checker.getSymbolAtLocation(assign.left);
-    const candidate = symbol !== undefined ? candidates.get(symbol) : undefined;
-    if (candidate === undefined) continue;
-    candidate.assigns++;
-    let right = assign.right;
-    while (ts.isParenthesizedExpression(right)) right = right.expression;
-    if (ts.isCallExpression(right) && splitRequireTarget7(program, sf, right))
-      candidate.call = right;
-  }
-  const names = new Set<string>();
-  for (const candidate of candidates.values()) {
-    if (candidate.assigns === 1 && candidate.call !== null)
-      names.add((candidate.decl.name as ts.Identifier).text);
-  }
-  if (names.size === 0) return out;
-  // Exactly one write in the whole file: the assignment itself.
-  const writes = new Map<ts.Symbol, number>();
-  ts.walkPreorder(sf, (node) => {
-    if (!ts.isIdentifier(node) || !names.has(node.text)) return undefined;
-    const parent = node.parent;
-    const symbol =
-      parent !== undefined && ts.isShorthandPropertyAssignment(parent) && parent.name === node
-        ? (checker.getShorthandAssignmentValueSymbol(parent) ?? checker.getSymbolAtLocation(node))
-        : checker.getSymbolAtLocation(node);
-    if (symbol === undefined || !candidates.has(symbol) || !isWriteReference7(node))
-      return undefined;
-    writes.set(symbol, (writes.get(symbol) ?? 0) + 1);
-    return undefined;
-  });
-  for (const [symbol, candidate] of candidates) {
-    if (candidate.assigns === 1 && candidate.call !== null && writes.get(symbol) === 1)
-      out.set(candidate.decl, candidate.call);
-  }
-  return out;
-}
-
-/** True when `call` is a require of the CommonJS global over a compiled
- * program module: not a builtin, a JSON document or a declaration file. */
-function splitRequireTarget7(
-  program: ts.Program,
-  sf: ts.SourceFile,
-  call: ts.CallExpression,
-): boolean {
-  const spec = requireSpecOf7(call);
-  if (spec === null || canonicalBuiltinModule(spec) !== null) return false;
-  if (requireCallBindingKind7(program, call) !== "ambient") return false;
-  const dep =
-    resolveImport7(program, sf, spec, "require") ?? npmStaticDepSf7(program, sf, spec, "require");
-  return dep !== null && !dep.isDeclarationFile && !dep.fileName.endsWith(".json");
-}
-
-/** The split require binding a top-level statement assigns, or null. */
-function splitRequireOfStatement7(
-  program: ts.Program,
-  stmt: ts.Statement,
-): { decl: ts.VariableDeclaration; call: ts.CallExpression } | null {
-  if (
-    !ts.isExpressionStatement(stmt) ||
-    !ts.isBinaryExpression(stmt.expression) ||
-    !ts.isSourceFile(stmt.parent)
-  )
-    return null;
-  let right = stmt.expression.right;
-  while (ts.isParenthesizedExpression(right)) right = right.expression;
-  for (const [decl, call] of splitRequireBindings7(program, stmt.parent))
-    if (call === right) return { decl, call };
-  return null;
-}
-
-/** The top-level statement of a split require binding's assignment, from
- * its require call (`m = require("./x")` or `m = (require("./x"))`). */
-function splitRequireStatementOf7(call: ts.CallExpression): ts.Node | undefined {
-  let node: ts.Node = call;
-  while (node.parent !== undefined && ts.isParenthesizedExpression(node.parent)) node = node.parent;
-  return node.parent?.parent;
-}
-
-/** The require call of a split require binding's declaration, or null. */
-function splitRequireCallOf7(
-  program: ts.Program,
-  decl: ts.VariableDeclaration,
-): ts.CallExpression | null {
-  return splitRequireBindings7(program, ts.getSourceFileOfNode(decl)).get(decl) ?? null;
-}
-
-/** True when `id` is written: an assignment target (compound and
- * destructuring included), an update operand, or a for-in/of target. */
-function isWriteReference7(id: ts.Identifier): boolean {
-  let n: ts.Node = id;
-  for (;;) {
-    const p: ts.Node | undefined = n.parent;
-    if (p === undefined) return false;
-    if (ts.isBinaryExpression(p)) {
-      const k = p.operatorToken.kind;
-      return (
-        p.left === n && k >= ts.SyntaxKind.FirstAssignment && k <= ts.SyntaxKind.LastAssignment
-      );
-    }
-    if (ts.isPostfixUnaryExpression(p) || ts.isPrefixUnaryExpression(p)) {
-      return (
-        (p.operator === ts.SyntaxKind.PlusPlusToken ||
-          p.operator === ts.SyntaxKind.MinusMinusToken) &&
-        p.operand === n
-      );
-    }
-    if (ts.isForOfStatement(p) || ts.isForInStatement(p)) return p.initializer === n;
-    if (
-      ts.isParenthesizedExpression(p) ||
-      ts.isArrayLiteralExpression(p) ||
-      ts.isSpreadElement(p) ||
-      ts.isSpreadAssignment(p) ||
-      ts.isShorthandPropertyAssignment(p) ||
-      ts.isObjectLiteralExpression(p) ||
-      (ts.isPropertyAssignment(p) && p.initializer === n)
-    ) {
-      n = p;
-      continue;
-    }
-    return false;
-  }
-}
-
-/** `true`, or `!0`, its minified spelling. */
-function isTrueLiteral(expr: ts.Expression): boolean {
-  return (
-    expr.kind === ts.SyntaxKind.TrueKeyword ||
-    (ts.isPrefixUnaryExpression(expr) &&
-      expr.operator === ts.SyntaxKind.ExclamationToken &&
-      ts.isNumericLiteral(expr.operand) &&
-      expr.operand.text === "0")
-  );
-}
-
 /** The exact `Object.defineProperty(exports|module.exports, "__esModule",
- * { value: true })` interop stamp (shared by preflight and the no-op lowering);
- * `{ value: !0 }` is the same stamp. */
+ * { value: true })` interop stamp (shared by preflight and the no-op lowering). */
 export function isEsModuleStamp(expr: ts.Expression): boolean {
   if (!ts.isCallExpression(expr) || expr.questionDotToken !== undefined) return false;
   const callee = expr.expression;
@@ -3145,12 +1148,8 @@ export function isEsModuleStamp(expr: ts.Expression): boolean {
   ) {
     return false;
   }
-  if (expr.arguments.nodes.length !== 3) return false;
-  const [recv, nameArg, desc] = expr.arguments.nodes as unknown as [
-    ts.Expression,
-    ts.Expression,
-    ts.Expression,
-  ];
+  if (expr.arguments.length !== 3) return false;
+  const [recv, nameArg, desc] = expr.arguments as unknown as [ts.Expression, ts.Expression, ts.Expression];
   const isExports =
     (ts.isIdentifier(recv) && recv.text === "exports") ||
     (ts.isPropertyAccessExpression(recv) &&
@@ -3160,13 +1159,13 @@ export function isEsModuleStamp(expr: ts.Expression): boolean {
       recv.name.text === "exports");
   if (!isExports) return false;
   if (!ts.isStringLiteral(nameArg) || nameArg.text !== "__esModule") return false;
-  if (!ts.isObjectLiteralExpression(desc) || desc.properties.nodes.length !== 1) return false;
-  const p = desc.properties.nodes[0]!;
+  if (!ts.isObjectLiteralExpression(desc) || desc.properties.length !== 1) return false;
+  const p = desc.properties[0]!;
   return (
     ts.isPropertyAssignment(p) &&
     ts.isIdentifier(p.name) &&
     p.name.text === "value" &&
-    isTrueLiteral(p.initializer)
+    p.initializer.kind === ts.SyntaxKind.TrueKeyword
   );
 }
 
@@ -3177,21 +1176,19 @@ export function isEsModuleStamp(expr: ts.Expression): boolean {
 function pureCjsExport7(program: ts.Program, stmt: ts.Statement): boolean {
   const cjs = cjsExportAssignmentOf(stmt);
   if (cjs === null) return false;
-  const sf = ts.getSourceFileOfNode(stmt);
+  const sf = stmt.getSourceFile();
   const plainMember = (left: ts.Expression): boolean => {
     if (!ts.isPropertyAccessExpression(left) || left.questionDotToken) return false;
     // A replacement export can have setters or non-writable function
     // properties. Only the wrapper's original object gets this exception.
-    if (sf.statements.nodes.some((s) => cjsExportAssignmentOf(s)?.kind === "table")) return false;
+    if (sf.statements.some((s) => cjsExportAssignmentOf(s)?.kind === "table")) return false;
     if (left.name.text === "__proto__" || left.name.text === "__esModule") return false;
     let receiver = left.expression;
     if (isModuleExportsAccess(receiver)) {
       receiver = receiver.expression;
       return ts.isIdentifier(receiver) && !sourceBinding7(program, receiver);
     }
-    return (
-      ts.isIdentifier(receiver) && receiver.text === "exports" && !sourceBinding7(program, receiver)
-    );
+    return ts.isIdentifier(receiver) && receiver.text === "exports" && !sourceBinding7(program, receiver);
   };
   if (cjs.kind === "member") {
     if (!plainMember(cjs.expr.left)) return false;
@@ -3206,48 +1203,32 @@ function pureCjsExport7(program: ts.Program, stmt: ts.Statement): boolean {
     value = value.right;
   }
   if (ts.isVoidExpression(value) && ts.isNumericLiteral(value.expression)) return true;
-  if (
-    ts.isStringLiteralLike(value) ||
-    ts.isNumericLiteral(value) ||
-    value.kind === ts.SyntaxKind.TrueKeyword ||
-    value.kind === ts.SyntaxKind.FalseKeyword ||
-    value.kind === ts.SyntaxKind.NullKeyword
-  )
-    return true;
+  if (ts.isStringLiteralLike(value) || ts.isNumericLiteral(value) ||
+      value.kind === ts.SyntaxKind.TrueKeyword || value.kind === ts.SyntaxKind.FalseKeyword ||
+      value.kind === ts.SyntaxKind.NullKeyword) return true;
   if (!ts.isIdentifier(value)) return false;
   if (value.text === "undefined" && !sourceBinding7(program, value)) return true;
   const checker = program.getTypeChecker();
   const symbol = checker.getSymbolAtLocation(value);
-  return (
-    symbol !== undefined &&
-    symbol.declarations.some(
-      (decl) => ts.isFunctionDeclaration(decl) && decl.parent === stmt.parent,
-    )
+  return symbol !== undefined && checker.declarationsOf(symbol).some(
+    (decl) => ts.isFunctionDeclaration(decl) && decl.parent === stmt.parent,
   );
 }
 
 function sourceBinding7(program: ts.Program, ident: ts.Identifier): boolean {
   const checker = program.getTypeChecker();
   const symbol = checker.getSymbolAtLocation(ident);
-  return (
-    symbol !== undefined &&
-    symbol.declarations.some(
-      (decl) => !ts.getSourceFileOfNode(decl).isDeclarationFile && !ts.isSourceFile(decl),
-    )
+  return symbol !== undefined && checker.declarationsOf(symbol).some(
+    (decl) => !decl.getSourceFile().isDeclarationFile && !ts.isSourceFile(decl),
   );
 }
 
 function purePrefixDecl7(decl: ts.VariableDeclaration): boolean {
   const init = decl.initializer;
-  return (
-    init === undefined ||
-    requireSpecOf7(init) !== null ||
-    ts.isStringLiteralLike(init) ||
-    ts.isNumericLiteral(init) ||
-    init.kind === ts.SyntaxKind.TrueKeyword ||
-    init.kind === ts.SyntaxKind.FalseKeyword ||
-    init.kind === ts.SyntaxKind.NullKeyword
-  );
+  return init === undefined || requireSpecOf7(init) !== null ||
+    ts.isStringLiteralLike(init) || ts.isNumericLiteral(init) ||
+    init.kind === ts.SyntaxKind.TrueKeyword || init.kind === ts.SyntaxKind.FalseKeyword ||
+    init.kind === ts.SyntaxKind.NullKeyword;
 }
 
 /** True for top-level statements that cannot run user code: directives,
@@ -3258,24 +1239,19 @@ function purePrefixDecl7(decl: ts.VariableDeclaration): boolean {
 function purePrefixStmt7(program: ts.Program, s: ts.Statement): boolean {
   if (ts.isEmptyStatement(s) || ts.isFunctionDeclaration(s)) return true;
   if (ts.isExpressionStatement(s) && ts.isStringLiteral(s.expression)) return true; // directive
-  if (isRequireStatement7(s) || splitRequireOfStatement7(program, s) !== null) return true;
-  if (isCjsJsFile7(ts.getSourceFileOfNode(s), program)) {
+  if (isRequireStatement7(s)) return true;
+  if (isCjsJsFile7(s.getSourceFile(), program)) {
     if (ts.isExpressionStatement(s) && isEsModuleStamp(s.expression)) {
       const call = s.expression as ts.CallExpression;
       const object = (call.expression as ts.PropertyAccessExpression).expression as ts.Identifier;
-      let receiver = call.arguments.nodes[0]!;
+      let receiver = call.arguments[0]!;
       if (ts.isPropertyAccessExpression(receiver)) receiver = receiver.expression;
-      if (
-        !sourceBinding7(program, object) &&
-        ts.isIdentifier(receiver) &&
-        !sourceBinding7(program, receiver)
-      )
-        return true;
+      if (!sourceBinding7(program, object) && ts.isIdentifier(receiver) && !sourceBinding7(program, receiver)) return true;
     }
     if (pureCjsExport7(program, s)) return true;
   }
   if (ts.isVariableStatement(s)) {
-    return s.declarationList.declarations.nodes.every(purePrefixDecl7);
+    return s.declarationList.declarations.every(purePrefixDecl7);
   }
   return false;
 }
@@ -3305,8 +1281,7 @@ export function bindingEarlyUse7(
   const bound: ts.Identifier[] = [];
   if (ts.isIdentifier(decl.name)) bound.push(decl.name);
   else if (ts.isObjectBindingPattern(decl.name)) {
-    for (const el of decl.name.elements.nodes)
-      if (el.name !== undefined && ts.isIdentifier(el.name)) bound.push(el.name);
+    for (const el of decl.name.elements) if (el.name !== undefined && ts.isIdentifier(el.name)) bound.push(el.name);
   }
   const bindings = new Map<ts.Symbol, string>();
   for (const id of bound) {
@@ -3314,7 +1289,7 @@ export function bindingEarlyUse7(
     if (sym) bindings.set(sym, id.text);
   }
   if (bindings.size === 0) return null;
-  const stmts = sf.statements.nodes;
+  const stmts = sf.statements;
   const hoisted = new Map<ts.Symbol, ts.Statement>();
   for (const s of stmts) {
     if ((ts.isFunctionDeclaration(s) || ts.isClassDeclaration(s)) && s.name) {
@@ -3372,527 +1347,6 @@ export function bindingEarlyUse7(
   return hit;
 }
 
-/** The first reference to a top-level require declaration's bindings that
- * code running before the require completes can reach, or null when no
- * earlier code can run or reach one. Memoized per program: preflight
- * decides the fence and the lowering places the initialization checks
- * from the same answer. */
-function requireEarlyReference7(
-  program: ts.Program,
-  decl: ts.VariableDeclaration,
-): ts.Identifier | null {
-  const memo = program.analysis.requireEarlyReferences;
-  const cached = memo.get(decl);
-  if (cached !== undefined) return cached;
-  let found: ts.Identifier | null = null;
-  const sf = ts.getSourceFileOfNode(decl);
-  // A split require binding is bound at its assignment statement.
-  const splitCall = splitRequireCallOf7(program, decl);
-  const stmt = splitCall !== null ? splitRequireStatementOf7(splitCall) : decl.parent?.parent;
-  if (
-    stmt !== undefined &&
-    (ts.isVariableStatement(stmt) || splitCall !== null) &&
-    ts.isSourceFile(stmt.parent)
-  ) {
-    const stmts = sf.statements.nodes;
-    const k = stmts.indexOf(stmt as ts.Statement);
-    const declarations = ts.isVariableStatement(stmt)
-      ? stmt.declarationList.declarations.nodes
-      : [];
-    // Earlier declarators run too: `const x = read(), dep = require('./dep')`.
-    const precedingDecls = declarations.slice(0, declarations.indexOf(decl));
-    let firstRunnable = program.analysis.requireFirstRunnable.get(sf);
-    if (firstRunnable === undefined) {
-      firstRunnable = stmts.findIndex((s) => !purePrefixStmt7(program, s));
-      program.analysis.requireFirstRunnable.set(sf, firstRunnable);
-    }
-    const prefixCanRun =
-      (firstRunnable >= 0 && firstRunnable < k) || precedingDecls.some((d) => !purePrefixDecl7(d));
-    if (prefixCanRun) found = requireBindingEarlyUse7(program, sf, k, decl, precedingDecls);
-  }
-  memo.set(decl, found);
-  return found;
-}
-
-/** The CommonJS twin of bindingEarlyUse7 for a top-level require binding:
- * the first reference to one of `decl`'s bindings that code running before
- * the require completes can reach, or null. It follows Node's evaluation
- * order instead of the conservative "every earlier statement" scan:
- *  - hoisted functions and classes, and the function and class values a
- *    var stored before the require, run only when reachable code names
- *    them; a class statement runs only its heritage, computed keys,
- *    decorators and static initializers;
- *  - callbacks handed to timers, microtasks and promise reactions run after
- *    the module body, hence after the require;
- *  - publishing a value (`module.exports = f`, `exports.n = f`,
- *    `Object.defineProperty(exports, "n", { get })`, `F.prototype.m = f`)
- *    runs nothing. The published value becomes reachable only when
- *    reachable code reads it back: an `exports.n` read reaches the values
- *    published as `n`, any other read of the export object reaches all of
- *    them, and naming `F` reaches what was stored on `F`. No other module
- *    can read this module's exports before its body completes: require
- *    cycles keep their SC1016 fence and a compiled module graph has no
- *    reflective exports object.
- * Every other function-like met in reachable code counts as reachable
- * because it may be handed to a callee. */
-export function requireBindingEarlyUse7(
-  program: ts.Program,
-  sf: ts.SourceFile,
-  k: number,
-  decl: ts.VariableDeclaration,
-  precedingDecls: readonly ts.VariableDeclaration[],
-  /** A reference of the binding whose early evaluation is known exact. */
-  exactEarlyRead?: (reference: ts.Identifier) => boolean,
-): ts.Identifier | null {
-  const checker = program.getTypeChecker();
-  const bindings = new Set<ts.Symbol>();
-  for (const id of boundNames7(decl.name)) {
-    const sym = checker.getSymbolAtLocation(id);
-    if (sym) bindings.add(sym);
-  }
-  if (bindings.size === 0) return null;
-  // A split require binding's assignment writes the binding; it reads nothing.
-  let splitWrite: ts.Node | null = splitRequireCallOf7(program, decl);
-  while (splitWrite !== null && ts.isParenthesizedExpression(splitWrite.parent))
-    splitWrite = splitWrite.parent;
-  splitWrite =
-    splitWrite !== null && ts.isBinaryExpression(splitWrite.parent) ? splitWrite.parent.left : null;
-  const stmts = sf.statements.nodes;
-  const cjs = isCjsJsFile7(sf, program);
-  const symbolOf = (id: ts.Identifier): ts.Symbol | undefined => {
-    const parent = id.parent;
-    if (parent !== undefined && ts.isShorthandPropertyAssignment(parent) && parent.name === id) {
-      return checker.getShorthandAssignmentValueSymbol(parent);
-    }
-    return checker.getSymbolAtLocation(id);
-  };
-  // Stored callables and the scans that skip them.
-  const units = new Map<ts.Symbol, ts.Node[]>();
-  const stored = new Set<ts.Node>();
-  const addUnit = (name: ts.Identifier, node: ts.Node): void => {
-    const sym = checker.getSymbolAtLocation(name);
-    if (sym === undefined) return;
-    stored.add(node);
-    const list = units.get(sym);
-    if (list) list.push(node);
-    else units.set(sym, [node]);
-  };
-  const storedCallables = (e: ts.Expression, out: ts.Node[]): void => {
-    while (ts.isParenthesizedExpression(e)) e = e.expression;
-    if (ts.isArrowFunction(e) || ts.isFunctionExpression(e) || ts.isClassExpression(e)) {
-      out.push(e);
-    } else if (ts.isObjectLiteralExpression(e)) {
-      for (const p of e.properties.nodes) {
-        if (
-          (ts.isMethodDeclaration(p) ||
-            ts.isGetAccessorDeclaration(p) ||
-            ts.isSetAccessorDeclaration(p)) &&
-          !ts.isComputedPropertyName(p.name)
-        ) {
-          out.push(p);
-        } else if (ts.isPropertyAssignment(p) && !ts.isComputedPropertyName(p.name)) {
-          storedCallables(p.initializer, out);
-        }
-      }
-    }
-  };
-  stmts.forEach((s, i) => {
-    if ((ts.isFunctionDeclaration(s) || ts.isClassDeclaration(s)) && s.name !== undefined) {
-      addUnit(s.name, s);
-    } else if (i < k && ts.isVariableStatement(s)) {
-      for (const d of s.declarationList.declarations.nodes) {
-        if (!ts.isIdentifier(d.name) || d.initializer === undefined) continue;
-        const out: ts.Node[] = [];
-        storedCallables(d.initializer, out);
-        for (const node of out) addUnit(d.name, node);
-      }
-    }
-  });
-  // Callbacks that only run as later jobs never run before the require:
-  // the timers, microtasks and promise reactions. (Event listeners can run
-  // synchronously from an emit, so they keep the conservative rule.)
-  const laterJob = (callee: ts.Expression): boolean => {
-    while (ts.isParenthesizedExpression(callee)) callee = callee.expression;
-    const name = ts.isIdentifier(callee)
-      ? callee.text
-      : ts.isPropertyAccessExpression(callee)
-        ? callee.name.text
-        : null;
-    return (
-      name !== null &&
-      (LATER_JOB_BUILTINS7.has(name) || name === "nextTick") &&
-      laterJobCallee7(checker, callee)
-    );
-  };
-  if (!hasTopLevelAwait7(sf)) {
-    const callbacks = (e: ts.Expression): void => {
-      while (ts.isParenthesizedExpression(e)) e = e.expression;
-      if (ts.isArrowFunction(e) || ts.isFunctionExpression(e)) stored.add(e);
-    };
-    for (const s of stmts.slice(0, k)) {
-      ts.walkPreorder(s, (node) => {
-        if ((ts.isCallExpression(node) || ts.isNewExpression(node)) && laterJob(node.expression)) {
-          for (const arg of node.arguments?.nodes ?? []) callbacks(arg);
-        }
-        return undefined;
-      });
-    }
-  }
-  const isWrapperName = (e: ts.Node, name: string): e is ts.Identifier =>
-    ts.isIdentifier(e) && e.text === name && !sourceBinding7(program, e);
-  /** `this` at the module's top level: the original export object. */
-  const isModuleThis = (e: ts.Node): boolean => {
-    if (e.kind !== ts.SyntaxKind.ThisKeyword) return false;
-    for (let p = e.parent; p !== undefined && !ts.isSourceFile(p); p = p.parent) {
-      if (ts.isFunctionLike(p) && !ts.isArrowFunction(p)) return false;
-      if (ts.isClassExpression(p) || ts.isClassDeclaration(p)) return false;
-    }
-    return true;
-  };
-  const isExportObject = (e: ts.Expression): boolean =>
-    isWrapperName(e, "exports") ||
-    isModuleThis(e) ||
-    (isModuleExportsAccess(e) && isWrapperName(e.expression, "module"));
-  const replacesExports = stmts.some((st) => cjsExportAssignmentOf(st)?.kind === "table");
-  // Published values: by export name ("*" for a whole replacement), and by
-  // the stored callable whose properties hold them.
-  const exportLinks = new Map<string, ts.Node[]>();
-  const ownerLinks = new Map<ts.Symbol, ts.Node[]>();
-  const reachedKeys = new Set<string>();
-  const writtenKeys = new Set<string>();
-  const reachedUnits = new Set<ts.Node>();
-  const work: ts.Node[] = [];
-  let hit: ts.Identifier | null = null;
-  const reachUnit = (node: ts.Node): void => {
-    if (reachedUnits.has(node)) return;
-    reachedUnits.add(node);
-    work.push(node);
-  };
-  const reachSymbol = (sym: ts.Symbol): void => {
-    for (const node of units.get(sym) ?? []) reachUnit(node);
-    for (const node of ownerLinks.get(sym) ?? []) reachUnit(node);
-  };
-  let allReached = false;
-  const reachKey = (key: string | null): void => {
-    if (key === null) {
-      allReached = true;
-      for (const list of exportLinks.values()) for (const node of list) reachUnit(node);
-      return;
-    }
-    reachedKeys.add(key);
-    for (const name of [key, "*"]) for (const node of exportLinks.get(name) ?? []) reachUnit(node);
-  };
-  const keyReached = (key: string): boolean =>
-    allReached || reachedKeys.has(key) || (key === "*" && reachedKeys.size > 0);
-  /** A read of the export object: which published names it can observe. */
-  const exportRead = (node: ts.Expression): void => {
-    let use: ts.Node = node;
-    while (ts.isParenthesizedExpression(use.parent)) use = use.parent;
-    const parent = use.parent;
-    // A truthiness test reads no member (tsc's `this && this.__helper`).
-    if (
-      ts.isBinaryExpression(parent) &&
-      parent.left === use &&
-      parent.operatorToken.kind === ts.SyntaxKind.AmpersandAmpersandToken
-    ) {
-      return;
-    }
-    if (ts.isTypeOfExpression(parent)) return;
-    if (ts.isPropertyAccessExpression(parent) && parent.expression === use) {
-      let target: ts.Node = parent;
-      while (ts.isParenthesizedExpression(target.parent)) target = target.parent;
-      const assignment = target.parent;
-      if (
-        ts.isBinaryExpression(assignment) &&
-        assignment.left === target &&
-        assignment.operatorToken.kind === ts.SyntaxKind.EqualsToken
-      ) {
-        // A plain write reads no member. It can still run a setter: one
-        // published for that name (now or later), or a static one of a
-        // replacing class.
-        writtenKeys.add(parent.name.text);
-        for (const node of exportLinks.get(parent.name.text) ?? []) reachUnit(node);
-        for (const node of exportLinks.get("*") ?? []) {
-          if (ts.isClassDeclaration(node) || ts.isClassExpression(node)) reachUnit(node);
-        }
-        return;
-      }
-      reachKey(parent.name.text);
-      return;
-    }
-    if (
-      ts.isElementAccessExpression(parent) &&
-      parent.expression === use &&
-      ts.isStringLiteralLike(parent.argumentExpression)
-    ) {
-      reachKey(parent.argumentExpression.text);
-      return;
-    }
-    reachKey(null);
-  };
-  const scan = (root: ts.Node): void => {
-    ts.walkPreorder(root, (n) => {
-      if (hit !== null) return "stop";
-      if (n !== root && stored.has(n)) {
-        if (ts.isClassExpression(n) || ts.isClassDeclaration(n)) {
-          for (const part of classSyncParts7(n)) scan(part);
-        }
-        return "skip";
-      }
-      // A self-require answers this module's partially built exports.
-      if (cjs && ts.isCallExpression(n)) {
-        const spec = requireSpecOf7(n);
-        if (spec !== null && resolveImport7(program, sf, spec, "require") === sf) reachKey(null);
-      }
-      if (cjs && n.kind === ts.SyntaxKind.ThisKeyword && isModuleThis(n)) {
-        exportRead(n as ts.Expression);
-        return undefined;
-      }
-      if (!ts.isIdentifier(n)) return undefined;
-      if (inTypePosition7(n)) return undefined;
-      const named = n.parent;
-      if (
-        (ts.isPropertyAccessExpression(named) ||
-          ts.isPropertyAssignment(named) ||
-          ts.isMethodDeclaration(named) ||
-          ts.isGetAccessorDeclaration(named) ||
-          ts.isSetAccessorDeclaration(named) ||
-          ts.isPropertyDeclaration(named)) &&
-        named.name === n
-      ) {
-        return undefined;
-      }
-      // A declaration's own name reads nothing.
-      if (named !== undefined && declaredName7(named) === n) return undefined;
-      if (cjs && isWrapperName(n, "exports")) {
-        exportRead(n);
-        return undefined;
-      }
-      if (cjs && isWrapperName(n, "module")) {
-        const parent = n.parent;
-        if (ts.isPropertyAccessExpression(parent) && parent.expression === n) {
-          if (parent.name.text === "exports") exportRead(parent);
-          return "skip";
-        }
-        reachKey(null);
-        return undefined;
-      }
-      const sym = symbolOf(n);
-      if (sym === undefined) return undefined;
-      if (bindings.has(sym)) {
-        if (n === splitWrite || exactEarlyRead?.(n) === true) return undefined;
-        hit = n;
-        return "stop";
-      }
-      reachSymbol(sym);
-      return undefined;
-    });
-  };
-  /** Links a published value: evaluating it reads identifiers, but the
-   * callables it names run only once they are read back. */
-  const publish = (value: ts.Expression, link: (node: ts.Node) => void): void => {
-    while (ts.isParenthesizedExpression(value)) value = value.expression;
-    if (ts.isIdentifier(value)) {
-      const sym = symbolOf(value);
-      if (sym !== undefined && bindings.has(sym)) {
-        hit = value;
-        return;
-      }
-      if (sym !== undefined) {
-        // What was stored on the value stays reachable through it.
-        for (const node of [...(units.get(sym) ?? []), ...(ownerLinks.get(sym) ?? [])]) link(node);
-      }
-      return;
-    }
-    if (ts.isFunctionExpression(value) || ts.isArrowFunction(value)) {
-      link(value);
-      return;
-    }
-    if (ts.isClassExpression(value)) {
-      for (const part of classSyncParts7(value)) scan(part);
-      link(value);
-      return;
-    }
-    if (ts.isObjectLiteralExpression(value)) {
-      for (const p of value.properties.nodes) {
-        if (ts.isShorthandPropertyAssignment(p)) {
-          const sym = checker.getShorthandAssignmentValueSymbol(p);
-          if (sym !== undefined && bindings.has(sym)) hit = p.name as ts.Identifier;
-          else if (sym !== undefined) {
-            for (const node of [...(units.get(sym) ?? []), ...(ownerLinks.get(sym) ?? [])]) {
-              link(node);
-            }
-          }
-        } else if (ts.isPropertyAssignment(p) && !ts.isComputedPropertyName(p.name)) {
-          publish(p.initializer, link);
-        } else if (
-          (ts.isMethodDeclaration(p) ||
-            ts.isGetAccessorDeclaration(p) ||
-            ts.isSetAccessorDeclaration(p)) &&
-          !ts.isComputedPropertyName(p.name)
-        ) {
-          link(p);
-        } else scan(p);
-      }
-      return;
-    }
-    if (
-      ts.isStringLiteralLike(value) ||
-      ts.isNumericLiteral(value) ||
-      value.kind === ts.SyntaxKind.TrueKeyword ||
-      value.kind === ts.SyntaxKind.FalseKeyword ||
-      value.kind === ts.SyntaxKind.NullKeyword ||
-      (ts.isVoidExpression(value) && ts.isNumericLiteral(value.expression))
-    ) {
-      return;
-    }
-    scan(value);
-    // Whatever an arbitrary expression evaluates to is opaque: treat it as
-    // reachable through the target too (scan already reached its parts).
-  };
-  /** Where a publication stores: an export name, or a stored callable. */
-  type Target = { kind: "key"; key: string } | { kind: "owner"; owner: ts.Symbol };
-  const targetOf = (left: ts.Expression): Target | null => {
-    if (isModuleExportsAccess(left) && isWrapperName(left.expression, "module")) {
-      return { kind: "key", key: "*" };
-    }
-    const names: string[] = [];
-    let e: ts.Expression = left;
-    for (;;) {
-      if (ts.isPropertyAccessExpression(e) && !e.questionDotToken) {
-        if (isExportObject(e)) break;
-        names.unshift(e.name.text);
-        e = e.expression;
-      } else if (
-        ts.isElementAccessExpression(e) &&
-        !e.questionDotToken &&
-        ts.isStringLiteralLike(e.argumentExpression)
-      ) {
-        names.unshift(e.argumentExpression.text);
-        e = e.expression;
-      } else break;
-    }
-    if (names.length === 0) return null;
-    if (isExportObject(e)) {
-      // __proto__ and the interop marker are not plain data slots, and a
-      // member of a replaced export may be a read-only function property:
-      // those writes keep the conservative scan.
-      if (names[0] === "__proto__" || names[0] === "__esModule" || replacesExports) return null;
-      return { kind: "key", key: names[0]! };
-    }
-    if (ts.isIdentifier(e)) {
-      const sym = symbolOf(e);
-      if (sym !== undefined && units.has(sym) && !bindings.has(sym))
-        return { kind: "owner", owner: sym };
-    }
-    return null;
-  };
-  const linkTo = (target: Target, node: ts.Node): void => {
-    if (target.kind === "key") {
-      const replacingClass =
-        target.key === "*" &&
-        writtenKeys.size > 0 &&
-        (ts.isClassDeclaration(node) || ts.isClassExpression(node));
-      if (keyReached(target.key) || writtenKeys.has(target.key) || replacingClass) {
-        reachUnit(node);
-      }
-      const list = exportLinks.get(target.key);
-      if (list) list.push(node);
-      else exportLinks.set(target.key, [node]);
-    } else {
-      if ((units.get(target.owner) ?? []).some((u) => reachedUnits.has(u))) reachUnit(node);
-      if ((units.get(target.owner) ?? []).includes(node)) return;
-      const list = ownerLinks.get(target.owner);
-      if (list === undefined) ownerLinks.set(target.owner, [node]);
-      else if (!list.includes(node)) list.push(node);
-    }
-  };
-  /** A top-level publication statement, handled in place; false for any
-   * other statement. */
-  const publication = (s: ts.Statement): boolean => {
-    if (!cjs || !ts.isExpressionStatement(s)) return false;
-    const e = s.expression;
-    if (ts.isBinaryExpression(e) && e.operatorToken.kind === ts.SyntaxKind.EqualsToken) {
-      const targets: Target[] = [];
-      let value: ts.Expression = e;
-      while (
-        ts.isBinaryExpression(value) &&
-        value.operatorToken.kind === ts.SyntaxKind.EqualsToken
-      ) {
-        const target = targetOf(value.left);
-        if (target === null) return false;
-        targets.push(target);
-        value = value.right;
-      }
-      publish(value, (node) => {
-        for (const t of targets) linkTo(t, node);
-      });
-      return true;
-    }
-    // Object.defineProperty(exports, "name", { get() {...}, value: f, ... })
-    if (
-      ts.isCallExpression(e) &&
-      ts.isPropertyAccessExpression(e.expression) &&
-      isWrapperName(e.expression.expression, "Object") &&
-      e.expression.name.text === "defineProperty" &&
-      e.arguments.nodes.length === 3
-    ) {
-      const [recv, key, desc] = e.arguments.nodes as unknown as [
-        ts.Expression,
-        ts.Expression,
-        ts.Expression,
-      ];
-      if (!isExportObject(recv) || !ts.isStringLiteralLike(key)) return false;
-      if (!ts.isObjectLiteralExpression(desc)) return false;
-      const keyTarget: Target = { kind: "key", key: key.text };
-      const link = (node: ts.Node): void => linkTo(keyTarget, node);
-      for (const p of desc.properties.nodes) {
-        if (
-          (ts.isMethodDeclaration(p) || ts.isPropertyAssignment(p)) &&
-          ts.isIdentifier(p.name) &&
-          (p.name.text === "get" || p.name.text === "set")
-        ) {
-          if (ts.isMethodDeclaration(p)) link(p);
-          else publish(p.initializer, link);
-        } else if (
-          ts.isPropertyAssignment(p) &&
-          ts.isIdentifier(p.name) &&
-          p.name.text === "value"
-        ) {
-          publish(p.initializer, link);
-        } else scan(p);
-      }
-      return true;
-    }
-    return false;
-  };
-  const drain = (): void => {
-    while (hit === null && work.length > 0) {
-      const unit = work.pop()!;
-      checker.prefetchSymbolRoots([unit]);
-      scan(unit);
-    }
-  };
-  const roots = stmts.slice(0, k);
-  checker.prefetchSymbolRoots([...roots, ...precedingDecls]);
-  for (const s of roots) {
-    if (hit !== null) break;
-    if (ts.isFunctionDeclaration(s)) continue;
-    if (ts.isClassDeclaration(s)) {
-      for (const part of classSyncParts7(s)) scan(part);
-    } else if (!publication(s)) {
-      scan(s);
-    }
-    drain();
-  }
-  for (const d of precedingDecls) {
-    if (hit !== null) break;
-    scan(d);
-    drain();
-  }
-  return hit;
-}
-
 /** Bare `require("...")` EXPRESSION STATEMENTS anywhere below the top
  * level of a file — inside top-level ifs/blocks/loops and inside function
  * bodies (the lazy-require idiom). No bindings, pure side-effect loads. */
@@ -3914,47 +1368,20 @@ function nestedBareRequiresOf7(sf: ts.SourceFile): ts.CallExpression[] {
   return out;
 }
 
-/** INLINE `require("...")` calls in expression position anywhere in a file
- * (`require("./x").f`, `require("debug")("ns")`, `module.exports =
- * require("./y")`, `{ v: require("./v") }`): each evaluates its module at
- * that position, exactly like a bare require statement. Top-level require
- * statements and bare require statements are collected by their own
- * scans; a require that initializes a nested declaration keeps its
- * lowering fence and is not an edge. */
-function inlineRequiresOf7(sf: ts.SourceFile): ts.CallExpression[] {
-  const out: ts.CallExpression[] = [];
-  ts.walkPreorder(sf, (n) => {
-    if (!ts.isCallExpression(n) || requireSpecOf7(n) === null) return;
-    let outer: ts.Node = n;
-    while (
-      outer.parent !== undefined &&
-      (ts.isParenthesizedExpression(outer.parent) ||
-        ts.isAsExpression(outer.parent) ||
-        ts.isTypeAssertion(outer.parent) ||
-        ts.isSatisfiesExpression(outer.parent) ||
-        ts.isNonNullExpression(outer.parent))
-    ) {
-      outer = outer.parent;
-    }
-    const parent = outer.parent;
-    if (parent !== undefined && ts.isExpressionStatement(parent)) return;
-    // A TOP-LEVEL declaration initializing from require() has its own
-    // statement edge (requiresOf7 above). A nested one evaluates the
-    // module where the declaration sits — lazy when it is in a deferred
-    // position — so it is an inline edge here.
-    if (parent !== undefined && ts.isVariableDeclaration(parent) && parent.initializer === outer) {
-      const list = parent.parent;
-      const stmt = list?.parent;
-      if (stmt !== undefined && ts.isSourceFile(stmt.parent)) return;
-    }
-    out.push(n);
-  });
-  return out;
-}
+type RequireCallBindingKind7 = "ambient" | "createRequire" | "source";
 
-/** What a call spelled `require(...)` runs: Node's ambient loader, a
- * createRequire binding, or a binding the file declares itself. */
-export type RequireCallBindingKind7 = "ambient" | "createRequire" | "source";
+function stripRequireCasts7(expr: ts.Expression): ts.Expression {
+  let cur = expr;
+  while (
+    ts.isParenthesizedExpression(cur) ||
+    ts.isAsExpression(cur) ||
+    ts.isTypeAssertion(cur) ||
+    ts.isNonNullExpression(cur)
+  ) {
+    cur = cur.expression;
+  }
+  return cur;
+}
 
 /** The supported-builtin provenance of an imported identifier, narrowed to
  * the one member this preflight distinction needs. Mirrors the lowering's
@@ -3962,7 +1389,7 @@ export type RequireCallBindingKind7 = "ambient" | "createRequire" | "source";
 function isCreateRequireImport7(program: ts.Program, ident: ts.Identifier): boolean {
   const checker = program.getTypeChecker();
   const symbol = checker.getSymbolAtLocation(ident);
-  const decl = symbol ? symbol.declarations[0] : undefined;
+  const decl = symbol ? checker.declarationsOf(symbol)[0] : undefined;
   if (decl === undefined || !ts.isImportSpecifier(decl)) return false;
   const importDecl = decl.parent?.parent?.parent;
   if (ts.isImportDeclaration(importDecl) && ts.isStringLiteral(importDecl.moduleSpecifier)) {
@@ -3972,18 +1399,11 @@ function isCreateRequireImport7(program: ts.Program, ident: ts.Identifier): bool
   }
   if (symbol !== undefined && (symbol.flags & ts.SymbolFlags.Alias) !== 0) {
     const target = checker.getAliasedSymbol(symbol);
-    const targetDecl = target.declarations[0];
-    if (targetDecl !== undefined && ts.getSourceFileOfNode(targetDecl).isDeclarationFile) {
-      for (
-        let p: ts.Node | undefined = targetDecl.parent;
-        p !== undefined && !ts.isSourceFile(p);
-        p = p.parent
-      ) {
+    const targetDecl = checker.declarationsOf(target)[0];
+    if (targetDecl !== undefined && targetDecl.getSourceFile().isDeclarationFile) {
+      for (let p: ts.Node | undefined = targetDecl.parent; p !== undefined && !ts.isSourceFile(p); p = p.parent) {
         if (ts.isModuleDeclaration(p) && ts.isStringLiteral(p.name)) {
-          return (
-            canonicalBuiltinModule(p.name.text) === "module" &&
-            ts.symbolName(target) === "createRequire"
-          );
+          return canonicalBuiltinModule(p.name.text) === "module" && target.name === "createRequire";
         }
       }
     }
@@ -3998,7 +1418,7 @@ export function isCreateRequireBinding7(program: ts.Program, callee: ts.Identifi
   const checker = program.getTypeChecker();
   const symbol = checker.getSymbolAtLocation(callee);
   const decl = symbol
-    ? symbol.declarations.find((d): d is ts.VariableDeclaration => ts.isVariableDeclaration(d))
+    ? checker.declarationsOf(symbol).find((d): d is ts.VariableDeclaration => ts.isVariableDeclaration(d))
     : undefined;
   if (
     decl === undefined ||
@@ -4007,301 +1427,54 @@ export function isCreateRequireBinding7(program: ts.Program, callee: ts.Identifi
   ) {
     return false;
   }
-  return (
-    isCreateRequireBaseCall7(program, decl.initializer) &&
-    ((decl.parent.flags & ts.NodeFlags.Const) !== 0 ||
-      stableCreateRequireBindingReason7(program, decl) === null)
+  return isCreateRequireBaseCall7(program, decl.initializer) && (
+    (decl.parent.flags & ts.NodeFlags.Const) !== 0 ||
+    stableCreateRequireBindingReason7(program, decl) === null
   );
 }
 
-/** How a use of a createRequire loader lowers:
- * - "static": a literal call or a literal resolution query, which erases
- *   the loader value.
- * - "runtime": in JavaScript source, a call with a computed specifier, a
- *   require.resolve call with a computed request, or `resolve` read as a
- *   value. The runtime resolves the specifier like Node
- *   (module-resolution.ts, scr_require.c).
- * - "deferred": in JavaScript source, inside the try block of a try
- *   statement in the same function, the other shapes: spread arguments,
- *   require.resolve with another argument count, and `resolve.paths` with
- *   a computed request or read as a value. The call throws a runtime
- *   fence, and the resolve.paths value is a function that throws one when
- *   called (module-resolution.ts), so the statement's catch clause handles
- *   them (packages that look for optional native addons).
- * - "value": the loader itself as a value (stored, passed, returned), in
- *   JavaScript and TypeScript source alike. It lowers to a run-time require
- *   function over the runtime resolver: the calls it will receive are not
- *   in sight where the value is read, so they are answered when they run.
- *   A package compiled statically cannot prove those call sites, so
- *   npm-static refuses it (the "escaping" class there).
- * - "computed": the "runtime" uses in TypeScript source (a call the
- *   compiler can see cannot load anything, so it is refused where it is
- *   written), and the "deferred" shapes outside a try block.
- * - "escaping": writes, optional calls, and other members. */
-const COMPUTED_CREATE_REQUIRE_REASON =
-  "its createRequire result is used with a computed specifier in TypeScript, or with spread arguments or resolve.paths outside a try block (static requires need literal specifiers)";
-
-type CreateRequireUse7 = "static" | "runtime" | "deferred" | "computed" | "escaping" | "value";
-
-function createRequireUse7(expr: ts.Expression): CreateRequireUse7 {
-  const use = createRequireUseShape7(expr);
-  return use === "runtime" && !isJsSourceFile(ts.getSourceFileOfNode(expr)) ? "computed" : use;
-}
-
-function createRequireUseShape7(expr: ts.Expression): CreateRequireUse7 {
+/** Only literal calls and literal resolution queries can erase the loader
+ * value. In particular, assignments, exported aliases, shorthand properties,
+ * optional calls, and passing the loader to user code cannot pass this test. */
+function staticCreateRequireUse7(expr: ts.Expression): boolean {
   let use: ts.Node = expr;
   while (ts.isParenthesizedExpression(use.parent)) use = use.parent;
-  let member = false;
-  let paths = false;
-  if (
-    ts.isPropertyAccessExpression(use.parent) &&
-    use.parent.expression === use &&
-    use.parent.name.text === "resolve" &&
-    !use.parent.questionDotToken
-  ) {
+  if (ts.isPropertyAccessExpression(use.parent) && use.parent.expression === use && use.parent.name.text === "resolve" && !use.parent.questionDotToken) {
     use = use.parent;
-    member = true;
-    if (
-      ts.isPropertyAccessExpression(use.parent) &&
-      use.parent.expression === use &&
-      use.parent.name.text === "paths" &&
-      !use.parent.questionDotToken
-    ) {
-      use = use.parent;
-      paths = true;
-    }
+    if (ts.isPropertyAccessExpression(use.parent) && use.parent.expression === use && use.parent.name.text === "paths" && !use.parent.questionDotToken) use = use.parent;
   }
   const call = use.parent;
-  if (ts.isCallExpression(call) && call.expression === use) {
-    if (call.questionDotToken) return "escaping";
-    const args = call.arguments.nodes;
-    if (args.length === 1 && ts.isStringLiteralLike(args[0]!)) return "static";
-    if (
-      !paths &&
-      !args.some((arg) => ts.isSpreadElement(arg)) &&
-      !(member && (args.length === 0 || args.length > 2))
-    )
-      return "runtime";
-  } else if (isJsWriteTarget7(use) || isAssignmentTarget7(use)) {
-    // A write through any pattern container (destructuring assignment,
-    // for-in/of head, ++/--): the binding's value changes under the
-    // erased declaration, so the loader has no stable value to lower.
-    return "escaping";
-  } else if (!member) {
-    // A member read other than resolve (including any optional chain and
-    // element access) is not the loader itself: the run-time value form
-    // is a function, not a lowered member surface.
-    if (
-      (ts.isPropertyAccessExpression(call) || ts.isElementAccessExpression(call)) &&
-      call.expression === use
-    )
-      return "escaping";
-    // The loader itself as a value (stored, passed, returned): a run-time
-    // require function over the runtime resolver.
-    return "value";
-  } else if (!paths) {
-    return "runtime";
-  }
-  return insideTryBlock7(use) ? "deferred" : "computed";
+  return ts.isCallExpression(call) && call.expression === use && !call.questionDotToken &&
+    call.arguments.length === 1 && ts.isStringLiteralLike(call.arguments[0]!);
 }
 
-/** True for the operand of a `typeof` expression (parentheses included).
- * A type probe reads no value out of the loader: npm-static admits it even
- * though the loader itself would otherwise be a value use. */
-function isTypeofOperand7(node: ts.Node): boolean {
-  let current = node;
-  while (ts.isParenthesizedExpression(current.parent)) current = current.parent;
-  const parent = current.parent;
-  return ts.isTypeOfExpression(parent) && parent.expression === current;
-}
-
-function isAssignmentTarget7(node: ts.Node): boolean {
-  const parent = node.parent;
-  return (
-    ts.isBinaryExpression(parent) &&
-    parent.left === node &&
-    parent.operatorToken.kind >= ts.SyntaxKind.FirstAssignment &&
-    parent.operatorToken.kind <= ts.SyntaxKind.LastAssignment
-  );
-}
-
-/** True when the identifier is a reference position that WRITES: an
- * assignment (or compound-assignment) target, a `++`/`--` operand, a
- * for-in/for-of head, or an element of a destructuring pattern — through
- * parentheses and pattern containers, exactly the shapes a sloppy-mode
- * implicit global can be introduced by. */
-export function isJsWriteTarget7(node: ts.Node): boolean {
-  let cur: ts.Node = node;
-  for (;;) {
-    const parent: ts.Node | undefined = cur.parent;
-    if (parent === undefined) return false;
-    if (ts.isParenthesizedExpression(parent)) {
-      cur = parent;
-      continue;
-    }
-    if (ts.isBinaryExpression(parent))
-      return (
-        parent.left === cur &&
-        parent.operatorToken.kind >= ts.SyntaxKind.FirstAssignment &&
-        parent.operatorToken.kind <= ts.SyntaxKind.LastAssignment
-      );
-    if (ts.isPrefixUnaryExpression(parent) || ts.isPostfixUnaryExpression(parent))
-      return (
-        parent.operand === cur &&
-        (parent.operator === ts.SyntaxKind.PlusPlusToken ||
-          parent.operator === ts.SyntaxKind.MinusMinusToken)
-      );
-    if (ts.isForInStatement(parent) || ts.isForOfStatement(parent))
-      return parent.initializer === cur;
-    if (ts.isArrayLiteralExpression(parent) || ts.isObjectLiteralExpression(parent)) {
-      cur = parent;
-      continue;
-    }
-    if (
-      (ts.isShorthandPropertyAssignment(parent) && parent.name === cur) ||
-      (ts.isPropertyAssignment(parent) && parent.initializer === cur) ||
-      ((ts.isSpreadElement(parent) || ts.isSpreadAssignment(parent)) && parent.expression === cur)
-    ) {
-      cur = parent;
-      continue;
-    }
-    return false;
-  }
-}
-
-/** Nothing binds `node`: the tsc had no symbol, and a shorthand pattern's
- * name has no VALUE binding either (its property symbol is the target, not a
- * declaration of the name being written). */
-function undeclaredJsName7(
-  checker: ReturnType<ts.Program["getTypeChecker"]>,
-  node: ts.Identifier,
-): boolean {
-  const parent = node.parent;
-  if (parent !== undefined && ts.isShorthandPropertyAssignment(parent) && parent.name === node)
-    return checker.getShorthandAssignmentValueSymbol(parent) === undefined;
-  return checker.getSymbolAtLocation(node) === undefined;
-}
-
-/** A `.js` WRITE to a name nothing declares (plan D-2/D-5). Sloppy mode
- * resolves such a write by creating a property on Node's global object —
- * process-wide state a native binary has no object for — so the program is
- * refused at build time, under SC1091, whose text names the Node-island
- * route those semantics need. A READ of the same name is admitted instead:
- * it throws Node's own catchable `ReferenceError` at the access
- * (lowering/expressions/identifiers.ts). TypeScript input never reaches
- * either path — an undeclared name is a compile error there. */
-function jsUndeclaredWriteDiags(
-  program: ts.Program,
-  files: readonly ts.SourceFile[],
-): ScrDiagnostic[] {
-  const diags: ScrDiagnostic[] = [];
-  const checker = program.getTypeChecker();
-  for (const sf of files) {
-    if (!isJsSourceFileName(sf.fileName)) continue;
-    const stack: ts.Node[] = [sf];
-    while (stack.length > 0) {
-      const node = stack.pop()!;
-      // An empty name is a parse-recovery artifact (`@import x = require(…)`
-      // in a JSDoc prologue leaves one behind), never a reference a program
-      // writes; the syntax error that created it is already reported.
-      if (
-        ts.isIdentifier(node) &&
-        node.text !== "" &&
-        isJsWriteTarget7(node) &&
-        undeclaredJsName7(checker, node)
-      ) {
-        const sloppyWrite = !isStrictCode(node);
-        const diag = unsupportedDiag(
-          "SC1091",
-          { file: sf.fileName, start: node.getStart(sf), end: node.end },
-          `writing the undeclared name '${node.text}' in a JavaScript source`,
-        );
-        // A sloppy-mode write creates the global at run time, a sloppy-only
-        // semantic the native tier does not implement: the reason lets an
-        // automatic island policy put this module in a Node island instead
-        // of refusing the build. A strict-mode write throws ReferenceError,
-        // which is an ordinary lowering gap and stays a plain refusal.
-        if (sloppyWrite) diag.reason = "implicit-global-write";
-        diags.push(diag);
-      }
-      ts.forEachChild(node, (child) => {
-        stack.push(child);
-        return undefined;
-      });
-    }
-  }
-  return diags;
-}
-
-/** True when `node` is inside the try block of a try statement in the same
- * function (a catch clause or finally block does not count). A class field
- * initializer runs when the class is instantiated, so it is a boundary too. */
-function insideTryBlock7(node: ts.Node): boolean {
-  for (let child = node, parent = node.parent; parent; child = parent, parent = parent.parent) {
-    if (ts.isTryStatement(parent) && parent.tryBlock === child) return true;
-    if (
-      ts.isFunctionLike(parent) ||
-      ts.isClassStaticBlockDeclaration(parent) ||
-      ts.isPropertyDeclaration(parent)
-    )
-      return false;
-  }
-  return false;
-}
-
-function stableCreateRequireBindingReason7(
-  program: ts.Program,
-  decl: ts.VariableDeclaration,
-): string | null {
+function stableCreateRequireBindingReason7(program: ts.Program, decl: ts.VariableDeclaration): string | null {
   const cache = program.analysis.createRequireReasons;
-  const cached = cache.get(decl);
-  if (cached !== undefined) return cached;
+  if (cache.has(decl)) return cache.get(decl)!;
   const check = (): string | null => {
     const stmt = decl.parent?.parent;
-    if (
-      !ts.isIdentifier(decl.name) ||
-      !ts.isVariableStatement(stmt) ||
-      !ts.isSourceFile(stmt.parent)
-    ) {
+    if (!ts.isIdentifier(decl.name) || !ts.isVariableStatement(stmt) || !ts.isSourceFile(stmt.parent)) {
       return "its mutable createRequire binding is outside the module's top level";
     }
     const checker = program.getTypeChecker();
     const symbol = checker.getSymbolAtLocation(decl.name);
-    if (!symbol || symbol.declarations.length !== 1)
-      return "its createRequire binding is redeclared";
-    if ((ts.getCombinedModifierFlags(decl) & ts.ModifierFlags.Export) !== 0)
-      return "its createRequire result escapes through an exported binding";
-    const sf = ts.getSourceFileOfNode(decl);
+    if (!symbol || checker.declarationsOf(symbol).length !== 1) return "its createRequire binding is redeclared";
+    if ((ts.getCombinedModifierFlags(decl) & ts.ModifierFlags.Export) !== 0) return "its createRequire result escapes through an exported binding";
+    const sf = decl.getSourceFile();
     const refs = identifierOccurrences7(sf, decl.name.text);
     checker.prefetchSymbolNodesExact(refs);
-    let exported = false;
     for (const ref of refs) {
       if (ref === decl.name || inTypePosition7(ref)) continue;
       let target = ts.isShorthandPropertyAssignment(ref.parent)
         ? checker.getShorthandAssignmentValueSymbol(ref.parent)
         : checker.getSymbolAtLocation(ref);
-      if (target && (target.flags & ts.SymbolFlags.Alias) !== 0)
-        target = checker.getAliasedSymbol(target);
-      if (target !== symbol) continue;
-      if (isExportSpecifierReference7(ref)) {
-        exported = true;
-        continue;
+      if (target && (target.flags & ts.SymbolFlags.Alias) !== 0) target = checker.getAliasedSymbol(target);
+      if (target === symbol && !staticCreateRequireUse7(ref)) {
+        return "its createRequire binding is reassigned, escapes, or uses a computed specifier";
       }
-      const use = createRequireUse7(ref);
-      if (use === "computed") return COMPUTED_CREATE_REQUIRE_REASON;
-      if (use === "escaping") return "its createRequire binding is reassigned or escapes";
     }
-    if (exported) {
-      const reason = exportedCreateRequireUseReason7(program, symbol);
-      if (reason !== null) return reason;
-    }
-    const preceding = stmt.declarationList.declarations.nodes.slice(
-      0,
-      stmt.declarationList.declarations.nodes.indexOf(decl),
-    );
-    if (
-      bindingEarlyUse7(program, sf, sf.statements.nodes.indexOf(stmt), decl, preceding) !== null
-    ) {
+    const preceding = stmt.declarationList.declarations.slice(0, stmt.declarationList.declarations.indexOf(decl));
+    if (bindingEarlyUse7(program, sf, sf.statements.indexOf(stmt), decl, preceding) !== null) {
       return "its createRequire binding can be used before initialization";
     }
     return null;
@@ -4311,79 +1484,18 @@ function stableCreateRequireBindingReason7(
   return reason;
 }
 
-/** True for the identifier in an export list that names a local binding
- * (`export { x }` or `export { x as y }`). The name is exported, not
- * read: an importing module resolves the same symbol. */
-function isExportSpecifierReference7(ref: ts.Identifier): boolean {
-  const parent = ref.parent;
-  if (!ts.isExportSpecifier(parent)) return false;
-  return parent.propertyName === ref || (parent.propertyName === undefined && parent.name === ref);
-}
-
-/** An exported createRequire loader is alias plumbing when every module
- * that imports the name uses it the way the loader itself may be used (a
- * supported call or member read). The loader then still names no runtime
- * value; the call sites resolve against its declaring file. A module that
- * re-exports the name onward would need the same proof transitively, so
- * that stays refused. */
-function exportedCreateRequireUseReason7(program: ts.Program, symbol: ts.Symbol): string | null {
-  const checker = program.getTypeChecker();
-  for (const sf of program.getSourceFiles()) {
-    if (sf.isDeclarationFile) continue;
-    const locals: ts.Symbol[] = [];
-    ts.walkPreorder(sf, (node) => {
-      if (!ts.isImportSpecifier(node)) return;
-      const local = checker.getSymbolAtLocation(node.name);
-      if (local === undefined || (local.flags & ts.SymbolFlags.Alias) === 0) return;
-      if (checker.getAliasedSymbol(local) === symbol) locals.push(local);
-    });
-    if (locals.length === 0) continue;
-    let reason: string | null = null;
-    ts.walkPreorder(sf, (node) => {
-      if (reason !== null || !ts.isIdentifier(node)) return;
-      if (ts.isImportSpecifier(node.parent) && node.parent.name === node) return;
-      if (inTypePosition7(node)) return;
-      const local = checker.getSymbolAtLocation(node);
-      if (local === undefined || !locals.includes(local)) return;
-      if (isExportSpecifierReference7(node)) {
-        reason = "its createRequire binding is re-exported through another module";
-        return;
-      }
-      const use = createRequireUse7(node);
-      if (use === "computed") reason = COMPUTED_CREATE_REQUIRE_REASON;
-      else if (use === "escaping") reason = "its createRequire binding is reassigned or escapes";
-    });
-    if (reason !== null) return reason;
-  }
-  return null;
-}
-
 function isCreateRequireBaseCall7(program: ts.Program, expr: ts.Expression): boolean {
-  const init = withoutParenthesesTypeWrappers(expr);
-  // `createRequire ? createRequire(import.meta.url) : undefined`: the
-  // import binding is always a function, so the true arm is the value.
-  // Only that polarity folds: with the arms swapped the binding is
-  // undefined at run time.
-  if (ts.isConditionalExpression(init)) {
-    const cond = withoutParenthesesTypeWrappers(init.condition);
-    const other = withoutParenthesesTypeWrappers(init.whenFalse);
-    return (
-      ts.isIdentifier(cond) &&
-      isCreateRequireImport7(program, cond) &&
-      isUndefinedValue7(other) &&
-      isCreateRequireBaseCall7(program, init.whenTrue)
-    );
-  }
+  const init = stripRequireCasts7(expr);
   if (
     !ts.isCallExpression(init) ||
     init.questionDotToken !== undefined ||
     !ts.isIdentifier(init.expression) ||
     !isCreateRequireImport7(program, init.expression) ||
-    init.arguments.nodes.length !== 1
+    init.arguments.length !== 1
   ) {
     return false;
   }
-  const base = withoutParenthesesTypeWrappers(init.arguments.nodes[0]!);
+  const base = stripRequireCasts7(init.arguments[0]!);
   if (ts.isIdentifier(base) && base.text === "__filename") return !sourceBinding7(program, base);
   return (
     ts.isPropertyAccessExpression(base) &&
@@ -4394,19 +1506,11 @@ function isCreateRequireBaseCall7(program: ts.Program, expr: ts.Expression): boo
   );
 }
 
-/** `undefined` in either spelling: the identifier, or `void <expr>`. */
-function isUndefinedValue7(expr: ts.Expression): boolean {
-  if (ts.isIdentifier(expr)) return expr.text === "undefined";
-  return ts.isVoidExpression(expr);
-}
-
-/** Refuse require indirection the lowering cannot erase, while
+/** A node:module import alone does not require an engine. Retain npm
+ * fallback for require indirection the lowering cannot erase, while
  * admitting literal calls through the same stable/inline shapes as program
  * code. Inspect symbols, not names: nested shadows are unrelated bindings. */
-function npmStaticModuleImportReason7(
-  program: ts.Program,
-  stmt: ts.ImportDeclaration,
-): string | null {
+function npmStaticModuleImportReason7(program: ts.Program, stmt: ts.ImportDeclaration): string | null {
   const clause = stmt.importClause;
   if (!clause) return null;
   const bindings = clause.namedBindings;
@@ -4415,81 +1519,27 @@ function npmStaticModuleImportReason7(
   }
   if (!bindings || !ts.isNamedImports(bindings)) return null;
   const checker = program.getTypeChecker();
-  const sf = ts.getSourceFileOfNode(stmt);
-  for (const specifier of bindings.elements.nodes) {
+  const sf = stmt.getSourceFile();
+  for (const specifier of bindings.elements) {
     if ((specifier.propertyName?.text ?? specifier.name.text) !== "createRequire") continue;
     const imported = checker.getSymbolAtLocation(specifier.name);
     if (!imported) return "its createRequire import could not be resolved";
     checker.prefetchSymbolNodesExact(identifierOccurrences7(sf, specifier.name.text));
     let reason: string | null = null;
     const checkUse = (expr: ts.Expression): void => {
-      const use = createRequireUse7(expr);
-      // A `typeof` probe observes the loader's type, never its call
-      // sites: the erased binding stands in as a function value, which is
-      // what the probe reads under Node too.
-      if (use === "computed") reason = COMPUTED_CREATE_REQUIRE_REASON;
-      else if (use === "escaping")
-        reason = "its createRequire result escapes (static requires need literal specifiers)";
-      else if (use === "value" && !isTypeofOperand7(expr))
-        // The loader value form lowers to a run-time require: its call
-        // sites are not the static edges this package compilation needs.
-        reason = "its createRequire result escapes (static requires need literal specifiers)";
+      if (!staticCreateRequireUse7(expr)) {
+        reason = "its createRequire result escapes or is used with a computed specifier (static requires need literal specifiers)";
+      }
     };
     ts.walkPreorder(sf, (node) => {
-      if (
-        reason ||
-        !ts.isIdentifier(node) ||
-        node.text !== specifier.name.text ||
-        node === specifier.name ||
-        checker.getSymbolAtLocation(node) !== imported
-      )
-        return;
+      if (reason || !ts.isIdentifier(node) || node.text !== specifier.name.text || node === specifier.name || checker.getSymbolAtLocation(node) !== imported) return;
       const call = node.parent;
-      if (!ts.isCallExpression(call) || call.expression !== node) {
-        // A truthiness test of the import binding (`createRequire ? …
-        // : undefined`) reads a value whose only possible truth is "the
-        // import is a function", which the erased binding keeps: the
-        // conditional's true arm owns the value.
-        if (ts.isConditionalExpression(call) && call.condition === node) {
-          // As a declaration's initializer the conditional must be the
-          // supported fold; the erased binding has no value otherwise
-          // (the reversed polarity reads `undefined` at run time).
-          const parent = call.parent;
-          if (
-            ts.isVariableDeclaration(parent) &&
-            parent.initializer === call &&
-            !isCreateRequireBaseCall7(program, call)
-          ) {
-            reason =
-              "its createRequire conditional initializer is not a supported fold (the supported form is `createRequire ? createRequire(import.meta.url) : undefined`)";
-          }
-          return;
-        }
-        reason =
-          "its createRequire import is used outside a supported call based on the current file";
+      if (!ts.isCallExpression(call) || call.expression !== node || !isCreateRequireBaseCall7(program, call)) {
+        reason = "its createRequire import is used outside a supported call based on the current file";
         return;
       }
-      if (!isCreateRequireBaseCall7(program, call)) {
-        // A runtime base (`createRequire(from)`) anchors no build-time
-        // resolution: the static package graph cannot resolve the
-        // loader's call sites.
-        reason =
-          "its createRequire import is used outside a supported call based on the current file";
-        return;
-      }
-      // The supported conditional fold (`createRequire ? createRequire(...)
-      // : undefined`) gives its value to the variable's declaration through
-      // the conditional, not through the call directly.
-      const handle =
-        ts.isConditionalExpression(call.parent) && call.parent.whenTrue === call
-          ? call.parent
-          : call;
-      const decl = handle.parent;
-      if (
-        ts.isVariableDeclaration(decl) &&
-        decl.initializer === handle &&
-        ts.isIdentifier(decl.name)
-      ) {
+      const decl = call.parent;
+      if (ts.isVariableDeclaration(decl) && decl.initializer === call && ts.isIdentifier(decl.name)) {
         if ((ts.getCombinedModifierFlags(decl) & ts.ModifierFlags.Export) !== 0) {
           reason = "its createRequire result escapes through an exported binding";
           return;
@@ -4502,19 +1552,10 @@ function npmStaticModuleImportReason7(
         const name = decl.name.text;
         checker.prefetchSymbolNodesExact(identifierOccurrences7(sf, name));
         ts.walkPreorder(sf, (ref) => {
-          if (!ts.isIdentifier(ref) || ref.text !== name || ref === decl.name) return;
-          if (isExportSpecifierReference7(ref)) return;
-          // A shorthand `{ load }` reads the variable through its property
-          // alias (the same resolution the stability proof uses).
-          let target = ts.isShorthandPropertyAssignment(ref.parent)
-            ? checker.getShorthandAssignmentValueSymbol(ref.parent)
-            : checker.getSymbolAtLocation(ref);
-          if (target !== undefined && (target.flags & ts.SymbolFlags.Alias) !== 0)
-            target = checker.getAliasedSymbol(target);
-          if (target === sym) checkUse(ref);
+          if (ts.isIdentifier(ref) && ref.text === name && ref !== decl.name && checker.getSymbolAtLocation(ref) === sym) checkUse(ref);
         });
       } else {
-        checkUse(handle);
+        checkUse(call);
       }
     });
     if (reason) return reason;
@@ -4529,13 +1570,13 @@ function npmStaticModuleImportReason7(
  * can mistake them for module syntax. */
 function requireCallBindingKind7(program: ts.Program, node: ts.Node): RequireCallBindingKind7 {
   const raw = ts.isVariableDeclaration(node) ? node.initializer : node;
-  const call = raw && ts.isExpression(raw) ? withoutParenthesesTypeWrappers(raw) : raw;
+  const call = raw && ts.isExpression(raw) ? stripRequireCasts7(raw) : raw;
   if (!call || !ts.isCallExpression(call) || !ts.isIdentifier(call.expression)) return "ambient";
   const checker = program.getTypeChecker();
   const symbol = checker.getSymbolAtLocation(call.expression);
   if (symbol === undefined) return "ambient";
-  const decls = symbol.declarations;
-  if (decls.every((d) => ts.getSourceFileOfNode(d).isDeclarationFile)) return "ambient";
+  const decls = checker.declarationsOf(symbol);
+  if (decls.length === 0 || decls.every((d) => d.getSourceFile().isDeclarationFile)) return "ambient";
   return isCreateRequireBinding7(program, call.expression) ? "createRequire" : "source";
 }
 
@@ -4549,7 +1590,7 @@ const CJS_WRAPPER_NAMES = new Set(["require", "module", "exports", "__dirname", 
 
 function bindingDeclaresCjsWrapper7(name: ts.BindingName): ts.Identifier | null {
   if (ts.isIdentifier(name)) return CJS_WRAPPER_NAMES.has(name.text) ? name : null;
-  for (const el of name.elements.nodes) {
+  for (const el of name.elements) {
     if (el.name === undefined) continue;
     const hit = bindingDeclaresCjsWrapper7(el.name);
     if (hit !== null) return hit;
@@ -4571,9 +1612,13 @@ function insideFunctionLike7(node: ts.Node): boolean {
  * import/export forms, import.meta, top-level await/for-await, or a top-level
  * lexical declaration that would redeclare a CommonJS wrapper binding. */
 function nodeEsmSyntaxMarker7(sf: ts.SourceFile): ts.Node | null {
-  for (const stmt of sf.statements.nodes) {
+  for (const stmt of sf.statements) {
     if (ts.isImportDeclaration(stmt) && !erasedTypeOnlyImport(stmt)) return stmt;
-    if (ts.isExportDeclaration(stmt) && !stmt.isTypeOnly) {
+    if (
+      ts.isExportDeclaration(stmt) &&
+      !stmt.isTypeOnly &&
+      !erasedTypeOnlyReexport(stmt)
+    ) {
       return stmt;
     }
     if (ts.isExportAssignment(stmt)) return stmt;
@@ -4587,23 +1632,22 @@ function nodeEsmSyntaxMarker7(sf: ts.SourceFile): ts.Node | null {
       ts.isVariableStatement(stmt) &&
       (stmt.declarationList.flags & (ts.NodeFlags.Let | ts.NodeFlags.Const)) !== 0
     ) {
-      for (const decl of stmt.declarationList.declarations.nodes) {
+      for (const decl of stmt.declarationList.declarations) {
         const hit = bindingDeclaresCjsWrapper7(decl.name);
         if (hit !== null) return hit;
       }
     }
-    if (
-      ts.isClassDeclaration(stmt) &&
-      stmt.name !== undefined &&
-      CJS_WRAPPER_NAMES.has(stmt.name.text)
-    ) {
+    if (ts.isClassDeclaration(stmt) && stmt.name !== undefined && CJS_WRAPPER_NAMES.has(stmt.name.text)) {
       return stmt.name;
     }
   }
 
   let found: ts.Node | null = null;
   ts.walkPreorder(sf, (node) => {
-    if (ts.isMetaProperty(node) && node.keywordToken === ts.SyntaxKind.ImportKeyword) {
+    if (
+      ts.isMetaProperty(node) &&
+      node.keywordToken === ts.SyntaxKind.ImportKeyword
+    ) {
       found = node;
       return "stop";
     }
@@ -4637,12 +1681,11 @@ function isNodeEsmFile7(sf: ts.SourceFile, program?: ts.Program): boolean {
     result = true;
   } else {
     const packageType = nearestPackageType(sf.fileName);
-    result =
-      packageType === "module"
-        ? true
-        : packageType === "commonjs"
-          ? false
-          : nodeEsmSyntaxMarker7(sf) !== null;
+    result = packageType === "module"
+      ? true
+      : packageType === "commonjs"
+        ? false
+        : nodeEsmSyntaxMarker7(sf) !== null;
   }
   program?.analysis.nodeEsmFiles.set(sf, result);
   return result;
@@ -4661,40 +1704,6 @@ function isCjsJsFile7(sf: ts.SourceFile, program?: ts.Program): boolean {
  * tsgo marks CJS files with export assignments as external modules). */
 export function isCjsJsFile(sf: ts.SourceFile, program?: ts.Program): boolean {
   return isCjsJsFile7(sf, program);
-}
-
-function hasUseStrictDirective(statements: readonly ts.Statement[]): boolean {
-  for (const statement of statements) {
-    if (!ts.isExpressionStatement(statement) || !ts.isStringLiteral(statement.expression))
-      return false;
-    if (statement.expression.text === "use strict") return true;
-  }
-  return false;
-}
-
-/** Whether `node` runs in strict mode code: inside a class body, a function
- * with a "use strict" directive, a module, or a script that starts with
- * "use strict". CommonJS JavaScript is sloppy otherwise; the sloppy-only
- * semantics (implicit globals, `with`, direct eval, Annex B) need a Node
- * island. */
-export function isStrictCode(node: ts.Node): boolean {
-  for (let parent: ts.Node | undefined = node.parent; parent; parent = parent.parent) {
-    if (ts.isClassDeclaration(parent) || ts.isClassExpression(parent)) return true;
-    if (
-      ts.isFunctionLike(parent) &&
-      parent.body &&
-      ts.isBlock(parent.body) &&
-      hasUseStrictDirective(parent.body.statements.nodes)
-    )
-      return true;
-    if (ts.isSourceFile(parent)) {
-      return (
-        hasUseStrictDirective(parent.statements.nodes) ||
-        (!isCjsJsFile7(parent) && (isNodeEsmFile7(parent) || ts.isExternalModule(parent)))
-      );
-    }
-  }
-  return false;
 }
 
 /** The self-import TDZ fences: for `import { x } from "<self>"` (default
@@ -4723,16 +1732,16 @@ function selfImportTdzFences7(
   // The aliased declaration's TDZ horizon: the position after which reads
   // are initialized. Hoisted functions have none.
   const tdzEndOf = (aliased: ts.Symbol): number | null => {
-    const d = aliased.valueDeclaration ?? aliased.declarations[0];
-    if (d === undefined || ts.getSourceFileOfNode(d) !== sf) return null;
+    const d = checker.valueDeclarationOf(aliased) ?? checker.declarationsOf(aliased)[0];
+    if (d === undefined || d.getSourceFile() !== sf) return null;
     if (ts.isFunctionDeclaration(d)) return null;
-    return d.end;
+    return d.getEnd();
   };
   const fence = (ref: ts.Identifier, name: string): void => {
     diags.push(
       unsupportedDiag(
         "SC1030",
-        { file: sf.fileName, start: ts.tokenStartOfNode(ref), end: ref.end },
+        { file: sf.fileName, start: ref.getStart(sf), end: ref.getEnd() },
         `the self-import binding '${name}' read above its declaration (the import aliases this module's OWN binding — Node initializes it when the declaration executes, so this read throws ReferenceError; move the read below the declaration)`,
       ),
     );
@@ -4748,7 +1757,7 @@ function selfImportTdzFences7(
         ts.isIdentifier(node) &&
         node !== bindingName &&
         node.text === bindingName.text &&
-        ts.tokenStartOfNode(node) < end &&
+        node.getStart(sf) < end &&
         !insideFunction(node) &&
         checker.getSymbolAtLocation(node) === sym
       ) {
@@ -4760,7 +1769,7 @@ function selfImportTdzFences7(
   };
   if (clause.name !== undefined) checkNamed(clause.name);
   if (clause.namedBindings !== undefined && ts.isNamedImports(clause.namedBindings)) {
-    for (const el of clause.namedBindings.elements.nodes) {
+    for (const el of clause.namedBindings.elements) {
       if (!el.isTypeOnly) checkNamed(el.name);
     }
   }
@@ -4781,8 +1790,7 @@ function selfImportTdzFences7(
         const memberSym = checker.getSymbolAtLocation(node.name);
         if (memberSym !== undefined) {
           const end = tdzEndOf(memberSym);
-          if (end !== null && ts.tokenStartOfNode(node) < end)
-            fence(node.expression, `${nsName.text}.${node.name.text}`);
+          if (end !== null && node.getStart(sf) < end) fence(node.expression, `${nsName.text}.${node.name.text}`);
         }
       }
       ts.forEachChild(node, visit);
@@ -4814,13 +1822,7 @@ function nsBindingUsesAreBareStatements7(
       node.text === nsName.text &&
       checker.getSymbolAtLocation(node) === bindingSym
     ) {
-      if (
-        !(
-          node.parent !== undefined &&
-          ts.isExpressionStatement(node.parent) &&
-          node.parent.expression === node
-        )
-      ) {
+      if (!(node.parent !== undefined && ts.isExpressionStatement(node.parent) && node.parent.expression === node)) {
         bareOnly = false;
         return;
       }
@@ -4835,11 +1837,10 @@ function nsBindingUsesAreBareStatements7(
  * Node runs legal ESM cycles all over the ecosystem: the revisited module
  * is a cache hit, and the only hazard is a READ of a binding before its
  * declaration executed (TDZ ReferenceError for let/const/class, a stale
- * `undefined` for var). Cycles where such a read is REACHABLE are admitted
- * by the exact initialization rule (exactCycleRefusal7 below), which
- * models the TDZ with initialization checks. A cycle needs no checks when
- * partial initialization is provably unobservable — the DECLARATION-ONLY
- * INIT WINDOW rule:
+ * `undefined` for var) — runtime evaluation-order semantics the static
+ * story does not model, so cycles where such a read is REACHABLE keep the
+ * SC1016 fence. A cycle is admitted when partial initialization is
+ * provably unobservable — the DECLARATION-ONLY INIT WINDOW rule:
  *
  *  1. Every module of the cycle cluster (the strongly-connected component
  *     — any member may be mid-initialization while another's top level
@@ -4864,13 +1865,6 @@ function nsBindingUsesAreBareStatements7(
 export interface CycleEdge {
   dep: ts.SourceFile;
   stmt?: ts.ImportDeclaration | ts.ExportDeclaration;
-  /** An inline require() in a deferred position (a function body): Node
-   * evaluates the dependency when that code runs, after this module's own
-   * top level, so the edge orders the dependency after the module and
-   * never closes a cycle through the module's initialization. */
-  lazy?: true;
-  /** The inline require() call behind the edge (inline edges only). */
-  call?: ts.CallExpression;
 }
 
 /** True when the reference at `node` can only evaluate AFTER the module
@@ -4882,11 +1876,7 @@ export interface CycleEdge {
  * itself — not deferred. */
 function inDeferredPosition7(node: ts.Node): boolean {
   let child: ts.Node = node;
-  for (
-    let p: ts.Node | undefined = node.parent;
-    p !== undefined && !ts.isSourceFile(p);
-    p = p.parent
-  ) {
+  for (let p: ts.Node | undefined = node.parent; p !== undefined && !ts.isSourceFile(p); p = p.parent) {
     if (p.kind === ts.SyntaxKind.Decorator) return false;
     if (ts.isClassStaticBlockDeclaration(p)) return false;
     if (ts.isFunctionLike(p)) {
@@ -4910,11 +1900,7 @@ function inDeferredPosition7(node: ts.Node): boolean {
  * CLASS `extends` heritage expression is the one TypeNode-shaped position
  * that IS a runtime read. */
 function inTypePosition7(node: ts.Node): boolean {
-  for (
-    let p: ts.Node | undefined = node.parent;
-    p !== undefined && !ts.isSourceFile(p);
-    p = p.parent
-  ) {
+  for (let p: ts.Node | undefined = node.parent; p !== undefined && !ts.isSourceFile(p); p = p.parent) {
     if (ts.isTypeNode(p)) {
       const heritage = p.parent;
       const isClassExtends =
@@ -4937,18 +1923,6 @@ function inTypePosition7(node: ts.Node): boolean {
  * callback-invoking builtin, a getter, an iterator, or an implicit
  * coercion of a user object) disqualifies the module's cycles. */
 function nonInertTopLevel7(program: ts.Program, sf: ts.SourceFile): ts.Node | null {
-  const nonInert = topLevelInertness7(program);
-  for (const stmt of sf.statements.nodes) {
-    const offence = nonInert(stmt);
-    if (offence !== null) return offence;
-  }
-  return null;
-}
-
-/** The per-statement form of nonInertTopLevel7: answers, for one
- * top-level statement, the first construct that could execute user code
- * while the statement runs, or null when the statement is inert. */
-function topLevelInertness7(program: ts.Program): (stmt: ts.Statement) => ts.Node | null {
   const checker = program.getTypeChecker();
   const PRIM =
     ts.TypeFlags.StringLike |
@@ -4973,20 +1947,17 @@ function topLevelInertness7(program: ts.Program): (stmt: ts.Statement) => ts.Nod
    * calls are runtime-implemented, never user code. */
   const dtsRooted = (e: ts.Expression): boolean => {
     let root: ts.Expression = e;
-    while (ts.isPropertyAccessExpression(root) || ts.isElementAccessExpression(root))
-      root = root.expression;
+    while (ts.isPropertyAccessExpression(root) || ts.isElementAccessExpression(root)) root = root.expression;
     if (ts.isMetaProperty(root)) return true; // import.meta
     if (!ts.isIdentifier(root)) return false;
     let sym = checker.getSymbolAtLocation(root);
     if (sym === undefined) return false;
     if (sym.flags & ts.SymbolFlags.Alias) sym = checker.getAliasedSymbol(sym);
-    const decls = sym.declarations;
-    return decls.length > 0 && decls.every((d) => ts.getSourceFileOfNode(d).isDeclarationFile);
+    const decls = checker.declarationsOf(sym);
+    return decls.length > 0 && decls.every((d) => d.getSourceFile().isDeclarationFile);
   };
   const hasDecorator = (n: ts.Node): boolean =>
-    ((n as { modifiers?: ts.NodeArray<ts.Node> }).modifiers?.nodes ?? []).some(
-      (m) => m.kind === ts.SyntaxKind.Decorator,
-    );
+    ((n as { modifiers?: readonly ts.Node[] }).modifiers ?? []).some((m) => m.kind === ts.SyntaxKind.Decorator);
   /** No function-like node anywhere in the subtree — arguments to builtin
    * calls must not smuggle a callback the builtin could invoke. */
   const containsFunctionLike = (n: ts.Node): boolean => {
@@ -5002,20 +1973,16 @@ function topLevelInertness7(program: ts.Program): (stmt: ts.Statement) => ts.Nod
   };
   const inertClass = (c: ts.ClassLikeDeclaration): ts.Node | null => {
     if (hasDecorator(c)) return c;
-    for (const h of c.heritageClauses?.nodes ?? []) {
+    for (const h of c.heritageClauses ?? []) {
       if (h.token !== ts.SyntaxKind.ExtendsKeyword) continue;
-      for (const t of h.types.nodes) {
-        if (!ts.isExpressionWithTypeArguments(t)) continue;
-        if (!inert(t.expression)) return t.expression;
-      }
+      for (const t of h.types) if (!inert(t.expression)) return t.expression;
     }
-    for (const m of c.members.nodes) {
+    for (const m of c.members) {
       if (ts.isClassStaticBlockDeclaration(m)) return m;
       if (hasDecorator(m)) return m;
       const memberName = (m as { name?: ts.PropertyName }).name;
       if (memberName !== undefined && ts.isComputedPropertyName(memberName)) {
-        if (!inert(memberName.expression) || !primitiveTyped(memberName.expression))
-          return memberName;
+        if (!inert(memberName.expression) || !primitiveTyped(memberName.expression)) return memberName;
       }
       if (
         ts.isPropertyDeclaration(m) &&
@@ -5055,12 +2022,7 @@ function topLevelInertness7(program: ts.Program): (stmt: ts.Statement) => ts.Nod
       return true;
     }
     if (ts.isClassExpression(e)) return inertClass(e) === null;
-    if (
-      ts.isParenthesizedExpression(e) ||
-      ts.isAsExpression(e) ||
-      ts.isSatisfiesExpression(e) ||
-      ts.isNonNullExpression(e)
-    ) {
+    if (ts.isParenthesizedExpression(e) || ts.isAsExpression(e) || ts.isSatisfiesExpression(e) || ts.isNonNullExpression(e)) {
       return inert(e.expression);
     }
     if (ts.isPropertyAccessExpression(e)) return dtsRooted(e);
@@ -5068,9 +2030,7 @@ function topLevelInertness7(program: ts.Program): (stmt: ts.Statement) => ts.Nod
       return dtsRooted(e) && inert(e.argumentExpression) && primitiveTyped(e.argumentExpression);
     }
     if (ts.isTemplateExpression(e)) {
-      return e.templateSpans.nodes.every(
-        (s) => inert(s.expression) && primitiveTyped(s.expression),
-      );
+      return e.templateSpans.every((s) => inert(s.expression) && primitiveTyped(s.expression));
     }
     if (ts.isVoidExpression(e) || ts.isTypeOfExpression(e)) return inert(e.expression);
     if (ts.isPrefixUnaryExpression(e)) {
@@ -5089,12 +2049,10 @@ function topLevelInertness7(program: ts.Program): (stmt: ts.Statement) => ts.Nod
       if (COERCING_FREE.has(e.operatorToken.kind)) return true;
       return primitiveTyped(e.left) && primitiveTyped(e.right);
     }
-    if (ts.isConditionalExpression(e))
-      return inert(e.condition) && inert(e.whenTrue) && inert(e.whenFalse);
-    if (ts.isArrayLiteralExpression(e))
-      return e.elements.nodes.every((el) => !ts.isSpreadElement(el) && inert(el));
+    if (ts.isConditionalExpression(e)) return inert(e.condition) && inert(e.whenTrue) && inert(e.whenFalse);
+    if (ts.isArrayLiteralExpression(e)) return e.elements.every((el) => !ts.isSpreadElement(el) && inert(el));
     if (ts.isObjectLiteralExpression(e)) {
-      return e.properties.nodes.every((p) => {
+      return e.properties.every((p) => {
         if (ts.isShorthandPropertyAssignment(p)) return true;
         if (!ts.isPropertyAssignment(p) || ts.isComputedPropertyName(p.name)) return false;
         return inert(p.initializer);
@@ -5102,7 +2060,7 @@ function topLevelInertness7(program: ts.Program): (stmt: ts.Statement) => ts.Nod
     }
     if (ts.isCallExpression(e) || ts.isNewExpression(e)) {
       if (!dtsRooted(e.expression) || !ts.isIdentifier(chainRoot7(e.expression))) return false;
-      const args = e.arguments?.nodes ?? [];
+      const args = e.arguments ?? [];
       // A CALLABLE argument is admissible when it is itself dts-rooted:
       // a builtin-owned function value (the `promisify(fs.readFile)`
       // at every cycle member's top level) is runtime-implemented — even
@@ -5118,7 +2076,7 @@ function topLevelInertness7(program: ts.Program): (stmt: ts.Statement) => ts.Nod
     }
     return false;
   };
-  return (stmt: ts.Statement): ts.Node | null => {
+  for (const stmt of sf.statements) {
     if (
       ts.isImportDeclaration(stmt) ||
       ts.isExportDeclaration(stmt) ||
@@ -5127,38 +2085,44 @@ function topLevelInertness7(program: ts.Program): (stmt: ts.Statement) => ts.Nod
       ts.isInterfaceDeclaration(stmt) ||
       ts.isTypeAliasDeclaration(stmt) ||
       ts.isEmptyStatement(stmt) ||
-      (ts.getCombinedModifierFlags(stmt as unknown as ts.Declaration) &
-        ts.ModifierFlags.Ambient) !==
-        0
+      (ts.getCombinedModifierFlags(stmt as unknown as ts.Declaration) & ts.ModifierFlags.Ambient) !== 0
     ) {
-      return null;
+      continue;
     }
     if (ts.isEnumDeclaration(stmt)) {
-      return (
-        stmt.members.nodes.find((m) => m.initializer !== undefined && !inert(m.initializer)) ?? null
-      );
+      const bad = stmt.members.find((m) => m.initializer !== undefined && !inert(m.initializer));
+      if (bad !== undefined) return bad;
+      continue;
     }
-    if (ts.isClassDeclaration(stmt)) return inertClass(stmt);
+    if (ts.isClassDeclaration(stmt)) {
+      const bad = inertClass(stmt);
+      if (bad !== null) return bad;
+      continue;
+    }
     if (ts.isVariableStatement(stmt)) {
-      for (const d of stmt.declarationList.declarations.nodes) {
+      for (const d of stmt.declarationList.declarations) {
         if (!ts.isIdentifier(d.name)) return d.name; // patterns can invoke getters/iterators
         if (d.initializer !== undefined && !inert(d.initializer)) return d.initializer;
       }
-      return null;
+      continue;
     }
-    if (ts.isExpressionStatement(stmt)) return inert(stmt.expression) ? null : stmt;
+    if (ts.isExpressionStatement(stmt)) {
+      if (!inert(stmt.expression)) return stmt;
+      continue;
+    }
     if (ts.isExportAssignment(stmt) && !stmt.isExportEquals) {
-      return inert(stmt.expression) ? null : stmt;
+      if (!inert(stmt.expression)) return stmt;
+      continue;
     }
     return stmt;
-  };
+  }
+  return null;
 }
 
 /** The head of a property/element-access chain. */
 function chainRoot7(e: ts.Expression): ts.Expression {
   let root: ts.Expression = e;
-  while (ts.isPropertyAccessExpression(root) || ts.isElementAccessExpression(root))
-    root = root.expression;
+  while (ts.isPropertyAccessExpression(root) || ts.isElementAccessExpression(root)) root = root.expression;
   return root;
 }
 
@@ -5192,9 +2156,7 @@ function backEdgeUseOffence7(
   if (clause.name !== undefined) bindingNames.push(clause.name);
   if (clause.namedBindings !== undefined) {
     if (ts.isNamespaceImport(clause.namedBindings)) bindingNames.push(clause.namedBindings.name);
-    else
-      for (const el of clause.namedBindings.elements.nodes)
-        if (!el.isTypeOnly) bindingNames.push(el.name);
+    else for (const el of clause.namedBindings.elements) if (!el.isTypeOnly) bindingNames.push(el.name);
   }
   for (const bindingName of bindingNames) {
     const sym = checker.getSymbolAtLocation(bindingName);
@@ -5215,6 +2177,22 @@ function backEdgeUseOffence7(
   return null;
 }
 
+/** The benign-cycle admission engine over one import graph, shared by
+ * preflight's static-module walk and the --dynamic subgraph walk
+ * (appendDynamicImportModules). Given a BACK edge (importer → e.dep with
+ * e.dep already mid-initialization in a depth-first walk), answers null
+ * to ADMIT the cycle — the guarded %init calls reproduce Node's cache-hit
+ * order and nothing can observe the partial initialization — or the
+ * human-readable reason it keeps the SC1016 fence. Two admission chances:
+ *  - the CHEAP PER-EDGE rule: the closing statement binds nothing (a
+ *    side-effect import) or binds only namespace objects whose every use
+ *    is a bare expression statement — no read crosses the edge at all;
+ *  - the DECLARATION-ONLY INIT WINDOW rule (the admission block above):
+ *    every cluster member is an ES module with an inert top level, and
+ *    the closing edge's bindings are used only in deferred positions.
+ * Tarjan SCCs (lazy, rooted at each queried importer) and cluster
+ * verdicts are memoized across calls, so `edgesOf` must answer the same
+ * edges for the same file every time. */
 export function makeCycleAdmission(
   program: ts.Program,
   edgesOf: (sf: ts.SourceFile) => readonly CycleEdge[],
@@ -5258,14 +2236,13 @@ export function makeCycleAdmission(
     }
   };
   const lineOf = (node: ts.Node): string => {
-    const nsf = ts.getSourceFileOfNode(node);
-    return `${nsf.fileName}:${ts.getLineAndCharacterOfPosition(nsf, ts.tokenStartOfNode(node)).line + 1}`;
+    const nsf = node.getSourceFile();
+    return `${nsf.fileName}:${ts.getLineAndCharacterOfPosition(nsf, node.getStart(nsf)).line + 1}`;
   };
-  // Cluster verdict memo (keyed by the component array identity): true
-  // when every member is an ES module passing the inert-top-level bar.
-  const sccVerdict = new Map<ts.SourceFile[], boolean>();
-  // The exact-initialization verdict, same keying (exactCycleRefusal7).
-  const exactVerdict = new Map<ts.SourceFile[], string | null>();
+  // Cluster verdict memo (keyed by the component array identity): the
+  // reason the cluster's cycles stay fenced, or null when its every
+  // member passes the inert-top-level bar.
+  const sccVerdict = new Map<ts.SourceFile[], string | null>();
   // A module can close many cycle edges, each importing many bindings.
   // Index its identifiers once for this admission pass. ASTs are immutable;
   // the pass owns the index so it cannot retain a disposed program.
@@ -5286,41 +2263,13 @@ export function makeCycleAdmission(
     bindingUses.set(sf, uses);
     return uses;
   };
-  // The CommonJS cluster verdict, same keying (cjsCycleAdmission7).
-  const cjsVerdict = new Map<ts.SourceFile[], string | null>();
   return (importer: ts.SourceFile, e: CycleEdge): string | null => {
-    if (e.stmt === undefined) {
-      if (!index.has(importer)) strongconnect(importer);
-      const comp = sccOf.get(e.dep);
-      if (comp === undefined || comp.length < 2 || !comp.includes(importer)) {
-        return "the cycle closes through a require() edge";
-      }
-      // A cluster with an ES module: a require() of the ES module itself is
-      // Node 24's require(esm), and reaching one mid-evaluation throws
-      // ERR_REQUIRE_CYCLE_MODULE at the call (the require site tests the
-      // target's %evaluating flag). Node never evaluates that module to
-      // completion on this path, so nothing observes a partial export
-      // object: admit the cycle.
-      if (comp.some((m) => isNodeEsmFile7(m, program))) {
-        if (isNodeEsmFile7(e.dep, program)) return null;
-        return "the cycle closes through a require() edge: the cluster mixes ES modules and CommonJS";
-      }
-      if (!cjsVerdict.has(comp))
-        cjsVerdict.set(
-          comp,
-          cjsCycleAdmission7(program, comp, lineOf, (m) =>
-            program.analysis.partialCjsCycleMembers.add(m),
-          ),
-        );
-      const reason = cjsVerdict.get(comp) ?? null;
-      return reason === null ? null : `the cycle closes through a require() edge: ${reason}`;
-    }
+    if (e.stmt === undefined) return "the cycle closes through a require() edge";
     // Cheap per-edge admission: nothing readable binds through the edge.
     if (ts.isImportDeclaration(e.stmt)) {
       const clause = e.stmt.importClause;
       if (
         clause === undefined ||
-        typeOnlyNamedImport(e.stmt) ||
         (clause.name === undefined &&
           (clause.namedBindings === undefined ||
             (ts.isNamespaceImport(clause.namedBindings) &&
@@ -5335,1765 +2284,55 @@ export function makeCycleAdmission(
       return "the cycle's module cluster could not be analyzed";
     }
     if (!sccVerdict.has(comp)) {
-      sccVerdict.set(
-        comp,
-        comp.every((m) => !isCjsJsFile7(m, program) && nonInertTopLevel7(program, m) === null),
-      );
-    }
-    if (
-      sccVerdict.get(comp) === true &&
-      backEdgeUseOffence7(program, e.stmt, usesOf(importer)) === null
-    ) {
-      return null;
-    }
-    // The EXACT INITIALIZATION rule: the cycle runs in Node's evaluation
-    // order and every binding that can be observed before its declaration
-    // runs carries an initialization check (cycleEarlyBindings).
-    if (!exactVerdict.has(comp)) {
-      const reason = exactCycleRefusal7(program, comp, lineOf);
-      exactVerdict.set(comp, reason);
-      if (reason === null) {
-        const members = program.analysis.exactCycleMembers;
-        for (const m of comp) members.add(m);
+      let reason: string | null = null;
+      for (const m of comp) {
+        if (isCjsJsFile7(m, program)) {
+          reason = `${m.fileName} is a CommonJS module — admission covers ES-module cycles only`;
+          break;
+        }
+        // WasmGC (the browser target and outputKind "wasmgc"): init-time code and early reads inside an ES-module cycle are modeled,
+        // not fenced — the guarded %init calls reproduce Node's evaluation order and module-tdz.ts flags the lexical bindings an init
+        // window can read early (checked reads throw Node's ReferenceError; early vars and classes with no checked form are refused
+        // there).
+        if (wasmGcLaneTarget()) continue;
+        const off = nonInertTopLevel7(program, m);
+        if (off !== null) {
+          reason = `top-level code at ${lineOf(off)} can run user code during the cycle's init window — only declaration-only module bodies are admitted`;
+          break;
+        }
       }
+      sccVerdict.set(comp, reason);
     }
-    return exactVerdict.get(comp) ?? null;
+    const clusterReason = sccVerdict.get(comp);
+    if (clusterReason === undefined) throw new Error("missing module-cycle verdict");
+    if (clusterReason !== null) return clusterReason;
+    const use = wasmGcLaneTarget() ? null : backEdgeUseOffence7(program, e.stmt, usesOf(importer));
+    if (use !== null) {
+      return `the cycle-crossing binding '${use.name}' is read at ${lineOf(use.node)}, outside any function body — a read during the init window observes the partially-initialized module (Node's TDZ ReferenceError / stale var), which is not modeled`;
+    }
+    return null;
   };
-}
-
-/** The reason a strongly-connected cluster of CommonJS modules cannot be
- * initialized exactly through its require() cycle, or null when it can.
- * Node answers a require of a module that is still evaluating with that
- * module's exports object as it stands, while the compiled bindings alias
- * the exporter's final declarations. The two agree when:
- *  - every member settles its exports before anything can enter the
- *    cycle: all of its export statements come before its first top-level
- *    statement that can run another module's code (a require, or anything
- *    but literals, plain reads, function and class values, and
- *    standard-library globals called with literal arguments), and every
- *    other use of its export object is a plain member read; and
- *  - no member's top-level code can reach its binding of another member,
- *    so no member runs another member's code while the cluster is still
- *    initializing. Each module then initializes exactly as it would
- *    outside the cycle, and its own require bindings keep the acyclic
- *    analysis (requireEarlyReference).
- * Other cycles keep the SC1016 fence. */
-function cjsCycleAdmission7(
-  program: ts.Program,
-  comp: readonly ts.SourceFile[],
-  lineOf: (node: ts.Node) => string,
-  markPartial: (sf: ts.SourceFile) => void,
-): string | null {
-  const members = new Set(comp);
-  // Set once a member assigns an export after the module entered the cycle:
-  // the cluster is a PARTIAL-exports cycle, and its live exports object
-  // models what a member reads mid-cycle.
-  let partial = false;
-  let earlyUseReason: string | null = null;
-  const mark = (): void => {
-    partial = true;
-  };
-  const builtinRoot = (e: ts.Expression): boolean => {
-    while (ts.isPropertyAccessExpression(e)) e = e.expression;
-    return ts.isIdentifier(e) && !sourceBinding7(program, e);
-  };
-  const literal = (e: ts.Node): boolean =>
-    ts.isStringLiteralLike(e) ||
-    ts.isNumericLiteral(e) ||
-    ts.isRegularExpressionLiteral(e) ||
-    e.kind === ts.SyntaxKind.TrueKeyword ||
-    e.kind === ts.SyntaxKind.FalseKeyword ||
-    e.kind === ts.SyntaxKind.NullKeyword;
-  /** An expression whose evaluation runs no user code and requires
-   * nothing: literals, plain reads, function and class values, literal
-   * containers of those, and standard-library globals called with
-   * literal arguments. */
-  const inertExpr = (e: ts.Node): boolean => {
-    while (ts.isParenthesizedExpression(e)) e = e.expression;
-    if (literal(e) || ts.isIdentifier(e)) return true;
-    if (ts.isFunctionExpression(e) || ts.isArrowFunction(e)) return true;
-    if (ts.isClassExpression(e)) return classSyncParts7(e).every(inertPart);
-    if (ts.isObjectLiteralExpression(e)) {
-      return e.properties.nodes.every((p) =>
-        ts.isShorthandPropertyAssignment(p)
-          ? true
-          : ts.isPropertyAssignment(p)
-            ? !ts.isComputedPropertyName(p.name) && inertExpr(p.initializer)
-            : (ts.isMethodDeclaration(p) ||
-                ts.isGetAccessorDeclaration(p) ||
-                ts.isSetAccessorDeclaration(p)) &&
-              !ts.isComputedPropertyName(p.name),
-      );
-    }
-    if (ts.isArrayLiteralExpression(e)) {
-      return e.elements.nodes.every((el) => !ts.isSpreadElement(el) && inertExpr(el));
-    }
-    if (ts.isPropertyAccessExpression(e)) return builtinRoot(e);
-    if (ts.isVoidExpression(e)) return literal(e.expression);
-    if (ts.isCallExpression(e) || ts.isNewExpression(e)) {
-      return (
-        requireSpecOf7(e) === null &&
-        builtinRoot(e.expression) &&
-        (e.arguments?.nodes ?? []).every(literal)
-      );
-    }
-    return false;
-  };
-  const inertPart = (part: ts.Node): boolean => {
-    // An implements element or an interface's base names a type, which
-    // evaluates nothing at run time.
-    if (ts.isHeritageClause(part))
-      return part.types.nodes.every(
-        (t) => !ts.isExpressionWithTypeArguments(t) || inertExpr(t.expression),
-      );
-    if (ts.isComputedPropertyName(part)) return inertExpr(part.expression);
-    return ts.isExpression(part) && inertExpr(part);
-  };
-  const exportObject = (e: ts.Expression): boolean =>
-    (ts.isIdentifier(e) && e.text === "exports" && !sourceBinding7(program, e)) ||
-    (isModuleExportsAccess(e) &&
-      ts.isIdentifier(e.expression) &&
-      !sourceBinding7(program, e.expression));
-  /** A top-level statement that only publishes inert values. */
-  const exportStatement = (stmt: ts.Statement): boolean => {
-    if (!ts.isExpressionStatement(stmt)) return false;
-    if (isEsModuleStamp(stmt.expression)) return true;
-    const cjs = cjsExportAssignmentOf(stmt);
-    if (cjs !== null) {
-      let value: ts.Expression = cjs.expr;
-      while (
-        ts.isBinaryExpression(value) &&
-        value.operatorToken.kind === ts.SyntaxKind.EqualsToken
-      ) {
-        const left = value.left;
-        if (
-          !isModuleExportsAccess(left) &&
-          !(ts.isPropertyAccessExpression(left) && exportObject(left.expression))
-        )
-          return false;
-        value = value.right;
-      }
-      return inertExpr(value);
-    }
-    const call = stmt.expression;
-    return (
-      ts.isCallExpression(call) &&
-      ts.isPropertyAccessExpression(call.expression) &&
-      ts.isIdentifier(call.expression.expression) &&
-      call.expression.expression.text === "Object" &&
-      !sourceBinding7(program, call.expression.expression) &&
-      call.expression.name.text === "defineProperty" &&
-      call.arguments.nodes.length === 3 &&
-      exportObject(call.arguments.nodes[0]!) &&
-      ts.isStringLiteralLike(call.arguments.nodes[1]!) &&
-      inertExpr(call.arguments.nodes[2]!)
-    );
-  };
-  for (const m of comp) {
-    if (!isCjsJsFile7(m, program)) {
-      return `${m.fileName} is not a CommonJS module — require cycles are admitted between CommonJS modules only`;
-    }
-    const stmts = m.statements.nodes;
-    // The first statement that can run another module's code.
-    let firstEntry = stmts.length;
-    for (let i = 0; i < stmts.length; i++) {
-      const st = stmts[i]!;
-      const inert =
-        ts.isFunctionDeclaration(st) ||
-        ts.isEmptyStatement(st) ||
-        (ts.isExpressionStatement(st) && ts.isStringLiteral(st.expression)) ||
-        (ts.isClassDeclaration(st) && classSyncParts7(st).every(inertPart)) ||
-        (ts.isVariableStatement(st) &&
-          st.declarationList.declarations.nodes.every(
-            (d) =>
-              ts.isIdentifier(d.name) && (d.initializer === undefined || inertExpr(d.initializer)),
-          )) ||
-        exportStatement(st);
-      if (!inert) {
-        firstEntry = i;
-        break;
-      }
-    }
-    // Every other use of the export object must be a plain member read:
-    // anything else can change what a module of the cycle observes.
-    let stray: ts.Node | null = null;
-    const settled = new Set(stmts.slice(0, firstEntry).filter(exportStatement));
-    // A bundler export table the rewrite certified (npmStaticLiveExportTable)
-    // stands for the live getter object the original installed before its
-    // first require: the tail table settles as if it ran there.
-    const tail = stmts[stmts.length - 1];
-    if (
-      tail !== undefined &&
-      npmStaticLiveExportTable(m.fileName) &&
-      cjsExportAssignmentOf(tail)?.kind === "table"
-    )
-      settled.add(tail);
-    ts.walkPreorder(m, (n) => {
-      if (stray !== null) return "stop";
-      if (ts.isStatement(n) && settled.has(n)) return "skip";
-      let use: ts.Expression | null = null;
-      if (n.kind === ts.SyntaxKind.ThisKeyword) {
-        let moduleThis = true;
-        for (let p = n.parent; p !== undefined && !ts.isSourceFile(p); p = p.parent) {
-          if (
-            (ts.isFunctionLike(p) && !ts.isArrowFunction(p)) ||
-            ts.isClassDeclaration(p) ||
-            ts.isClassExpression(p)
-          ) {
-            moduleThis = false;
-            break;
-          }
-        }
-        if (moduleThis) use = n as ts.Expression;
-      } else if (
-        ts.isIdentifier(n) &&
-        (n.text === "exports" || n.text === "module") &&
-        !(ts.isPropertyAccessExpression(n.parent) && n.parent.name === n) &&
-        !sourceBinding7(program, n)
-      ) {
-        if (n.text === "exports") use = n;
-        else if (!ts.isPropertyAccessExpression(n.parent) || n.parent.expression !== n) stray = n;
-        else if (n.parent.name.text === "exports") use = n.parent;
-      }
-      if (use === null) return undefined;
-      const parent = use.parent;
-      if (parent === undefined) return undefined;
-      const read =
-        ts.isPropertyAccessExpression(parent) &&
-        parent.expression === use &&
-        !(
-          ts.isBinaryExpression(parent.parent) &&
-          parent.parent.left === parent &&
-          parent.parent.operatorToken.kind >= ts.SyntaxKind.FirstAssignment &&
-          parent.parent.operatorToken.kind <= ts.SyntaxKind.LastAssignment
-        ) &&
-        !(ts.isCallExpression(parent.parent) && parent.parent.expression === parent) &&
-        !ts.isDeleteExpression(parent.parent);
-      const assignment = (expr: ts.Node | undefined): boolean =>
-        expr !== undefined &&
-        ts.isBinaryExpression(expr) &&
-        expr.operatorToken.kind >= ts.SyntaxKind.FirstAssignment &&
-        expr.operatorToken.kind <= ts.SyntaxKind.LastAssignment;
-      // A WRITE through the export object (`exports.x = v`,
-      // `module.exports.x = v`, `this.x = v`, `module.exports = v`) after
-      // the module entered the cycle is the shape Node answers with partial
-      // exports: the module's exports object is a live checked-dynamic
-      // object, and members still missing at a read are undefined (with
-      // Node's circular-dependency warning). Admit it.
-      const grand = parent.parent;
-      const write =
-        (ts.isPropertyAccessExpression(parent) &&
-          parent.expression === use &&
-          assignment(grand) &&
-          (grand as ts.BinaryExpression).left === parent) ||
-        (assignment(parent) && (parent as ts.BinaryExpression).left === use);
-      if (write) {
-        mark();
-        return undefined;
-      }
-      if (!read) stray = use;
-      return undefined;
-    });
-    if (stray !== null) {
-      return `${m.fileName} uses its exports at ${lineOf(stray)} outside the export statements that precede its first require, so a module of the cycle can observe them before they settle`;
-    }
-    // Top-level code that can reach another member's binding must do so in
-    // a way the lowering answers exactly: an observable read (a value Node
-    // shows as it stands, the live exports object's member) passes, while a
-    // call or an escape keeps the fence.
-    {
-      for (const st of stmts) {
-        for (const req of requiresOf7(st, program)) {
-          if (req.decl === null) continue;
-          const dep = resolveImport7(program, m, req.spec, "require");
-          if (dep === null || !members.has(dep)) continue;
-          const reached = requireBindingEarlyUse7(
-            program,
-            m,
-            stmts.length,
-            req.decl,
-            [],
-            (id) => functionExportRead7(id, dep) || observableExportRead7(program, id),
-          );
-          if (reached !== null && earlyUseReason === null) {
-            earlyUseReason = `the top-level code of ${m.fileName} can use its binding '${reached.text}' of a module of the cycle (${lineOf(reached)}) while the cycle initializes`;
-          }
-        }
-      }
-    }
-  }
-  if (earlyUseReason !== null) return earlyUseReason;
-  if (partial) {
-    // Every member can be observed mid-evaluation, so every member keeps
-    // the live exports object.
-    for (const m of comp) markPartial(m);
-    // A partial cycle's exports object stays the CommonJS object Node
-    // hands out; replacing it with one value would need that value's own
-    // identity per require, which the live table does not model.
-    for (const m of comp) {
-      for (const stmt of m.statements.nodes) {
-        const cjs = cjsExportAssignmentOf(stmt);
-        if (cjs?.kind === "table" && cjs.obj === null) {
-          return `${m.fileName} replaces module.exports with a single value at ${lineOf(stmt)} inside a require cycle whose exports are observable before they settle`;
-        }
-      }
-    }
-  }
-  return null;
-}
-
-/** True when `use` initializes a top-level const whose every other
- * reference is a value of an export statement (`module.exports = { … }`
- * or `exports.n = …`). */
-function publishedAlias7(use: ts.Node, decl: ts.Node | undefined): boolean {
-  if (
-    decl === undefined ||
-    !ts.isVariableDeclaration(decl) ||
-    decl.initializer !== use ||
-    !ts.isIdentifier(decl.name)
-  )
-    return false;
-  const list = decl.parent;
-  const stmt = list?.parent;
-  const sf = stmt?.parent;
-  if (
-    list === undefined ||
-    (list.flags & ts.NodeFlags.Const) === 0 ||
-    stmt === undefined ||
-    !ts.isVariableStatement(stmt) ||
-    sf === undefined ||
-    !ts.isSourceFile(sf)
-  )
-    return false;
-  const alias = decl.name;
-  const published = new Set<ts.Node>();
-  for (const st of sf.statements.nodes) {
-    const cjs = cjsExportAssignmentOf(st);
-    if (cjs === null) continue;
-    if (cjs.kind === "member") published.add(cjs.value);
-    else if (cjs.obj !== null) {
-      for (const p of cjs.obj.properties.nodes) {
-        if (ts.isPropertyAssignment(p) && !ts.isComputedPropertyName(p.name))
-          published.add(p.initializer);
-        else if (ts.isShorthandPropertyAssignment(p)) published.add(p.name);
-      }
-    }
-  }
-  let kept = false;
-  ts.walkPreorder(sf, (n) => {
-    if (kept) return "stop";
-    if (!ts.isIdentifier(n) || n === alias || n.text !== alias.text) return undefined;
-    const p = n.parent;
-    if (
-      p !== undefined &&
-      ((ts.isPropertyAccessExpression(p) && p.name === n) ||
-        (ts.isPropertyAssignment(p) && p.name === n))
-    )
-      return undefined;
-    if (!published.has(n)) kept = true;
-    return undefined;
-  });
-  return !kept;
-}
-
-/** True for a plain read `binding.name` of the cycle member `dep` used only
- * where its VALUE is observed (an expression statement, `typeof`, `void`,
- * a comparison, a condition, a further member read, or an argument to a
- * `console` call): a live checked-dynamic read that shows exactly what Node
- * shows, whether or not the export is a function. A call, a store, or any
- * other escape stays the strict rule's business. */
-function observableExportRead7(program: ts.Program, id: ts.Identifier): boolean {
-  const access = id.parent;
-  if (!ts.isPropertyAccessExpression(access) || access.expression !== id) return false;
-  let use: ts.Node = access;
-  for (;;) {
-    const p = use.parent;
-    if (ts.isParenthesizedExpression(p)) use = p;
-    else break;
-  }
-  const parent = use.parent;
-  if (ts.isPropertyAccessExpression(parent) && parent.expression === use) return true;
-  // Producing the value for an export assignment reads it exactly once, at
-  // this statement, from the live object.
-  if (
-    ts.isBinaryExpression(parent) &&
-    parent.operatorToken.kind >= ts.SyntaxKind.FirstAssignment &&
-    parent.operatorToken.kind <= ts.SyntaxKind.LastAssignment &&
-    parent.right === use
-  )
-    return true;
-  if (ts.isCallExpression(parent) && parent.arguments.nodes.includes(use as never)) {
-    const callee = parent.expression;
-    return (
-      ts.isPropertyAccessExpression(callee) &&
-      ts.isIdentifier(callee.expression) &&
-      callee.expression.text === "console" &&
-      !sourceBinding7(program, callee.expression)
-    );
-  }
-  return (
-    ts.isExpressionStatement(parent) ||
-    ts.isTypeOfExpression(parent) ||
-    ts.isVoidExpression(parent) ||
-    (ts.isPrefixUnaryExpression(parent) && parent.operator === ts.SyntaxKind.ExclamationToken) ||
-    (ts.isBinaryExpression(parent) &&
-      (parent.operatorToken.kind === ts.SyntaxKind.EqualsEqualsEqualsToken ||
-        parent.operatorToken.kind === ts.SyntaxKind.ExclamationEqualsEqualsToken ||
-        parent.operatorToken.kind === ts.SyntaxKind.EqualsEqualsToken ||
-        parent.operatorToken.kind === ts.SyntaxKind.ExclamationEqualsToken)) ||
-    ((ts.isIfStatement(parent) || ts.isWhileStatement(parent) || ts.isDoStatement(parent)) &&
-      parent.expression === use) ||
-    (ts.isConditionalExpression(parent) && parent.condition === use)
-  );
-}
-
-/** True for a plain read `binding.name` (not a call, not a write, not a
- * value that is stored or passed on) of the cycle member `dep` whose
- * export `name` is a top-level function declaration nothing reassigns.
- * Every member settles its exports before entering the cycle, so Node
- * reads that same function whenever the read runs, and the compiled read
- * resolves to the declaration itself. */
-function functionExportRead7(id: ts.Identifier, dep: ts.SourceFile): boolean {
-  const access = id.parent;
-  if (!ts.isPropertyAccessExpression(access) || access.expression !== id) return false;
-  // The value the read yields: through parentheses and the right operand
-  // of a comma, so `(0, binding.name)(...)` is the call it spells.
-  let use: ts.Node = access;
-  for (;;) {
-    const p = use.parent;
-    if (ts.isParenthesizedExpression(p)) use = p;
-    else if (
-      ts.isBinaryExpression(p) &&
-      p.operatorToken.kind === ts.SyntaxKind.CommaToken &&
-      p.right === use
-    )
-      use = p;
-    else break;
-  }
-  const parent = use.parent;
-  // Only a use that neither runs the function nor keeps it is a read: a
-  // stored alias (`const f = binding.name`, `{ f: binding.name }`) or an
-  // argument can be called while the cycle initializes. A top-level const
-  // that only publishes it (`module.exports = { name: f }`, the static
-  // rewrite's re-export spelling) runs nothing: a module that reads the
-  // export back checks that read itself.
-  const observes =
-    publishedAlias7(use, parent) ||
-    ts.isExpressionStatement(parent) ||
-    ts.isTypeOfExpression(parent) ||
-    ts.isVoidExpression(parent) ||
-    (ts.isPrefixUnaryExpression(parent) && parent.operator === ts.SyntaxKind.ExclamationToken) ||
-    (ts.isBinaryExpression(parent) &&
-      (parent.operatorToken.kind === ts.SyntaxKind.EqualsEqualsEqualsToken ||
-        parent.operatorToken.kind === ts.SyntaxKind.ExclamationEqualsEqualsToken ||
-        parent.operatorToken.kind === ts.SyntaxKind.EqualsEqualsToken ||
-        parent.operatorToken.kind === ts.SyntaxKind.ExclamationEqualsToken)) ||
-    ((ts.isIfStatement(parent) || ts.isWhileStatement(parent) || ts.isDoStatement(parent)) &&
-      parent.expression === use) ||
-    (ts.isConditionalExpression(parent) && parent.condition === use);
-  if (!observes) return false;
-  const name = access.name.text;
-  // The exported value's identifier: a table entry or a member export.
-  const values: ts.Expression[] = [];
-  for (const stmt of dep.statements.nodes) {
-    if (!ts.isExpressionStatement(stmt) || !ts.isBinaryExpression(stmt.expression)) continue;
-    const e = stmt.expression;
-    if (e.operatorToken.kind !== ts.SyntaxKind.EqualsToken) continue;
-    if (isModuleExportsAccess(e.left)) {
-      if (!ts.isObjectLiteralExpression(e.right)) return false;
-      for (const p of e.right.properties.nodes) {
-        if (ts.isSpreadAssignment(p)) return false;
-        if (ts.isShorthandPropertyAssignment(p) && p.name.text === name)
-          values.push(p.name as ts.Identifier);
-        else if (
-          ts.isPropertyAssignment(p) &&
-          (ts.isIdentifier(p.name) || ts.isStringLiteral(p.name)) &&
-          p.name.text === name
-        )
-          values.push(p.initializer);
-      }
-    } else if (
-      ts.isPropertyAccessExpression(e.left) &&
-      e.left.name.text === name &&
-      ((ts.isIdentifier(e.left.expression) && e.left.expression.text === "exports") ||
-        isModuleExportsAccess(e.left.expression))
-    ) {
-      values.push(e.right);
-    }
-  }
-  const value = values.length === 1 ? values[0]! : null;
-  if (value === null || !ts.isIdentifier(value)) return false;
-  const fnName = value.text;
-  if (
-    !dep.statements.nodes.some(
-      (st) => ts.isFunctionDeclaration(st) && st.name?.text === fnName && st.body !== undefined,
-    )
-  )
-    return false;
-  let rebound = false;
-  ts.walkPreorder(dep, (n) => {
-    if (rebound) return "stop";
-    if (
-      (ts.isBinaryExpression(n) &&
-        ts.isIdentifier(n.left) &&
-        n.left.text === fnName &&
-        n.operatorToken.kind >= ts.SyntaxKind.FirstAssignment &&
-        n.operatorToken.kind <= ts.SyntaxKind.LastAssignment) ||
-      (ts.isVariableDeclaration(n) && ts.isIdentifier(n.name) && n.name.text === fnName) ||
-      (ts.isFunctionDeclaration(n) && n.name?.text === fnName && !ts.isSourceFile(n.parent))
-    )
-      rebound = true;
-    return undefined;
-  });
-  return !rebound;
-}
-
-/* ── exact cyclic initialization ─────────────────────────────────────────
- * Cycles that fail the declaration-only rule still evaluate exactly like
- * Node when their shape is representable: the guarded %init calls already
- * run every module body in ES evaluation order (depth-first postorder,
- * a module mid-evaluation answered from the cache), function declarations
- * are callable from the start, and live bindings are shared globals. What
- * remains is the temporal dead zone: a let/const binding read before its
- * declaration ran throws ReferenceError. cycleEarlyBindings finds every
- * such binding whose read CAN run early; the lowering gives each one an
- * initialization flag and checks it at every read or write that can run
- * before the declaration. The shapes below have no such representation
- * and keep the SC1016 fence. */
-
-/** The modules of `program` whose import cycles were admitted by the
- * exact initialization rule (not the declaration-only rule). */
-export function exactCycleMembers(program: ts.Program): ReadonlySet<ts.SourceFile> {
-  return program.analysis.exactCycleMembers;
-}
-
-/** True when the module's top level (outside every function-like body)
- * contains `await` or `for await`. */
-function hasTopLevelAwait7(sf: ts.SourceFile): boolean {
-  let found = false;
-  ts.walkPreorder(sf, (node) => {
-    if (found) return "stop";
-    if (node !== sf && ts.isFunctionLike(node)) return "skip";
-    if (
-      ts.isAwaitExpression(node) ||
-      (ts.isForOfStatement(node) && node.awaitModifier !== undefined)
-    ) {
-      found = true;
-      return "stop";
-    }
-    return undefined;
-  });
-  return found;
-}
-
-/** The reason a strongly-connected module cluster cannot be initialized
- * exactly, or null when it can. */
-function exactCycleRefusal7(
-  program: ts.Program,
-  comp: readonly ts.SourceFile[],
-  lineOf: (node: ts.Node) => string,
-): string | null {
-  const members = new Set(comp);
-  const targetOf = (stmt: ts.ImportDeclaration | ts.ExportDeclaration): ts.SourceFile | null => {
-    const spec = stmt.moduleSpecifier;
-    if (spec === undefined || !ts.isStringLiteral(spec)) return null;
-    const sf = ts.getSourceFileOfNode(stmt);
-    return resolveImport7(program, sf, spec.text) ?? npmStaticDepSf7(program, sf, spec.text);
-  };
-  for (const m of comp) {
-    if (isCjsJsFile7(m, program) || /\.c[jt]s$/.test(m.fileName)) {
-      return `${m.fileName} is a CommonJS module — cyclic initialization covers ES modules only`;
-    }
-    if (hasTopLevelAwait7(m)) {
-      return `${m.fileName} uses top-level await inside the cycle`;
-    }
-    for (const stmt of m.statements.nodes) {
-      if (ts.isExportAssignment(stmt) && !stmt.isExportEquals) {
-        return `the default export expression at ${lineOf(stmt)} has no initialization state inside the cycle`;
-      }
-      // `export * from` binds each name to the declaring member's own
-      // binding, like a named re-export, so only `export * as ns` (a
-      // namespace object of a member) has state of its own.
-      if (
-        ts.isExportDeclaration(stmt) &&
-        !stmt.isTypeOnly &&
-        stmt.exportClause !== undefined &&
-        ts.isNamespaceExport(stmt.exportClause)
-      ) {
-        const dep = targetOf(stmt);
-        if (dep !== null && members.has(dep)) {
-          return `the namespace re-export at ${lineOf(stmt)} names a module of the cycle`;
-        }
-      }
-      if (
-        ts.isImportDeclaration(stmt) &&
-        stmt.importClause !== undefined &&
-        !stmt.importClause.isTypeOnly &&
-        stmt.importClause.namedBindings !== undefined &&
-        ts.isNamespaceImport(stmt.importClause.namedBindings)
-      ) {
-        const dep = targetOf(stmt);
-        const nsName = stmt.importClause.namedBindings.name;
-        if (
-          dep !== null &&
-          members.has(dep) &&
-          !nsBindingUsesAreBareStatements7(program, m, nsName)
-        ) {
-          return `the namespace import '${nsName.text}' at ${lineOf(stmt)} names a module of the cycle`;
-        }
-      }
-      if (ts.isClassDeclaration(stmt) && stmt.name === undefined) {
-        return `the anonymous default class at ${lineOf(stmt)} has no initialization state inside the cycle`;
-      }
-      const ambient =
-        (ts.getCombinedModifierFlags(stmt as unknown as ts.Declaration) &
-          ts.ModifierFlags.Ambient) !==
-        0;
-      if (ambient) continue;
-      if (
-        ts.isEnumDeclaration(stmt) &&
-        (ts.getCombinedModifierFlags(stmt) & ts.ModifierFlags.Const) === 0
-      ) {
-        return `the enum '${stmt.name.text}' at ${lineOf(stmt)} has no initialization state inside the cycle`;
-      }
-      if (ts.isModuleDeclaration(stmt) && !typeOnlyNamespace7(stmt)) {
-        return `the namespace at ${lineOf(stmt)} has no initialization state inside the cycle`;
-      }
-    }
-  }
-  return null;
-}
-
-/** A module-scope binding of an exactly-initialized cycle that some read
- * or write can reach before its declaration ran. */
-export interface CycleEarlyBinding {
-  symbol: ts.Symbol;
-  /** The declaration's name. */
-  name: ts.Identifier;
-  kind: "lexical" | "var" | "class";
-  module: ts.SourceFile;
-  /** One reference that can run before the declaration. */
-  reference: ts.Identifier;
-  /** A reference in a position the lowering may resolve at compile time
-   * from the binding's type (a property key, a `typeof` operand). */
-  folded?: ts.Identifier;
-  /** Modules whose TOP-LEVEL code runs only after the declaration ran:
-   * modules outside the cycle and cycle members evaluated later. */
-  settled: ReadonlySet<ts.SourceFile>;
-  /** The local name each importing file gives the binding when it differs
-   * from the declared one, by file name: Node's ReferenceError names it. */
-  localNames?: ReadonlyMap<string, string>;
-}
-
-/** Every binding of the program's exactly-initialized cycles that can be
- * observed before its declaration executes. `order` is the compiled module
- * order; `singleRoot` is false when more than one module graph root runs
- * (fork or worker entries), so a cycle can be entered at different
- * members. With one root and a purely ES-module graph the evaluation order
- * is static and the analysis is precise up to "user code may run": a
- * binding needs its check when its declaration completes after some
- * top-level code that can call user functions and a deferred position
- * (function body, parameter default, instance field) references it, or
- * when the top level of a cycle member evaluated before it reads it.
- * Otherwise every deferred reference and every top-level reference from
- * another member counts. */
-export function cycleEarlyBindings(
-  program: ts.Program,
-  entry: ts.SourceFile,
-  order: readonly ts.SourceFile[],
-  singleRoot: boolean,
-): CycleEarlyBinding[] {
-  const exact = program.analysis.exactCycleMembers;
-  if (exact.size === 0) return [];
-  // Every lowering pass of one compile asks with the same inputs.
-  const key = `${entry.fileName}\0${order.map((sf) => sf.fileName).join("\0")}\0${singleRoot}`;
-  const memo = program.analysis.cycleEarlyBindings;
-  if (memo !== null && memo.key === key) return memo.bindings;
-  const bindings = computeCycleEarlyBindings7(program, entry, order, singleRoot, exact);
-  program.analysis.cycleEarlyBindings = { key, bindings };
-  return bindings;
-}
-
-function computeCycleEarlyBindings7(
-  program: ts.Program,
-  entry: ts.SourceFile,
-  order: readonly ts.SourceFile[],
-  singleRoot: boolean,
-  exact: ReadonlySet<ts.SourceFile>,
-): CycleEarlyBinding[] {
-  const inOrder = new Set(order);
-  const members = [...exact].filter((m) => inOrder.has(m));
-  if (members.length === 0) return [];
-  const memberSet = new Set(members);
-  const depsOf = (sf: ts.SourceFile): ts.SourceFile[] =>
-    orderedImportsOf(program, sf).flatMap(({ dep }) =>
-      dep !== null && dep !== sf && inOrder.has(dep) ? [dep] : [],
-    );
-  // Strongly-connected components among the exactly-initialized members.
-  const comps: ts.SourceFile[][] = [];
-  {
-    const index = new Map<ts.SourceFile, number>();
-    const low = new Map<ts.SourceFile, number>();
-    const onStack = new Set<ts.SourceFile>();
-    const stack: ts.SourceFile[] = [];
-    let next = 0;
-    const connect = (v: ts.SourceFile): void => {
-      index.set(v, next);
-      low.set(v, next);
-      next++;
-      stack.push(v);
-      onStack.add(v);
-      for (const w of depsOf(v)) {
-        if (!memberSet.has(w)) continue;
-        if (!index.has(w)) {
-          connect(w);
-          low.set(v, Math.min(low.get(v)!, low.get(w)!));
-        } else if (onStack.has(w)) {
-          low.set(v, Math.min(low.get(v)!, index.get(w)!));
-        }
-      }
-      if (low.get(v) === index.get(v)) {
-        const comp: ts.SourceFile[] = [];
-        for (;;) {
-          const w = stack.pop()!;
-          onStack.delete(w);
-          comp.push(w);
-          if (w === v) break;
-        }
-        if (comp.length > 1) comps.push(comp);
-      }
-    };
-    for (const m of members) if (!index.has(m)) connect(m);
-  }
-  if (comps.length === 0) return [];
-  // The static evaluation order: Node's depth-first postorder from the
-  // entry over ES import edges. Known only for one root and a graph with
-  // no CommonJS module (a require() evaluates its target mid-body).
-  const position = new Map<ts.SourceFile, number>();
-  if (
-    singleRoot &&
-    !order.some((sf) => isCjsJsFile7(sf, program) || /\.c[jt]s$/.test(sf.fileName))
-  ) {
-    const seen = new Set<ts.SourceFile>();
-    const visit = (sf: ts.SourceFile): void => {
-      seen.add(sf);
-      for (const dep of depsOf(sf)) if (!seen.has(dep)) visit(dep);
-      position.set(sf, position.size);
-    };
-    visit(entry);
-  }
-  const checker = program.getTypeChecker();
-  const nonInert = topLevelInertness7(program);
-  const out: CycleEarlyBinding[] = [];
-  for (const comp of comps) {
-    const known = comp.every((m) => position.has(m));
-    const evaluation = known
-      ? comp.slice().sort((a, b) => position.get(a)! - position.get(b)!)
-      : comp.slice();
-    const candidates = new Map<ts.Symbol, CycleCandidate7>();
-    const names = new Set<string>();
-    let dirty = !known;
-    evaluation.forEach((m, rank) => {
-      for (const stmt of m.statements.nodes) {
-        const offence = nonInert(stmt);
-        const exposed = dirty || offence !== null;
-        const declared: { name: ts.Identifier; kind: CycleEarlyBinding["kind"] }[] = [];
-        if (
-          ts.isVariableStatement(stmt) &&
-          (ts.getCombinedModifierFlags(stmt as unknown as ts.Declaration) &
-            ts.ModifierFlags.Ambient) ===
-            0
-        ) {
-          const lexical =
-            (stmt.declarationList.flags & (ts.NodeFlags.Let | ts.NodeFlags.Const)) !== 0;
-          for (const d of stmt.declarationList.declarations.nodes) {
-            for (const name of boundNames7(d.name)) {
-              declared.push({ name, kind: lexical ? "lexical" : "var" });
-            }
-          }
-        } else if (ts.isClassDeclaration(stmt) && stmt.name !== undefined) {
-          declared.push({ name: stmt.name, kind: "class" });
-        }
-        for (const { name, kind } of declared) {
-          const symbol = checker.getSymbolAtLocation(name);
-          if (symbol === undefined) continue;
-          candidates.set(symbol, {
-            symbol,
-            name,
-            kind,
-            module: m,
-            exposed,
-            rank,
-            start: ts.tokenStartOfNode(stmt),
-            end: stmt.end,
-            reference: null,
-            deferredReference: null,
-            deferredFolded: null,
-            folded: null,
-            localNames: new Map(),
-          });
-          names.add(name.text);
-        }
-        if (offence !== null) dirty = true;
-      }
-    });
-    if (candidates.size === 0) continue;
-    const rankOf = new Map(evaluation.map((m, i) => [m, i] as const));
-    // References: every identifier spelled like a candidate or like a
-    // local name the file imports one under (`import { x as y }`, a
-    // default import), resolved through import aliases to the
-    // declaration's symbol.
-    for (const sf of order) {
-      const local = new Set<string>();
-      for (const stmt of sf.statements.nodes) {
-        if (!ts.isImportDeclaration(stmt) || stmt.importClause === undefined) continue;
-        const clause = stmt.importClause;
-        const bound: ts.Identifier[] = clause.name !== undefined ? [clause.name] : [];
-        if (clause.namedBindings !== undefined && ts.isNamedImports(clause.namedBindings))
-          for (const element of clause.namedBindings.elements.nodes) bound.push(element.name);
-        for (const name of bound) {
-          if (names.has(name.text)) continue;
-          const imported = checker.getSymbolAtLocation(name);
-          const candidate =
-            imported === undefined ? undefined : candidates.get(checker.getAliasedSymbol(imported));
-          if (candidate === undefined) continue;
-          local.add(name.text);
-          candidate.localNames.set(sf.fileName, name.text);
-        }
-      }
-      const refs: ts.Identifier[] = [];
-      ts.walkPreorder(sf, (node) => {
-        if (ts.isImportDeclaration(node)) return "skip";
-        if (ts.isIdentifier(node) && (names.has(node.text) || local.has(node.text)))
-          refs.push(node);
-        return undefined;
-      });
-      if (refs.length === 0) continue;
-      checker.prefetchSymbolNodesExact(refs);
-      for (const ref of refs) {
-        const parent = ref.parent;
-        if (parent !== undefined && ts.isExportSpecifier(parent)) continue;
-        if (inTypePosition7(ref)) continue;
-        let symbol = checker.getSymbolAtLocation(ref);
-        if (
-          parent !== undefined &&
-          ts.isShorthandPropertyAssignment(parent) &&
-          parent.name === ref
-        ) {
-          symbol = checker.getShorthandAssignmentValueSymbol(parent) ?? symbol;
-        }
-        if (symbol !== undefined && symbol.flags & ts.SymbolFlags.Alias) {
-          symbol = checker.getAliasedSymbol(symbol);
-        }
-        const c = symbol === undefined ? undefined : candidates.get(symbol);
-        if (c === undefined || ref === c.name) continue;
-        // A class body names its own inner binding, initialized throughout.
-        if (
-          c.kind === "class" &&
-          sf === c.module &&
-          ts.tokenStartOfNode(ref) >= c.start &&
-          ref.end <= c.end
-        )
-          continue;
-        const foldable = foldablePosition7(ref);
-        if (inDeferredPosition7(ref)) {
-          if (c.exposed && c.deferredReference === null) c.deferredReference = ref;
-          if (c.exposed && foldable && c.deferredFolded === null) c.deferredFolded = ref;
-          continue;
-        }
-        let early: boolean;
-        if (sf === c.module) early = ts.tokenStartOfNode(ref) < c.start;
-        else if (!memberSet.has(sf) || !rankOf.has(sf)) early = false;
-        else early = !known || rankOf.get(sf)! < c.rank;
-        if (!early) continue;
-        if (c.reference === null) c.reference = ref;
-        // Only a reference that can run before the declaration is a folding
-        // hazard: one that runs after it observes the initialized binding.
-        if (foldable && c.folded === null) c.folded = ref;
-      }
-    }
-    // With a static evaluation order, a deferred reference only runs early
-    // when the code that runs before the declaration completes can reach
-    // the function holding it.
-    const reached =
-      known && [...candidates.values()].some((c) => c.deferredReference)
-        ? cycleReachedDeferredReferences7(program, evaluation, candidates)
-        : null;
-    for (const c of candidates.values()) {
-      if (reached === null) {
-        if (c.reference === null && c.deferredReference !== null) c.reference = c.deferredReference;
-        if (c.folded === null) c.folded = c.deferredFolded;
-      } else {
-        const hit = reached.get(c.symbol);
-        if (c.reference === null && c.deferredReference !== null)
-          c.reference = hit?.reference ?? null;
-        if (c.folded === null && hit?.folded !== undefined) c.folded = hit.folded;
-      }
-      if (c.reference === null) continue;
-      const settled = new Set<ts.SourceFile>(order.filter((sf) => !rankOf.has(sf)));
-      if (known) for (const m of evaluation.slice(c.rank + 1)) settled.add(m);
-      out.push({
-        symbol: c.symbol,
-        name: c.name,
-        kind: c.kind,
-        module: c.module,
-        reference: c.reference,
-        ...(c.folded !== null ? { folded: c.folded } : {}),
-        settled,
-        ...(c.localNames.size > 0 ? { localNames: c.localNames } : {}),
-      });
-    }
-  }
-  return out;
-}
-
-/** Collects into `units` the callables an initializer expression stores
- * (see moduleEarlyBindingsOf7), recording in `immediate` the parts of a
- * stored node that run where it is evaluated. */
-function storedCallables7(
-  checker: ts.TypeChecker,
-  e: ts.Expression,
-  units: ts.Node[],
-  immediate: Map<ts.Node, ts.Node[]>,
-): void {
-  while (
-    ts.isParenthesizedExpression(e) ||
-    ts.isAsExpression(e) ||
-    ts.isSatisfiesExpression(e) ||
-    ts.isNonNullExpression(e)
-  )
-    e = e.expression;
-  if (ts.isArrowFunction(e) || ts.isFunctionExpression(e)) {
-    units.push(e);
-  } else if (ts.isClassExpression(e)) {
-    units.push(e);
-    immediate.set(e, classSyncParts7(e));
-  } else if (ts.isObjectLiteralExpression(e)) {
-    for (const p of e.properties.nodes) {
-      if (
-        ts.isMethodDeclaration(p) ||
-        ts.isGetAccessorDeclaration(p) ||
-        ts.isSetAccessorDeclaration(p)
-      ) {
-        // A computed key evaluates where the literal does; a plain
-        // member-chain key (`[Equal.symbol]`) runs no user code.
-        if (!ts.isComputedPropertyName(p.name)) units.push(p);
-        else if (memberChainKey7(p.name.expression)) {
-          units.push(p);
-          immediate.set(p, [p.name]);
-        }
-      } else if (ts.isPropertyAssignment(p))
-        storedCallables7(checker, p.initializer, units, immediate);
-    }
-  } else if (ts.isArrayLiteralExpression(e)) {
-    for (const el of e.elements.nodes)
-      if (!ts.isSpreadElement(el)) storedCallables7(checker, el, units, immediate);
-  } else if (ts.isCallExpression(e)) {
-    // `const f = wrap(callback)` where wrap only returns closures over
-    // the callback: it runs when the stored result is called.
-    e.arguments.nodes.forEach((arg, index) => {
-      let fn: ts.Expression = arg;
-      while (ts.isParenthesizedExpression(fn)) fn = fn.expression;
-      if (
-        (ts.isArrowFunction(fn) || ts.isFunctionExpression(fn)) &&
-        returnsOnlyClosuresOver7(checker, e.expression, index)
-      )
-        units.push(fn);
-    });
-  }
-}
-
-/** A binding of an import cycle and what the reference scan found. */
-interface CycleCandidate7 {
-  symbol: ts.Symbol;
-  name: ts.Identifier;
-  kind: CycleEarlyBinding["kind"];
-  module: ts.SourceFile;
-  /** User code can run between the cycle's start and the end of the
-   * declaration (always true when the order is unknown). */
-  exposed: boolean;
-  rank: number;
-  start: number;
-  end: number;
-  /** A reference read at top level before the declaration ran. */
-  reference: ts.Identifier | null;
-  /** A deferred reference (function body, parameter default, instance
-   * field) when user code may run before the declaration completes. */
-  deferredReference: ts.Identifier | null;
-  /** An exposed deferred reference in a position the lowering may resolve
-   * from the binding's type when the static order says every deferred
-   * reference can run early. */
-  deferredFolded: ts.Identifier | null;
-  /** An early reference in a position the lowering may resolve at compile
-   * time from the binding's type (a property key, a `typeof` operand). */
-  folded: ts.Identifier | null;
-  localNames: Map<string, string>;
-}
-
-/** For one import cycle with a static evaluation order: the first deferred
- * reference to each candidate that code running before the candidate's
- * declaration completes can reach, or null when the walk cannot be precise
- * (top-level await, a default-exported function or class declaration).
- *
- * The cycle's top-level code runs in evaluation order. A stored callable
- * (a function or class declaration, or a function, class or object-literal
- * method stored by a variable initializer) becomes reachable once
- * reachable code names its binding, through an import alias or a
- * namespace member too; every other function-like in reachable code counts
- * as reachable, since it may be handed to a callee. A namespace import of
- * a cycle member used other than for a member read makes every stored
- * callable reachable. moduleEarlyBindingsOf7 is the single-module form. */
-function cycleReachedDeferredReferences7(
-  program: ts.Program,
-  evaluation: readonly ts.SourceFile[],
-  candidates: ReadonlyMap<ts.Symbol, CycleCandidate7>,
-): Map<ts.Symbol, { reference: ts.Identifier; folded: ts.Identifier | null }> | null {
-  const checker = program.getTypeChecker();
-  const members = new Set(evaluation);
-  for (const sf of evaluation) {
-    if (hasTopLevelAwait7(sf)) return null;
-    for (const stmt of sf.statements.nodes) {
-      if (
-        (ts.isFunctionDeclaration(stmt) || ts.isClassDeclaration(stmt)) &&
-        (ts.getCombinedModifierFlags(stmt as unknown as ts.Declaration) &
-          ts.ModifierFlags.Default) !==
-          0
-      )
-        return null;
-    }
-  }
-  const stored = new Set<ts.Node>();
-  const immediate = new Map<ts.Node, ts.Node[]>();
-  const storedNames: ts.Identifier[] = [];
-  const unitsOfName = new Map<ts.Identifier, ts.Node[]>();
-  const store = (name: ts.Identifier, units: ts.Node[]): void => {
-    if (units.length === 0) return;
-    for (const u of units) stored.add(u);
-    storedNames.push(name);
-    unitsOfName.set(name, units);
-  };
-  for (const sf of evaluation) {
-    for (const stmt of sf.statements.nodes) {
-      if (
-        (ts.getCombinedModifierFlags(stmt as unknown as ts.Declaration) &
-          ts.ModifierFlags.Ambient) !==
-        0
-      )
-        continue;
-      if (ts.isFunctionDeclaration(stmt) && stmt.name !== undefined && stmt.body !== undefined) {
-        store(stmt.name, [stmt]);
-      } else if (ts.isClassDeclaration(stmt) && stmt.name !== undefined) {
-        store(stmt.name, [stmt]);
-      } else if (ts.isVariableStatement(stmt)) {
-        for (const d of stmt.declarationList.declarations.nodes) {
-          if (ts.isIdentifier(d.name) && d.initializer !== undefined) {
-            const units: ts.Node[] = [];
-            storedCallables7(checker, d.initializer, units, immediate);
-            store(d.name, units);
-          }
-        }
-      }
-    }
-  }
-  const unitsBySymbol = new Map<ts.Symbol, ts.Node[]>();
-  const allUnits: ts.Node[] = [];
-  for (const name of storedNames) {
-    const symbol = checker.getSymbolAtLocation(name);
-    if (symbol === undefined) continue;
-    const units = unitsOfName.get(name)!;
-    unitsBySymbol.set(symbol, [...(unitsBySymbol.get(symbol) ?? []), ...units]);
-    for (const unit of units) allUnits.push(unit);
-  }
-  // A named class expression's inner name (`class Impl { static x =
-  // Impl.m(); }`) names the class inside its own body, as the binding it
-  // is stored in names it outside.
-  const innerNames: ts.Identifier[] = [];
-  for (const unit of allUnits) {
-    if (!ts.isClassExpression(unit) || unit.name === undefined) continue;
-    const symbol = checker.getSymbolAtLocation(unit.name);
-    if (symbol === undefined) continue;
-    innerNames.push(unit.name);
-    unitsBySymbol.set(symbol, [...(unitsBySymbol.get(symbol) ?? []), unit]);
-  }
-  // The identifier texts worth resolving: declared names, and the local
-  // names of imports (named, default and namespace) in cycle members.
-  const names = new Set<string>();
-  for (const c of candidates.values()) names.add(c.name.text);
-  for (const name of storedNames) names.add(name.text);
-  for (const name of innerNames) names.add(name.text);
-  for (const sf of evaluation) {
-    for (const stmt of sf.statements.nodes) {
-      if (!ts.isImportDeclaration(stmt) || stmt.importClause === undefined) continue;
-      const clause = stmt.importClause;
-      if (clause.name !== undefined) names.add(clause.name.text);
-      const bindings = clause.namedBindings;
-      if (bindings === undefined) continue;
-      if (ts.isNamedImports(bindings))
-        for (const element of bindings.elements.nodes) names.add(element.name.text);
-      else names.add(bindings.name.text);
-    }
-  }
-  const idents: ts.Identifier[] = [];
-  for (const sf of evaluation) {
-    ts.walkPreorder(sf, (node) => {
-      if (ts.isImportDeclaration(node)) return "skip";
-      if (ts.isIdentifier(node) && names.has(node.text)) idents.push(node);
-      return undefined;
-    });
-  }
-  checker.prefetchSymbolNodesExact(idents);
-  const symbolOf = (id: ts.Identifier): ts.Symbol | undefined => {
-    const parent = id.parent;
-    let symbol = checker.getSymbolAtLocation(id);
-    if (parent !== undefined && ts.isShorthandPropertyAssignment(parent) && parent.name === id) {
-      symbol = checker.getShorthandAssignmentValueSymbol(parent) ?? symbol;
-    }
-    if (symbol !== undefined && symbol.flags & ts.SymbolFlags.Alias) {
-      symbol = checker.getAliasedSymbol(symbol);
-    }
-    return symbol;
-  };
-  const isMemberNamespace = (symbol: ts.Symbol): boolean =>
-    (symbol.flags & ts.SymbolFlags.ValueModule) !== 0 &&
-    symbol.declarations.some((d) => ts.isSourceFile(d) && members.has(d));
-  const declared = new Set<ts.Symbol>();
-  const reachedUnits = new Set<ts.Node>();
-  const out = new Map<ts.Symbol, { reference: ts.Identifier; folded: ts.Identifier | null }>();
-  const work: ts.Node[] = [];
-  const reach = (unit: ts.Node): void => {
-    if (reachedUnits.has(unit)) return;
-    reachedUnits.add(unit);
-    work.push(unit);
-  };
-  const visit = (root: ts.Node): void => {
-    ts.walkPreorder(root, (node) => {
-      if (node !== root && stored.has(node)) {
-        for (const part of immediate.get(node) ?? []) visit(part);
-        return "skip";
-      }
-      if (ts.isImportDeclaration(node)) return "skip";
-      if (node.kind === ts.SyntaxKind.ThisKeyword) {
-        // `this` in a static initializer or block names the class, so it
-        // reaches the class's methods as naming the class does.
-        const owner = staticThisClass7(node);
-        if (owner !== undefined && stored.has(owner)) reach(owner);
-        return undefined;
-      }
-      if (!ts.isIdentifier(node) || !names.has(node.text)) return undefined;
-      if (inTypePosition7(node)) return undefined;
-      const parent = node.parent;
-      if (parent !== undefined && ts.isExportSpecifier(parent)) return undefined;
-      if (parent !== undefined && declaredName7(parent) === node) return undefined;
-      const symbol = symbolOf(node);
-      if (symbol === undefined) return undefined;
-      if (isMemberNamespace(symbol)) {
-        // `ns.member` resolves through the member's own identifier; any
-        // other use can reach every export.
-        if (
-          !(
-            parent !== undefined &&
-            ts.isPropertyAccessExpression(parent) &&
-            parent.expression === node
-          )
-        )
-          for (const unit of allUnits) reach(unit);
-        return undefined;
-      }
-      const c = candidates.get(symbol);
-      if (
-        c !== undefined &&
-        node !== c.name &&
-        !declared.has(symbol) &&
-        inDeferredPosition7(node) &&
-        !(
-          c.kind === "class" &&
-          ts.getSourceFileOfNode(node) === c.module &&
-          ts.tokenStartOfNode(node) >= c.start &&
-          node.end <= c.end
-        )
-      ) {
-        const hit = out.get(symbol);
-        if (hit === undefined) {
-          out.set(symbol, { reference: node, folded: foldablePosition7(node) ? node : null });
-        } else if (hit.folded === null && foldablePosition7(node)) {
-          hit.folded = node;
-        }
-      }
-      for (const unit of unitsBySymbol.get(symbol) ?? []) reach(unit);
-      return undefined;
-    });
-  };
-  const drain = (): void => {
-    while (work.length > 0) visit(work.pop()!);
-  };
-  const declare = (name: ts.BindingName): void => {
-    for (const id of boundNames7(name)) {
-      const symbol = checker.getSymbolAtLocation(id);
-      if (symbol !== undefined) declared.add(symbol);
-    }
-  };
-  for (const sf of evaluation) {
-    for (const stmt of sf.statements.nodes) {
-      if (ts.isClassDeclaration(stmt)) {
-        for (const part of classSyncParts7(stmt)) visit(part);
-        drain();
-        if (stmt.name !== undefined) declare(stmt.name);
-      } else if (ts.isVariableStatement(stmt)) {
-        for (const d of stmt.declarationList.declarations.nodes) {
-          visit(d);
-          drain();
-          declare(d.name);
-        }
-      } else if (!ts.isFunctionDeclaration(stmt)) visit(stmt);
-      drain();
-    }
-  }
-  return out;
-}
-
-/** Top-level let/const and class bindings, in modules outside the
- * exactly-initialized cycles, that code running before their declaration
- * completes can read.
- * Function declarations are callable from the module's start, so a call
- * made by earlier top-level code (or by the declaration's own initializer)
- * can observe the temporal dead zone. Reachability is syntactic: a stored
- * callable (a function or class declaration, or a function, class or
- * object-literal method stored by a variable initializer) becomes reachable
- * once reachable code names its binding, and every other function-like in
- * reachable code counts as reachable because it may be handed to a callee.
- * A binding is reported only when one of its references in a deferred
- * position is reachable before the declaration ran, so modules that call
- * nothing early report nothing. Bindings of exactly-initialized cycles are
- * covered by cycleEarlyBindings. */
-export function moduleEarlyBindings(
-  program: ts.Program,
-  order: readonly ts.SourceFile[],
-): CycleEarlyBinding[] {
-  const key = order.map((sf) => sf.fileName).join("\0");
-  const memo = program.analysis.moduleEarlyBindings;
-  if (memo !== null && memo.key === key) return memo.bindings;
-  const exact = program.analysis.exactCycleMembers;
-  const out: CycleEarlyBinding[] = [];
-  for (const sf of order) {
-    if (sf.isDeclarationFile || exact.has(sf)) continue;
-    for (const binding of moduleEarlyBindingsOf7(program, sf, order)) out.push(binding);
-  }
-  program.analysis.moduleEarlyBindings = { key, bindings: out };
-  return out;
-}
-
-function moduleEarlyBindingsOf7(
-  program: ts.Program,
-  sf: ts.SourceFile,
-  order: readonly ts.SourceFile[],
-): CycleEarlyBinding[] {
-  const ambient = (stmt: ts.Statement): boolean =>
-    (ts.getCombinedModifierFlags(stmt as unknown as ts.Declaration) & ts.ModifierFlags.Ambient) !==
-    0;
-  // Candidate bindings, by declaring statement.
-  interface Candidate {
-    name: ts.Identifier;
-    index: number;
-    start: number;
-    /** A class declaration: its own body sees the inner binding. */
-    cls?: ts.ClassDeclaration;
-  }
-  const candidates: Candidate[] = [];
-  const candidateNames = new Set<string>();
-  // Stored callables, by the name of the binding that stores them.
-  const stored = new Set<ts.Node>();
-  const storedBy = new Map<string, { name: ts.Identifier; units: ts.Node[] }[]>();
-  // Parts of a stored node that run where it is evaluated: a class's
-  // heritage, computed keys, decorators and static initializers, and a
-  // stored method's computed key.
-  const immediate = new Map<ts.Node, ts.Node[]>();
-  const store = (name: ts.Identifier, units: ts.Node[]): void => {
-    if (units.length === 0) return;
-    for (const u of units) stored.add(u);
-    const list = storedBy.get(name.text) ?? [];
-    list.push({ name, units });
-    storedBy.set(name.text, list);
-  };
-  const checker = program.getTypeChecker();
-  const storedIn = (e: ts.Expression, units: ts.Node[]): void =>
-    storedCallables7(checker, e, units, immediate);
-  sf.statements.nodes.forEach((stmt, index) => {
-    if (ambient(stmt)) return;
-    if (ts.isFunctionDeclaration(stmt) && stmt.name !== undefined && stmt.body !== undefined) {
-      store(stmt.name, [stmt]);
-    } else if (ts.isClassDeclaration(stmt) && stmt.name !== undefined) {
-      store(stmt.name, [stmt]);
-      candidates.push({ name: stmt.name, index, start: ts.tokenStartOfNode(stmt), cls: stmt });
-      candidateNames.add(stmt.name.text);
-    } else if (ts.isVariableStatement(stmt)) {
-      const lexical = (stmt.declarationList.flags & (ts.NodeFlags.Let | ts.NodeFlags.Const)) !== 0;
-      for (const d of stmt.declarationList.declarations.nodes) {
-        if (ts.isIdentifier(d.name) && d.initializer !== undefined) {
-          const units: ts.Node[] = [];
-          storedIn(d.initializer, units);
-          store(d.name, units);
-        }
-        if (!lexical) continue;
-        for (const name of boundNames7(d.name)) {
-          candidates.push({ name, index, start: ts.tokenStartOfNode(stmt) });
-          candidateNames.add(name.text);
-        }
-      }
-    }
-  });
-  if (candidates.length === 0) return [];
-  // Resolve every identifier that could name a candidate or a stored
-  // callable in one batch.
-  const idents: ts.Identifier[] = [];
-  ts.walkPreorder(sf, (node) => {
-    if (ts.isImportDeclaration(node)) return "skip";
-    if (ts.isIdentifier(node) && (candidateNames.has(node.text) || storedBy.has(node.text)))
-      idents.push(node);
-    return undefined;
-  });
-  checker.prefetchSymbolNodesExact(idents);
-  const symbolOf = (id: ts.Identifier): ts.Symbol | undefined => {
-    const parent = id.parent;
-    let symbol = checker.getSymbolAtLocation(id);
-    if (parent !== undefined && ts.isShorthandPropertyAssignment(parent) && parent.name === id) {
-      symbol = checker.getShorthandAssignmentValueSymbol(parent) ?? symbol;
-    }
-    if (symbol !== undefined && symbol.flags & ts.SymbolFlags.Alias) {
-      symbol = checker.getAliasedSymbol(symbol);
-    }
-    return symbol;
-  };
-  // A callback handed to a timer, a microtask queue, a promise reaction or
-  // a host (Node) API runs as a later job or event. Without top-level await
-  // the module's body completes before any job runs, so such a callback is
-  // never early. JavaScript builtins (array callbacks, the promise
-  // executor, replacers) and the host APIs that call back synchronously
-  // keep the conservative rule.
-  if (!hasTopLevelAwait7(sf)) {
-    const callbacks = (e: ts.Expression): void => {
-      while (ts.isParenthesizedExpression(e)) e = e.expression;
-      if (ts.isArrowFunction(e) || ts.isFunctionExpression(e)) stored.add(e);
-      else if (ts.isObjectLiteralExpression(e)) {
-        for (const p of e.properties.nodes) {
-          if (ts.isMethodDeclaration(p)) stored.add(p);
-          else if (ts.isPropertyAssignment(p)) callbacks(p.initializer);
-        }
-      }
-    };
-    ts.walkPreorder(sf, (node) => {
-      if (
-        (ts.isCallExpression(node) || ts.isNewExpression(node)) &&
-        laterJobCallee7(checker, node.expression)
-      ) {
-        for (const arg of node.arguments?.nodes ?? []) callbacks(arg);
-      }
-      return undefined;
-    });
-  }
-  const unitsBySymbol = new Map<ts.Symbol, ts.Node[]>();
-  for (const list of storedBy.values()) {
-    for (const { name, units } of list) {
-      const symbol = checker.getSymbolAtLocation(name);
-      if (symbol === undefined) continue;
-      unitsBySymbol.set(symbol, [...(unitsBySymbol.get(symbol) ?? []), ...units]);
-    }
-  }
-  const candidateSymbols = new Map<ts.Symbol, Candidate>();
-  for (const c of candidates) {
-    const symbol = checker.getSymbolAtLocation(c.name);
-    if (symbol !== undefined) candidateSymbols.set(symbol, c);
-  }
-  // Walk reachable code, collecting the candidate references it holds.
-  const reachedUnits = new Set<ts.Node>();
-  const reachedRefs = new Map<ts.Symbol, ts.Identifier>();
-  const work: ts.Node[] = [];
-  const visit = (root: ts.Node): void => {
-    ts.walkPreorder(root, (node) => {
-      if (node !== root && stored.has(node)) {
-        for (const part of immediate.get(node) ?? []) visit(part);
-        return "skip";
-      }
-      if (ts.isImportDeclaration(node)) return "skip";
-      if (!ts.isIdentifier(node)) return undefined;
-      if (!candidateNames.has(node.text) && !storedBy.has(node.text)) return undefined;
-      if (inTypePosition7(node)) return undefined;
-      const parent = node.parent;
-      if (parent !== undefined && ts.isExportSpecifier(parent)) return undefined;
-      if (parent !== undefined && declaredName7(parent) === node) return undefined;
-      const symbol = symbolOf(node);
-      if (symbol === undefined) return undefined;
-      const c = candidateSymbols.get(symbol);
-      if (
-        c !== undefined &&
-        node !== c.name &&
-        !reachedRefs.has(symbol) &&
-        !(c.cls !== undefined && ts.tokenStartOfNode(node) >= c.cls.pos && node.end <= c.cls.end)
-      ) {
-        if (inDeferredPosition7(node) || ts.tokenStartOfNode(node) < c.start)
-          reachedRefs.set(symbol, node);
-      }
-      for (const unit of unitsBySymbol.get(symbol) ?? []) {
-        if (reachedUnits.has(unit)) continue;
-        reachedUnits.add(unit);
-        work.push(unit);
-      }
-      return undefined;
-    });
-  };
-  const drain = (): void => {
-    while (work.length > 0) visit(work.pop()!);
-  };
-  const out: CycleEarlyBinding[] = [];
-  const settled = new Set(order.filter((m) => m !== sf));
-  let next = 0;
-  const report = (declaration: ts.Node): void => {
-    while (
-      next < candidates.length &&
-      ts.tokenStartOfNode(candidates[next]!.name) >= ts.tokenStartOfNode(declaration) &&
-      candidates[next]!.name.end <= declaration.end
-    ) {
-      const c = candidates[next++]!;
-      const symbol = checker.getSymbolAtLocation(c.name);
-      const reference = symbol === undefined ? undefined : reachedRefs.get(symbol);
-      if (symbol === undefined || reference === undefined) continue;
-      out.push({
-        symbol,
-        name: c.name,
-        kind: c.cls !== undefined ? "class" : "lexical",
-        module: sf,
-        reference,
-        settled,
-      });
-    }
-  };
-  for (const stmt of sf.statements.nodes) {
-    if (ts.isClassDeclaration(stmt)) {
-      // The binding initializes once the class definition, static
-      // initializers included, has run.
-      for (const part of classSyncParts7(stmt)) visit(part);
-      drain();
-      report(stmt);
-    } else if (ts.isVariableStatement(stmt)) {
-      // Declarators run in order: a later declarator's initializer cannot
-      // observe an earlier binding before it was initialized.
-      for (const d of stmt.declarationList.declarations.nodes) {
-        visit(d);
-        drain();
-        report(d);
-      }
-    } else if (!ts.isFunctionDeclaration(stmt)) visit(stmt);
-    drain();
-  }
-  return out;
-}
-
-/** True when the program function `callee` names reads its parameter
- * `index` only inside function expressions it returns directly, and never
- * through `arguments` in its own body: calling it cannot run that argument
- * before the returned closure is called. */
-function returnsOnlyClosuresOver7(
-  checker: ts.TypeChecker,
-  callee: ts.Expression,
-  index: number,
-): boolean {
-  while (ts.isParenthesizedExpression(callee)) callee = callee.expression;
-  const name = ts.isIdentifier(callee)
-    ? callee
-    : ts.isPropertyAccessExpression(callee) && ts.isIdentifier(callee.name)
-      ? callee.name
-      : undefined;
-  if (name === undefined) return false;
-  let symbol = checker.getSymbolAtLocation(name);
-  if (symbol !== undefined && symbol.flags & ts.SymbolFlags.Alias) {
-    symbol = checker.getAliasedSymbol(symbol);
-  }
-  const decls = symbol === undefined ? [] : symbol.declarations;
-  if (decls.length !== 1) return false;
-  const decl = decls[0]!;
-  if (ts.getSourceFileOfNode(decl).isDeclarationFile) return false;
-  let fn: ts.Node | undefined;
-  if (ts.isFunctionDeclaration(decl)) fn = decl;
-  else if (ts.isVariableDeclaration(decl) && decl.initializer !== undefined) {
-    let init: ts.Expression = decl.initializer;
-    while (ts.isParenthesizedExpression(init)) init = init.expression;
-    if (ts.isFunctionExpression(init) || ts.isArrowFunction(init)) fn = init;
-  }
-  if (fn === undefined) return false;
-  const like = fn as ts.FunctionLikeDeclaration;
-  const body = like.body;
-  const param = like.parameters.nodes[index];
-  if (body === undefined || !ts.isBlock(body) || param === undefined) return false;
-  if (!ts.isIdentifier(param.name) || param.dotDotDotToken !== undefined) return false;
-  if (like.parameters.nodes.slice(0, index).some((p) => p.dotDotDotToken !== undefined))
-    return false;
-  const paramName = param.name.text;
-  let deferred = true;
-  ts.walkPreorder(body, (node) => {
-    if (!deferred) return "stop";
-    if (ts.isFunctionLike(node) || ts.isClassExpression(node) || ts.isClassDeclaration(node)) {
-      let child: ts.Node = node;
-      while (ts.isParenthesizedExpression(child.parent)) child = child.parent;
-      const returned = ts.isReturnStatement(child.parent) && child.parent.expression === child;
-      const uses = (part: ts.Node): boolean => {
-        let found = false;
-        ts.walkPreorder(part, (inner) => {
-          if (ts.isIdentifier(inner) && inner.text === paramName) found = true;
-          return found ? "stop" : undefined;
-        });
-        return found;
-      };
-      // A returned closure may use the parameter; any other nested
-      // function could escape and run before the result is called. A
-      // returned class still evaluates its heritage, computed keys,
-      // decorators and static initializers when the callee runs.
-      if (returned) {
-        if (
-          (ts.isClassExpression(node) || ts.isClassDeclaration(node)) &&
-          classSyncParts7(node).some(uses)
-        )
-          deferred = false;
-        return "skip";
-      }
-      if (uses(node)) deferred = false;
-      return "skip";
-    }
-    if (ts.isIdentifier(node) && (node.text === paramName || node.text === "arguments")) {
-      if (node !== param.name) deferred = false;
-    }
-    return undefined;
-  });
-  return deferred;
-}
-
-/** The parts of a class that run where the class is evaluated: heritage
- * expressions, decorators, computed member keys, static field
- * initializers and static blocks. Methods and instance fields wait for a
- * call or a construction. */
-/** The class whose static field initializer or static block evaluates `this`
- * (through arrow functions, which keep the enclosing `this`), or undefined
- * when another function or a class's instance side binds it. */
-function staticThisClass7(node: ts.Node): ts.ClassLikeDeclaration | undefined {
-  let child = node;
-  for (let n = node.parent; n !== undefined; child = n, n = n.parent) {
-    if (ts.isArrowFunction(n)) continue;
-    if (ts.isClassStaticBlockDeclaration(n)) return n.parent as ts.ClassLikeDeclaration;
-    if (ts.isPropertyDeclaration(n)) {
-      if (n.initializer !== child) return undefined;
-      return (ts.getCombinedModifierFlags(n) & ts.ModifierFlags.Static) !== 0
-        ? (n.parent as ts.ClassLikeDeclaration)
-        : undefined;
-    }
-    if (ts.isComputedPropertyName(n)) {
-      // A computed key evaluates in the scope around the class.
-      const member = n.parent;
-      const cls = member?.parent;
-      if (cls === undefined) return undefined;
-      child = cls;
-      n = cls;
-      continue;
-    }
-    if (
-      ts.isFunctionLike(n) ||
-      ts.isClassDeclaration(n) ||
-      ts.isClassExpression(n) ||
-      ts.isSourceFile(n)
-    )
-      return undefined;
-  }
-  return undefined;
-}
-
-function classSyncParts7(c: ts.ClassLikeDeclaration): ts.Node[] {
-  const decorators = (n: ts.Node): ts.Node[] =>
-    ((n as { modifiers?: ts.NodeArray<ts.Node> }).modifiers?.nodes ?? []).filter(
-      (m) => m.kind === ts.SyntaxKind.Decorator,
-    );
-  const parts: ts.Node[] = [...decorators(c), ...(c.heritageClauses?.nodes ?? [])];
-  for (const m of c.members.nodes) {
-    parts.push(...decorators(m));
-    const memberName = (m as { name?: ts.PropertyName }).name;
-    if (memberName !== undefined && ts.isComputedPropertyName(memberName)) parts.push(memberName);
-    if (ts.isClassStaticBlockDeclaration(m)) parts.push(m);
-    else if (
-      ts.isPropertyDeclaration(m) &&
-      m.initializer !== undefined &&
-      (ts.getCombinedModifierFlags(m) & ts.ModifierFlags.Static) !== 0
-    )
-      parts.push(m.initializer);
-  }
-  return parts;
-}
-
-/** An identifier or a chain of plain property reads. */
-function memberChainKey7(e: ts.Expression): boolean {
-  while (ts.isPropertyAccessExpression(e)) e = e.expression;
-  return ts.isIdentifier(e);
-}
-
-/** The name a declaration node binds, if any. */
-function declaredName7(node: ts.Node): ts.Node | undefined {
-  if (
-    ts.isVariableDeclaration(node) ||
-    ts.isFunctionDeclaration(node) ||
-    ts.isFunctionExpression(node) ||
-    ts.isClassDeclaration(node) ||
-    ts.isClassExpression(node) ||
-    ts.isBindingElement(node) ||
-    ts.isParameter(node)
-  )
-    return node.name;
-  return undefined;
-}
-
-/** A declared builtin whose callback arguments run only as later jobs or
- * events: the timers, queueMicrotask, promise reactions, and Node APIs
- * other than the ones that call back before returning. */
-function laterJobCallee7(checker: ts.TypeChecker, callee: ts.Expression): boolean {
-  while (ts.isParenthesizedExpression(callee)) callee = callee.expression;
-  let name: ts.Identifier;
-  if (ts.isIdentifier(callee)) name = callee;
-  else if (ts.isPropertyAccessExpression(callee) && ts.isIdentifier(callee.name)) {
-    name = callee.name;
-  } else return false;
-  if (SYNC_CALLBACK_HOST_APIS7.has(name.text)) return false;
-  let root: ts.Expression = callee;
-  while (ts.isPropertyAccessExpression(root)) root = root.expression;
-  if (ts.isIdentifier(root) && root.text === "assert") return false;
-  let symbol = checker.getSymbolAtLocation(name);
-  if (symbol !== undefined && symbol.flags & ts.SymbolFlags.Alias) {
-    symbol = checker.getAliasedSymbol(symbol);
-  }
-  if (symbol === undefined) return false;
-  const decls = symbol.declarations;
-  if (decls.length === 0 || !decls.every((d) => ts.getSourceFileOfNode(d).isDeclarationFile))
-    return false;
-  if (LATER_JOB_BUILTINS7.has(name.text)) return true;
-  // The JavaScript standard library's callbacks mostly run synchronously;
-  // package declarations describe user code.
-  return decls.every((d) => {
-    const file = ts.getSourceFileOfNode(d).fileName;
-    return isNodeTypesPath(file) || isFallbackDtsPath(file);
-  });
-}
-
-/** Standard-library functions whose callbacks run as later jobs. */
-const LATER_JOB_BUILTINS7 = new Set([
-  "setTimeout",
-  "setInterval",
-  "setImmediate",
-  "queueMicrotask",
-  "then",
-  "catch",
-  "finally",
-]);
-
-/** Host APIs that can invoke a callback argument before returning. */
-const SYNC_CALLBACK_HOST_APIS7 = new Set([
-  "apply",
-  "bind",
-  "call",
-  "doesNotReject",
-  "doesNotThrow",
-  "emit",
-  "enterWith",
-  "exit",
-  "rejects",
-  "run",
-  "runInAsyncScope",
-  "throws",
-]);
-
-/** True for a reference whose value the lowering can take from the
- * binding's checker type instead of its storage: a property key (element
- * access argument, computed name, `in` operand, through parentheses,
- * casts and template spans). A `typeof` operand is not one: the typeof
- * lowering keeps the read of a flagged binding, so its initialization
- * check runs (Node's typeof throws for a binding not yet initialized).
- * That holds for every answer it folds from the binding's type, through
- * type wrappers, and in the `typeof x === "lit"` tests
- * (withCycleBindingRead, typeof.ts). */
-function foldablePosition7(ref: ts.Identifier): boolean {
-  let child: ts.Node = ref;
-  for (let p: ts.Node | undefined = ref.parent; p !== undefined; p = p.parent) {
-    if (
-      ts.isParenthesizedExpression(p) ||
-      ts.isAsExpression(p) ||
-      ts.isSatisfiesExpression(p) ||
-      ts.isNonNullExpression(p) ||
-      ts.isTemplateSpan(p) ||
-      ts.isTemplateExpression(p)
-    ) {
-      child = p;
-      continue;
-    }
-    if (ts.isTypeOfExpression(p)) return false;
-    if (ts.isElementAccessExpression(p)) return p.argumentExpression === child;
-    if (ts.isComputedPropertyName(p)) return true;
-    if (ts.isBinaryExpression(p))
-      return p.operatorToken.kind === ts.SyntaxKind.InKeyword && p.left === child;
-    return false;
-  }
-  return false;
-}
-
-/** The identifiers a binding name (identifier or destructuring pattern)
- * declares. */
-function boundNames7(name: ts.BindingName): ts.Identifier[] {
-  if (ts.isIdentifier(name)) return [name];
-  const out: ts.Identifier[] = [];
-  for (const el of name.elements.nodes) {
-    if (ts.isOmittedExpression(el) || el.name === undefined) continue;
-    out.push(...boundNames7(el.name));
-  }
-  return out;
-}
-
-/** A namespace declaration whose body holds only types (interfaces, type
- * aliases, nested type-only namespaces) — no runtime object exists. */
-function typeOnlyNamespace7(decl: ts.ModuleDeclaration): boolean {
-  let body = decl.body;
-  while (body !== undefined && ts.isModuleDeclaration(body)) body = body.body;
-  if (body === undefined || !ts.isModuleBlock(body)) return true;
-  return body.statements.nodes.every(
-    (s) =>
-      ts.isInterfaceDeclaration(s) ||
-      ts.isTypeAliasDeclaration(s) ||
-      (ts.isModuleDeclaration(s) && typeOnlyNamespace7(s)),
-  );
 }
 
 /** Resolves an import specifier from `from` to a source file of the
  * program, or null (unresolvable / outside the program). Exported (as
  * resolveImport) for the lowering: CommonJS require statements lower to
  * guarded %init calls of exactly the module preflight resolved here. */
-function resolveImport7(
-  program: ts.Program,
-  from: ts.SourceFile,
-  specifier: string,
-  resolutionKind: "import" | "require" = "import",
-  /** False for the graph passes that over-approximate edges (see
-   * `resolveRuntimeEdge`): they resolve specifiers Node may never load, so
-   * a miss there is no evidence about the package's entry and must not
-   * classify it. The walks that model real loads pass the default. */
-  reportMiss = true,
-): ts.SourceFile | null {
+function resolveImport7(program: ts.Program, from: ts.SourceFile, specifier: string, resolutionKind: "import" | "require" = "import"): ts.SourceFile | null {
+  // Browser target: host modules (the page's JavaScript) never resolve to program files.
+  if (isHostModule(specifier)) return null;
   const resolved = resolveProjectModule(from.fileName, specifier);
   if (resolved !== null) return program.getSourceFile(resolved) ?? null;
-  // A JSON document is data, not a package's module surface: Node reads it in
-  // any module system, and a compiled package requires its own data files
-  // (mime-db's db.json) whether or not the package ships declarations. The
-  // document itself is the dependency.
-  if (specifier.endsWith(".json")) {
-    const json = resolveBareModule(from.fileName, specifier, "js-only", resolutionKind);
-    if (json !== null && json.typesFile.endsWith(".json"))
-      return program.getSourceFile(json.typesFile) ?? null;
-  }
   const npm = resolveNpmImport7(from.fileName, specifier, resolutionKind);
   return npm && isNpmStaticPackage(npm.packageName)
-    ? npmStaticProgramDep(program, npm.packageName, npm.typesFile, reportMiss)
-    : null;
+    ? npmStaticProgramDep(program, npm.packageName, npm.typesFile) : null;
 }
 
+/** An import that resolves into node_modules: the package's shipped .d.ts
+ * is the type surface, and the package's shipped JS runs in the dynamic
+ * island under --dynamic. Resolution rides the own resolver (resolve.ts).
+ * Null for relative and node: specifiers, and for anything that doesn't
+ * resolve into node_modules. */
 function resolveNpmImport7(
   fromFileName: string,
   specifier: string,
@@ -7102,20 +2341,10 @@ function resolveNpmImport7(
   if (isRelativeSpecifier(specifier) || specifier.startsWith("node:")) {
     return null;
   }
-  // Node resolves a bare core-module name (`string_decoder`, `events`,
-  // `fs/promises`) to the builtin before it looks in node_modules, so an
-  // installed npm package of the same name never answers it. Prefix-only
-  // builtins (`node:test`) are listed with their prefix, so a bare `test`
-  // still names the package.
-  if (nodeBuiltinNames.has(specifier)) return null;
   // --provenance-sources: a registered specifier is NOT an npm import —
   // its attested source compiles as program modules (resolveProjectModule
-
+  // answers the entry), so no island embed and no .d.ts type surface.
   if (provenanceEntryFor(specifier) !== null) return null;
-  // Shimmed and never-loaded packages (package-shims.ts) are not npm
-  // imports either: the shim compiles as a program module, and an unloaded
-  // package's require() is Node's MODULE_NOT_FOUND.
-  if (isShimmedImport(fromFileName, specifier)) return null;
   const resolved = resolveBareModule(fromFileName, specifier, undefined, resolutionKind);
   if (!resolved) return null;
   if (!isNodeModulesPath(resolved.typesFile)) {
@@ -7137,13 +2366,26 @@ function resolveNpmImport7(
 }
 
 function locOf7(node: ts.Node): { file: string; start: number; end: number } {
-  const sf = ts.getSourceFileOfNode(node);
-  return { file: sf.fileName, start: ts.tokenStartOfNode(node), end: node.end };
+  const sf = node.getSourceFile();
+  return { file: sf.fileName, start: node.getStart(sf), end: node.getEnd() };
 }
 
-/** The program file holding an opted-in package's resolved runtime JS:
- * the file itself, or its same-stem TypeScript twin. */
-function npmStaticProgramFile(program: ts.Program, resolvedFile: string): ts.SourceFile | null {
+/** The PROGRAM source file an opted-in --npm-static package's resolved
+ * entry maps to, or null with the package marked an offender (resolution
+ * still answering declarations, or the file missing from the type-checked
+ * program — a path-identity mismatch between the two resolvers). */
+function npmStaticProgramDep(
+  program: ts.Program,
+  packageName: string,
+  resolvedFile: string,
+): ts.SourceFile | null {
+  if (!isJsSourceFileName(resolvedFile)) {
+    reportNpmStaticOffender(
+      packageName,
+      `its import resolves to '${resolvedFile}', not to runtime JavaScript`,
+    );
+    return null;
+  }
   let dep = program.getSourceFile(resolvedFile) ?? null;
   if (dep === null) {
     // A workspace-linked package shipping its .ts SOURCE beside the
@@ -7156,34 +2398,11 @@ function npmStaticProgramFile(program: ts.Program, resolvedFile: string): ts.Sou
       if (dep !== null) break;
     }
   }
-  return dep;
-}
-
-/** The PROGRAM source file an opted-in --npm-static package's resolved
- * entry maps to, or null with the package marked an offender (resolution
- * still answering declarations, or the file missing from the type-checked
- * program — a path-identity mismatch between the two resolvers). */
-function npmStaticProgramDep(
-  program: ts.Program,
-  packageName: string,
-  resolvedFile: string,
-  reportMiss = true,
-): ts.SourceFile | null {
-  if (!isJsSourceFileName(resolvedFile)) {
-    if (reportMiss)
-      reportNpmStaticOffender(
-        packageName,
-        `its import resolves to '${resolvedFile}', not to runtime JavaScript`,
-      );
-    return null;
-  }
-  const dep = npmStaticProgramFile(program, resolvedFile);
   if (dep === null) {
-    if (reportMiss)
-      reportNpmStaticOffender(
-        packageName,
-        `its entry '${resolvedFile}' did not join the type-checked program`,
-      );
+    reportNpmStaticOffender(
+      packageName,
+      `its entry '${resolvedFile}' did not join the type-checked program`,
+    );
     return null;
   }
   return dep;
@@ -7226,63 +2445,34 @@ export function checkPreflightTs7(
   }
 }
 
-/** Whether a declaration file has the runtime file TypeScript pairs it
- * with (`x.d.ts` with `x.js`, `x.d.mts` with `x.mjs`, `x.d.cts` with
- * `x.cjs`): a specifier that resolves to the declaration then still names a
- * module Node can load. */
-function declarationHasRuntimeFile(declaration: ts.SourceFile): boolean {
-  const name = declaration.fileName;
-  const pairs: [string, string][] = [
-    [".d.ts", ".js"],
-    [".d.mts", ".mjs"],
-    [".d.cts", ".cjs"],
-  ];
-  for (const [declared, runtime] of pairs)
-    if (name.endsWith(declared))
-      return trackedFileExists(name.slice(0, -declared.length) + runtime);
-  return false;
-}
+function preflight7(load: LoadResult): {
+  diags: ScrDiagnostic[];
+  moduleOrder: ts.SourceFile[];
+  startupCrash: StartupCrash | null;
+} {
+  const { program, entry } = load;
+  const diags: ScrDiagnostic[] = [...load.configDiags];
 
-/** Whether two resolutions name the same module file. Their spellings differ
- * routinely — a tsconfig `paths` answer keeps the project's spelling where
- * the npm resolver answers realpath'd — so the real paths decide. */
-function sameResolvedFile(a: string, b: string): boolean {
-  const normalize = (path: string): string => path.replaceAll("\\", "/");
-  if (normalize(a) === normalize(b)) return true;
-  return normalize(trackedRealpath(a) ?? a) === normalize(trackedRealpath(b) ?? b);
-}
+  // An explicit entry can itself live in an installed package. Its own
+  // source files are program code, including relative barrels and sibling
+  // modules; their location must not silently erase the module graph.
+  // Match the full installed directory, not just the package name, and
+  // exclude nested installations so dependencies keep their npm policy.
+  const entryPackageFile = entryPackageFilePredicate(entry.fileName);
 
-/** A program file TypeScript's checker pulled in from a package the build
- * does not compile — unselected node_modules JavaScript, or an unselected
- * workspace package's shipped JavaScript at a realpath outside node_modules
- * (the symlinked-install shape): Node never loads it as program source. A
- * workspace package whose bare import resolves to its TypeScript source
- * compiles from source, and its JavaScript modules compile with it. */
-function unselectedPackageJsFilePredicate(entryFileName: string): (file: string) => boolean {
-  const entryPackageFile = entryPackageFilePredicate(entryFileName);
-  return (file) =>
-    isJsSourceFileName(file) &&
-    !entryPackageFile(file) &&
-    npmStaticPackageOfPath(file) === null &&
-    (isNodeModulesPath(file) ||
-      (workspacePackageOfPath(file) !== null && !isWorkspaceSourcePath(file)));
-}
-
-/** Workspace-linked packages register before the tsc gate. Their files live
- * at realpaths OUTSIDE node_modules (the monorepo-tool symlink shape), so
- * nothing path-shaped marks them as npm surface — yet their shipped JS
- * follows the same foreign-tsconfig rules as node_modules JS. The lazy
- * registration inside the import-fence walk registers them too, but too late
- * for the gate, so one pass over the program's import edges registers them up
- * front: every bare specifier any program file loads — import/export
- * declarations, dynamic import("literal") (tsgo chases those into the program
- * too; a CLI reaches its workspace sibling exactly that way),
- * require("literal") — resolved with the own resolver, workspace answers
- * recorded. Runs once per load, ahead of the gate and the walk. */
-function registerWorkspaceEdges(load: LoadResult): void {
-  if (load.workspaceProbed === true) return;
-  load.workspaceProbed = true;
-  const { program } = load;
+  // Workspace-linked packages register BEFORE the tsc gate. Their files
+  // live at realpaths OUTSIDE node_modules (the monorepo-tool symlink
+  // shape), so nothing path-shaped marks them as npm surface — yet their
+  // shipped JS is the identical foreign-tsconfig story as node_modules JS
+  // (the island executes it under --dynamic; the author's own build
+  // checked it, the program's author cannot fix it). The lazy
+  // registration inside the import-fence walk below runs AFTER errorsOf,
+  // too late for the gate, so one pass over the program's import edges
+  // registers them up front: every bare specifier any program file loads —
+  // import/export declarations, dynamic import("literal") (tsgo chases
+  // those into the program too; a CLI reaches its workspace sibling exactly
+  // that way), require("literal") — resolved with the own resolver,
+  // workspace answers recorded.
   {
     const supportedBuiltins = new Set<string>(SUPPORTED_NODE_MODULES);
     const probed = new Set<string>();
@@ -7299,59 +2489,239 @@ function registerWorkspaceEdges(load: LoadResult): void {
       if (probed.has(key)) return;
       probed.add(key);
       const r = resolveBareModule(fromFile, spec);
-      if (r !== null && r.workspaceDir !== undefined) {
-        registerWorkspacePackage(r.packageName, r.workspaceDir);
-        if (resolveWorkspaceSourceModule(fromFile, spec) !== null)
-          registerWorkspaceSourcePackage(r.workspaceDir);
-      }
+      if (r !== null && r.workspaceDir !== undefined) registerWorkspacePackage(r.packageName, r.workspaceDir);
     };
-    for (const sf of program.getImplementationSourceFiles()) {
+    for (const sf of program.getSourceFiles()) {
       if (sf.isDeclarationFile || sf.fileName.endsWith(".json")) continue;
-      for (const specifier of moduleSourceCandidates(program, sf).specifiers)
-        probe(sf.fileName, specifier);
+      ts.walkPreorder(sf, (n) => {
+        if (
+          (ts.isImportDeclaration(n) || ts.isExportDeclaration(n)) &&
+          n.moduleSpecifier !== undefined &&
+          ts.isStringLiteral(n.moduleSpecifier)
+        ) {
+          probe(sf.fileName, n.moduleSpecifier.text);
+          return "skip";
+        }
+        if (ts.isCallExpression(n)) {
+          const arg = n.arguments[0];
+          const isImportCall = n.expression.kind === ts.SyntaxKind.ImportKeyword;
+          const isRequireCall = ts.isIdentifier(n.expression) && n.expression.text === "require";
+          if ((isImportCall || isRequireCall) && arg !== undefined && ts.isStringLiteralLike(arg)) {
+            probe(sf.fileName, arg.text);
+          }
+        }
+        return undefined;
+      });
     }
   }
-}
 
-/** The structural half of preflight: the module evaluation order and the
- * graph facts derived with it, plus the fence diagnostics the walk itself
- * produces. */
-interface PreflightStructure {
-  order: ts.SourceFile[];
-  moduleEdges: ReadonlyMap<ts.SourceFile, readonly CycleEdge[]>;
-  dynamicImportRejections: ReadonlyMap<ts.SourceFile, StartupCrash>;
-  inlineRequireCycleCalls: ReadonlySet<ts.Node>;
-  /** The graph walk's own diagnostics, in report order. The full preflight
-   * reports them right after its tsc gate. */
-  diags: ScrDiagnostic[];
-  /** Node's resolve-phase refusal, before the full preflight decides whether
-   * the remaining diagnostics let it stand (a build that already fails
-   * reports every refusal's compile fence instead). */
-  resolveCrash: StartupCrash | null;
-  /** The compile-fence diagnostic of every refusal the entry never reaches,
-   * in report order; the full preflight reports them only when nothing else
-   * fails. */
-  fallbacks: ScrDiagnostic[];
-}
+  const toPassthrough = (d: ts.Diagnostic): ScrDiagnostic => {
+    const message = ts.flattenDiagnosticMessageText(d, "\n");
+    // File-less (global/options) diagnostics anchor at the entry with a
+    // zero span, exactly like the 5.9.3 lane's `d.start ?? 0` fallback.
+    const file = d.fileName ?? entry.fileName;
+    const start = d.fileName !== undefined ? d.pos : 0;
+    const end = d.fileName !== undefined ? d.end : 0;
+    return tscPassthroughDiag(message, { file, start, end });
+  };
+  /* TS7 checker change (not finding 5, same discipline): tsgo types a
+   * NAMESPACE import as the spec's non-callable module namespace object
+   * even when the module is declared with the callable `export =` shape —
+   * 5.9.3 bound the callable value directly, so `import * as a from
+   * "node:assert"; a(x)` typechecked there and draws TS2349 here. Those
+   * callable module objects are scriptc's OWN declared surface, and calls
+   * through the namespace binding are fenced per site by the lowering (the
+   * assert-fences fixture pins the wording), so tsgo's extra TS2349 on
+   * exactly those callees — an identifier that is a namespace-import
+   * binding of a supported builtin module — is suppressed to the 5.9.3
+   * verdict. Nothing else rides this: any other non-callable call keeps
+   * tsc's voice in both lanes. */
+  const builtinNamespaceNames = new Map<string, Set<string>>();
+  const namespaceCalleeSuppressed = (p: ts.Program, d: ts.Diagnostic): boolean => {
+    if (d.code !== 2349 || d.fileName === undefined) return false;
+    let names = builtinNamespaceNames.get(d.fileName);
+    if (!names) {
+      names = new Set();
+      builtinNamespaceNames.set(d.fileName, names);
+      const sf = p.getSourceFile(d.fileName);
+      for (const stmt of sf?.statements ?? []) {
+        if (!ts.isImportDeclaration(stmt) || !ts.isStringLiteral(stmt.moduleSpecifier)) continue;
+        if (canonicalBuiltinModule(stmt.moduleSpecifier.text) === null) continue;
+        const bindings = stmt.importClause?.namedBindings;
+        if (bindings && ts.isNamespaceImport(bindings)) names.add(bindings.name.text);
+      }
+    }
+    if (names.size === 0) return false;
+    const sf = p.getSourceFile(d.fileName);
+    return sf !== undefined && names.has(sf.text.slice(d.pos, d.end));
+  };
+  /* --npm-static: checker errors INSIDE an opted-in package's files never
+   * gate the build — the package's author checked that JS under a foreign
+   * tsconfig (their own lib choices, their own strictness), the program's
+   * author cannot fix it, and the JS design already names where inference
+   * gaps land: the per-statement runtime fences (trust-but-verify — a
+   * statement the checker could not prove compiles to its honest trap,
+   * never to a silent guess). scriptc's OWN SC1xxx fences in those files
+   * still count — preflight structure problems mark the package an
+   * offender and it falls back to the island. */
+  const npmStaticFileSuppressed = (d: ts.Diagnostic): boolean =>
+    d.fileName !== undefined && npmStaticPackageOfPath(d.fileName) !== null;
+  /* The same doctrine for node_modules JS the opt-in never NAMED:
+   * maxNodeModuleJsDepth (set only on --npm-static loads) admits ANY
+   * node_modules JavaScript the checker's resolution touches — e.g. an
+   * ambient `declare module "punycode"` in @types/node now loses to an
+   * INSTALLED punycode package's JS, which checkJs then checks. Those
+   * files' errors are the identical foreign-tsconfig story (third-party
+   * shipped JS the program's author cannot fix), they were invisible to
+   * every flagless compile (depth 0 keeps node_modules JS out of the
+   * program), and the packages themselves still island — so their checker
+   * errors never gate a build. */
+  /* WORKSPACE-LINKED shipped JS is the same story at a different path: the
+   * package's files realpath OUTSIDE node_modules (so depth-0 exclusion
+   * never saw them and allowJs+checkJs pulls them straight into the
+   * program), but they are npm surface all the same — the island executes
+   * them, the program's author cannot fix them (a workspace package shipping
+   * an ncc bundle with dozens of checker errors). Registered up front (the
+   * pass above), suppressed here unless --npm-static opted them into being
+   * program modules. */
+  const islandJsFile = (file: string): boolean =>
+    isJsSourceFileName(file) &&
+    !entryPackageFile(file) &&
+    npmStaticPackageOfPath(file) === null &&
+    (isNodeModulesPath(file) || workspacePackageOfPath(file) !== null);
+  const nodeModulesJsSuppressed = (d: ts.Diagnostic): boolean =>
+    d.fileName !== undefined && islandJsFile(d.fileName);
+  /* VENDORED bundles are the same story inside the program's own tree: a
+   * JavaScript file a bundler produced from npm packages (esbuild's and
+   * webpack's module markers name each bundled file's node_modules path)
+   * is the packages' code, checked under their authors' settings, which the
+   * program's author cannot fix. Its checker errors never gate the build;
+   * what cannot compile meets the per-statement runtime fences (and the
+   * fence receipt lists them), exactly as in --npm-static package files. */
+  const vendoredBundles = new Map<string, boolean>();
+  const vendoredBundleSuppressed = (p: ts.Program, d: ts.Diagnostic): boolean => {
+    if (d.fileName === undefined || !isJsSourceFileName(d.fileName)) return false;
+    let vendored = vendoredBundles.get(d.fileName);
+    if (vendored === undefined) {
+      const text = p.getSourceFile(d.fileName)?.text ?? "";
+      vendored = /^\s*\/\/ (?:\.\.\/)*(?:[\w.@-]+\/)*node_modules\/\S+\.[cm]?js\s*$/m.test(text) ||
+        /^\/\*{3}\/ "\.\/node_modules\/\S+":/m.test(text);
+      vendoredBundles.set(d.fileName, vendored);
+    }
+    return vendored;
+  };
+  /* JSDoc TYPE positions in JS files are documentation Node never reads:
+   * a name-resolution failure THERE (2304/2552 — the pattern's utilities.js
+   * spells a mapped type over a @template name it never declared) types
+   * as the error-any and the per-site fences apply, same stance as the
+   * strictness families above. A 2300 duplicate-identifier PAIR formed by
+   * a @typedef and a same-named class/function is the same story — the
+   * typedef half sits inside the comment, and the code half is suppressed
+   * exactly when its partner (same file, same name) was comment-side, so
+   * a REAL duplicate declaration (both halves in code — Node's own
+   * SyntaxError) keeps tsc's voice. */
+  const insideBlockComment = (text: string, pos: number): boolean => {
+    const open = text.lastIndexOf("/*", pos);
+    if (open < 0) return false;
+    const close = text.indexOf("*/", open + 2);
+    return close === -1 || close >= pos;
+  };
+  const jsdocTypeSuppressed = (p: ts.Program, d: ts.Diagnostic, commentDup: Set<string>): boolean => {
+    if (d.fileName === undefined || !isJsSourceFileName(d.fileName)) return false;
+    if (d.code !== 2304 && d.code !== 2552 && d.code !== 2300 && d.code !== 1003) return false;
+    if (d.pos === undefined) return false;
+    const sf = p.getSourceFile(d.fileName);
+    if (!sf) return false;
+    if (insideBlockComment(sf.text, d.pos)) return true;
+    return d.code === 2300 && commentDup.has(`${d.fileName}:${sf.text.slice(d.pos, d.end)}`);
+  };
+  /* A workspace member installed by COPY ships its JS inside node_modules,
+   * where depth-0 exclusion keeps it out of the checker's program — an
+   * UNTYPED member then types as an implicit-any module (TS7016) at every
+   * import site. The symlinked install of the same tree never sees this
+   * (the realpath escapes node_modules and allowJs types the member from
+   * its JS), and the package is the program author's own workspace code
+   * with the island as its execution home — "install @types" is not
+   * actionable — so the copied shape must not gate either: a 7016 whose
+   * specifier names a REGISTERED workspace package (the eager
+   * registration pass above runs first) is suppressed, and the import
+   * takes the same per-site island story as any untyped npm package. */
+  const workspaceImplicitAnySuppressed = (p: ts.Program, d: ts.Diagnostic): boolean => {
+    if (d.code !== 7016 || d.fileName === undefined || d.pos === undefined || d.end === undefined) return false;
+    const sf = p.getSourceFile(d.fileName);
+    if (!sf) return false;
+    const spec = sf.text.slice(d.pos, d.end).replace(/^['"]|['"]$/g, "");
+    const prefix = spec.startsWith("@") ? spec.split("/").slice(0, 2).join("/") : spec.split("/")[0]!;
+    return isWorkspacePackageName(prefix);
+  };
+  /** The program's tsc errors after the suppressions below; `onlyFiles`: per-file diagnostics of those files only (the
+   * program-wide ones always). */
+  const errorsOf = (p: ts.Program, onlyFiles?: ReadonlySet<string>): ts.Diagnostic[] => {
+    const all = onlyFiles === undefined ? ts.getPreEmitDiagnostics(p) : [
+      ...p.getConfigFileParsingDiagnostics(), ...p.getProgramDiagnostics(), ...p.getGlobalDiagnostics(),
+      ...[...onlyFiles].flatMap((fileName) => {
+        const sf = p.getSourceFile(fileName);
+        return sf ? [...p.getSyntacticDiagnostics(sf), ...p.getSemanticDiagnostics(sf)] : [];
+      }),
+    ];
+    // First pass: every comment-side 2300's (file, name) — the partners
+    // the second pass forgives.
+    const commentDup = new Set<string>();
+    for (const d of all) {
+      if (d.code !== 2300 || d.fileName === undefined || d.pos === undefined || d.end === undefined) continue;
+      if (!isJsSourceFileName(d.fileName)) continue;
+      const sf = p.getSourceFile(d.fileName);
+      if (sf && insideBlockComment(sf.text, d.pos)) commentDup.add(`${d.fileName}:${sf.text.slice(d.pos, d.end)}`);
+    }
+    return all.filter(
+      (d) =>
+        d.category === ts.DiagnosticCategory.Error &&
+        !suppressedJsStrictness7(d) &&
+        !npmStaticFileSuppressed(d) &&
+        !nodeModulesJsSuppressed(d) &&
+        !vendoredBundleSuppressed(p, d) &&
+        !namespaceCalleeSuppressed(p, d) &&
+        !inferredJsDiagnosticSuppressed(p, d) &&
+        !isNpmStaticSubclassArgument(p, d) &&
+        !workspaceImplicitAnySuppressed(p, d) &&
+        !jsdocTypeSuppressed(p, d, commentDup),
+    );
+  };
 
-function preflightStructure(load: LoadResult): PreflightStructure {
-  if (load.preflightStructure === undefined) load.preflightStructure = preflightStructure7(load);
-  return load.preflightStructure;
-}
-
-function preflightStructure7(load: LoadResult): PreflightStructure {
-  const { program, entry } = load;
-  // The walk's own diagnostics. The config diagnostics and the tsc gate are
-  // preflightDiagnostics7's, which reports them ahead of these.
-  const diags: ScrDiagnostic[] = [];
-  const unselectedPackageJsFile = unselectedPackageJsFilePredicate(entry.fileName);
-
-  // An explicit entry can itself live in an installed package. Its own
-  // source files are program code, including relative barrels and sibling
-  // modules; their location must not erase the module graph.
-  // Match the full installed directory, not just the package name, and
-  // exclude nested installations so dependencies keep their npm policy.
-  const entryPackageFile = entryPackageFilePredicate(entry.fileName);
+  // The tsc gate, with a second chance: the LOWERING world's checker
+  // includes the divergence overrides (JSON.parse(): unknown, the Promise
+  // executor shape, ...), which are TIGHTER than the standard lib — a
+  // project that typechecks clean under its own tsc can still error here
+  // (any-typed JSON.parse results, most commonly). Those errors are OURS,
+  // not the project's, so they must not fail preflight: when the lowering
+  // world has errors, the PROJECT world (same program without the override
+  // declarations) is built and consulted. Clean there → preflight passes
+  // and the override-affected sites meet the lowerer's honest fences
+  // instead (the SC1100 checked-cast family). Dirty there → the project-
+  // world errors are the ones reported: they are reproducible with the
+  // project's own tsc, which is what "fix type errors first" asks for.
+  frontendStamp("preflight.workspaces");
+  const tscErrors = errorsOf(program);
+  // (preflight.tsc-gate below then times the project-world second chance alone, when there is one.)
+  frontendStamp("preflight.tsc-gate.lowering-world", { errors: tscErrors.length, codes: [...new Set(tscErrors.map((d) => d.code))].slice(0, 8) });
+  // SCRIPTC_DEBUG_TSC_GATE=1: the lowering world's errors, each of which costs a second (project-world) program check.
+  if (process.env["SCRIPTC_DEBUG_TSC_GATE"] === "1") {
+    for (const d of tscErrors) {
+      const sf = d.fileName === undefined ? undefined : program.getSourceFile(d.fileName);
+      const line = sf && d.pos !== undefined ? sf.text.slice(0, d.pos).split("\n").length : 0;
+      process.stderr.write(`scriptc tsc-gate TS${d.code} ${d.fileName}:${line} ${ts.flattenDiagnosticMessageText(d, " ").slice(0, 300)}\n`);
+    }
+  }
+  if (tscErrors.length > 0) {
+    // The second chance forgives what the overrides manufactured, file by file: only the files with lowering-world errors
+    // are checked again in the project world. A file clean in the lowering world passes as it would with no error
+    // elsewhere (the gate never consults the project world for it), so its verdict no longer depends on another file's
+    // errors, and a slip in one file costs a few files' check rather than the whole program's (3-4 s per large module).
+    const erroring = new Set(tscErrors.flatMap((d) => (d.fileName === undefined ? [] : [d.fileName])));
+    const programWide = tscErrors.some((d) => d.fileName === undefined);
+    for (const d of errorsOf(load.projectWorld(), programWide ? undefined : erroring)) diags.push(toPassthrough(d));
+  }
+  frontendStamp("preflight.tsc-gate");
 
   // Preflight and lowering share this CheckerFacade. Claim executable
   // source files after workspace discovery and the tsc gate but before
@@ -7361,70 +2731,31 @@ function preflightStructure7(load: LoadResult): PreflightStructure {
   // reachable bodies are added by lowering's worklists.
   const ambient = ambientDtsPath();
   const programFiles = program
-    .getImplementationSourceFiles()
+    .getSourceFiles()
     .filter(
       (sf) =>
         sf.fileName !== ambient &&
         !sf.isDeclarationFile &&
         !sf.fileName.endsWith(".json") &&
-        (!isInstalledPackagePath(sf.fileName) ||
-          entryPackageFile(sf.fileName) ||
-          npmStaticPackageOfPath(sf.fileName) !== null) &&
-        !unselectedPackageJsFile(sf.fileName),
+        (!isNodeModulesPath(sf.fileName) || entryPackageFile(sf.fileName) || npmStaticPackageOfPath(sf.fileName) !== null) &&
+        !islandJsFile(sf.fileName),
     );
-  // Files reached only through `import type` / `export type … from` are
-  // checker input, never program modules: Node does not load them, so
-  // their imports and syntax must not fence the program.
-  //
-  // Reachability over-approximates: `callReferencesOf` and the reexport
-  // planner count EVERY call with a leading string literal as a loading
-  // edge, so a bare specifier that merely names a package — a model id
-  // passed to a catalog helper, a settings key passed to `markModified` —
-  // reaches npm resolution here. Whether this walk runs at all depends on
-  // the program it is handed (it early-returns unless an erased reference
-  // resolves, and the island rounds change the program), so classifying a
-  // miss from it made package selection depend on program composition: the
-  // same build could refuse a static package's entry as "did not join the
-  // type-checked program" or compile it, run to run. Report nothing from
-  // these edges; the walks that model real loads (import/export
-  // declarations and `require()`/`import()` calls) own the offender
-  // classification.
-  const resolveRuntimeEdge = (
-    sf: ts.SourceFile,
-    spec: string,
-    resolutionKind?: "import" | "require",
-  ): ts.SourceFile | null =>
-    resolveImport7(program, sf, spec, resolutionKind, false) ??
-    npmStaticDepSf7(program, sf, spec, resolutionKind);
-  const typeOnlyFiles = typeOnlyReachedFiles(
-    program,
-    entry,
-    programFiles,
-    () => [
-      ...forkTargetPaths(program, program.getImplementationSourceFiles()),
-      ...workerTargetPaths(program, program.getImplementationSourceFiles()),
-    ],
-    resolveRuntimeEdge,
-  );
-  const runtimeFiles =
-    typeOnlyFiles.size === 0 ? programFiles : programFiles.filter((sf) => !typeOnlyFiles.has(sf));
-  const userFiles = npmStaticActive()
+  const userFiles = npmStaticActive() || hasPrunableSourcePackage(programFiles)
     ? planNpmStaticReexports(
         program,
         entry,
-        runtimeFiles,
-        [
-          ...createRequireProgramRoots7(program),
-          ...forkTargetPaths(program, program.getImplementationSourceFiles()),
-          ...workerTargetPaths(program, program.getImplementationSourceFiles()),
-        ],
-        resolveRuntimeEdge,
+        programFiles,
+        [...createRequireProgramRoots7(program), ...forkTargetPaths(program, program.getSourceFiles())],
+        (sf, spec, resolutionKind) => resolveImport7(program, sf, spec, resolutionKind) ?? npmStaticDepSf7(program, sf, spec, resolutionKind),
       )
-    : runtimeFiles;
+    : programFiles;
   program.getTypeChecker().prefetchSourceFileStructures(userFiles);
 
-  // Unselected node_modules JS is not native program source even when a
-  // root put it in the checker's program (nodeModulesJsSuppressed).
+  // node_modules JS that no --npm-static opt-in claims is NOT program
+  // source even when maxNodeModuleJsDepth pulled it into the checker's
+  // program (see nodeModulesJsSuppressed above): its execution home is the
+  // island, so preflight's statement walks skip it — no import fences, no
+  // module edges, no statement counts from files the lowering never lowers.
   // Node stops at the nearest package.json even when it is malformed, and
   // an explicit CommonJS scope (or .cjs/.cts extension) disables ambiguous-
   // file syntax detection entirely. TypeScript's bundler checker models
@@ -7437,9 +2768,7 @@ function preflightStructure7(load: LoadResult): PreflightStructure {
     if (invalidConfig !== null) {
       if (!invalidPackageConfigs.has(invalidConfig)) {
         invalidPackageConfigs.add(invalidConfig);
-        diags.push(
-          invalidPackageConfigDiag(invalidConfig, { file: sf.fileName, start: 0, end: 0 }),
-        );
+        diags.push(invalidPackageConfigDiag(invalidConfig, { file: sf.fileName, start: 0, end: 0 }));
       }
       continue;
     }
@@ -7461,7 +2790,7 @@ function preflightStructure7(load: LoadResult): PreflightStructure {
     if (ambientModuleDecls === null) {
       ambientModuleDecls = { names: new Set(), patterns: [] };
       for (const f of program.getSourceFiles()) {
-        for (const s of f.statements.nodes) {
+        for (const s of f.statements) {
           if (!ts.isModuleDeclaration(s) || !ts.isStringLiteral(s.name)) continue;
           const name = s.name.text;
           if (name.includes("*")) ambientModuleDecls.patterns.push(name);
@@ -7490,9 +2819,10 @@ function preflightStructure7(load: LoadResult): PreflightStructure {
   // benign-cycle admission block above). Node evaluates such cycles
   // benignly (the revisited module is a cache hit, and no binding read
   // can hit TDZ or a stale slot), so the guarded %init calls reproduce
-  // its order exactly. Cycles that fail both are judged by the exact
-  // initialization rule: admitted when every early read is modeled by an
-  // initialization check, fenced with SC1016 otherwise.
+  // its order exactly. Cycles that fail both keep the SC1016 fence,
+  // because a read through them mid-cycle observes TDZ (let/const) or
+  // undefined (var) in Node — runtime evaluation-order semantics the
+  // static story does not model.
   const edges = new Map<ts.SourceFile, CycleEdge[]>();
   // Import edges Node's RESOLUTION refuses before any module evaluates —
   // recorded in source order per file (interleaved with the resolved deps
@@ -7512,7 +2842,7 @@ function preflightStructure7(load: LoadResult): PreflightStructure {
     edges.set(sf, deps);
     refusals.set(sf, []);
     depPositions.set(sf, []);
-    for (const stmt of sf.statements.nodes) {
+    for (const stmt of sf.statements) {
       if (ts.isImportEqualsDeclaration(stmt)) {
         // The ENTITY form (`import a = A`, `import x = N.y`) is namespace
         // alias plumbing — the lowerer resolves references through it and
@@ -7524,16 +2854,10 @@ function preflightStructure7(load: LoadResult): PreflightStructure {
         // lowers to nothing.
         if (ts.isExternalModuleReference(stmt.moduleReference) && !stmt.isTypeOnly) {
           const spec = stmt.moduleReference.expression;
-          if (
-            spec !== undefined &&
-            ts.isStringLiteralLike(spec) &&
-            load.externalTypes.has(spec.text)
-          ) {
+          if (spec !== undefined && ts.isStringLiteralLike(spec) && load.externalTypes.has(spec.text)) {
             diags.push(externalHostModuleDiag7(spec.text, stmt));
           } else {
-            diags.push(
-              unsupportedDiag("SC1013", locOf7(stmt), "import = require(...) assignments"),
-            );
+            diags.push(unsupportedDiag("SC1013", locOf7(stmt), "import = require(...) assignments"));
           }
         }
         continue;
@@ -7545,7 +2869,7 @@ function preflightStructure7(load: LoadResult): PreflightStructure {
         continue;
       }
       if (ts.isExportDeclaration(stmt)) {
-        if (stmt.isTypeOnly || isPrunedNpmReexport(program, stmt)) continue;
+        if (stmt.isTypeOnly || erasedTypeOnlyReexport(stmt) || isPrunedNpmReexport(program, stmt)) continue;
         if (!stmt.moduleSpecifier) continue;
         const fromSpec = ts.isStringLiteral(stmt.moduleSpecifier) ? stmt.moduleSpecifier.text : "";
         if (load.externalTypes.has(fromSpec)) {
@@ -7572,8 +2896,13 @@ function preflightStructure7(load: LoadResult): PreflightStructure {
           // NAMED re-exports from an INSTALLED npm package (`export
           // { isUrl } from "url-or-path"` — the pattern's universal facade,
           // `export { visitorKeys as default } from "@glimmer/syntax"`):
-          // import-plus-export plumbing. The lowering owns the package
-          // value diagnostic when no compiled source can supply the binding.
+          // import-plus-export plumbing. collectNpmImports registers the
+          // island load at this statement's position in the exporter's
+          // init and keys each binding by the same aliased symbol a
+          // direct import would, so consumer reads resolve identically
+          // through the alias chain. Star re-exports and unresolvable
+          // specifiers keep the fence (no member list to bind / nothing
+          // installed to load).
           if (
             stmt.exportClause !== undefined &&
             ts.isNamedExports(stmt.exportClause) &&
@@ -7582,21 +2911,9 @@ function preflightStructure7(load: LoadResult): PreflightStructure {
           ) {
             continue;
           }
-          diags.push(
-            unsupportedDiag("SC1014", locOf7(stmt), "re-exports from packages or builtin modules"),
-          );
+          diags.push(unsupportedDiag("SC1014", locOf7(stmt), "re-exports from packages or builtin modules"));
           continue;
         }
-        // A re-export from a Node island package that tsconfig `paths` maps
-        // to its installed directory: its declarations are no program
-        // module (the lowering reports the island boundary).
-        if (
-          projectReexport !== null &&
-          projectReexport.isDeclarationFile &&
-          !isRelativeSpecifier(fromSpec) &&
-          isFrontendIsland(packageNameOfSpecifier(fromSpec))
-        )
-          continue;
         const reDep = projectReexport;
         // `export * as ns from "./m"` re-exports the module NAMESPACE
         // object under a name: importers' `x.ns.member` reads resolve
@@ -7606,47 +2923,18 @@ function preflightStructure7(load: LoadResult): PreflightStructure {
         // there is no namespace object to materialize.
         if (stmt.exportClause && ts.isNamespaceExport(stmt.exportClause)) {
           if (reDep === null || reDep.fileName.endsWith(".json") || isCjsJsFile7(reDep, program)) {
-            diags.push(
-              unsupportedDiag(
-                "SC1013",
-                locOf7(stmt),
-                "namespace re-exports (export * as ns) of this module form",
-              ),
-            );
+            diags.push(unsupportedDiag("SC1013", locOf7(stmt), "namespace re-exports (export * as ns) of this module form"));
             continue;
           }
         }
-        // A re-export whose specifier resolves ONLY to a declaration file
-        // has no runtime module to link (Node throws
-        // ERR_MODULE_NOT_FOUND), and a declaration file is not a program
-        // module: an edge to it would lower the declarations' own imports
-        // as code.
-        if (reDep !== null && reDep.isDeclarationFile && !declarationHasRuntimeFile(reDep)) {
-          diags.push(
-            unsupportedDiag(
-              "SC1010",
-              locOf7(stmt),
-              `the '${fromSpec}' re-export (it resolves only to type declarations — there is no runtime implementation to compile)`,
-            ),
-          );
-          continue;
-        }
         if (reDep && !reDep.fileName.endsWith(".json")) {
           deps.push({ dep: reDep, stmt });
-          depPositions.get(sf)!.push({ dep: reDep, pos: ts.tokenStartOfNode(stmt) });
+          depPositions.get(sf)!.push({ dep: reDep, pos: stmt.getStart(sf) });
         }
         continue;
       }
       if (!ts.isImportDeclaration(stmt)) continue;
       if (erasedTypeOnlyImport(stmt)) continue;
-      // `import source x from "./x.wasm"` (TypeScript 7.1) binds the module's source object, such
-      // as a WebAssembly.Module; compiled programs do not support it yet.
-      if (isSourcePhaseImport(stmt.importClause)) {
-        diags.push(
-          unsupportedDiag("SC1090", locOf7(stmt), "source phase imports (`import source`)"),
-        );
-        continue;
-      }
 
       // Import-like nodes whose specifier the parse could not shape into a
       // string literal — the jsdoc `/** @import x = require(...) */`
@@ -7685,53 +2973,34 @@ function preflightStructure7(load: LoadResult): PreflightStructure {
         message: string,
         className: StartupCrash["className"],
         fallbackFeature: string,
-        code?: string,
       ): void => {
         refusals.get(sf)!.push({
-          crash: { message, className, loc: locOf7(stmt), ...(code !== undefined ? { code } : {}) },
+          crash: { message, className, loc: locOf7(stmt) },
           fallback: unsupportedDiag("SC1010", locOf7(stmt), fallbackFeature),
-          pos: ts.tokenStartOfNode(stmt),
+          pos: stmt.getStart(sf),
         });
       };
       // Project modules win before npm fallback: this is the source graph
       // tsgo type-checked for tsconfig paths, package imports/self-references,
       // and provenance entries. Ordinary packages still answer null here.
-      const projectAnswer = isBare ? resolveImport7(program, sf, spec) : null;
-      let projDep = projectAnswer;
-      let npm: ReturnType<typeof resolveNpmImport7> = null;
-      if (isBare && !spec.startsWith("#")) {
-        // A tsconfig `paths` target can name an installed package's directory
-        // (pi maps "typebox": ["./node_modules/typebox"]): its declarations
-        // are the package's own, so Node resolves the same specifier to the
-        // same answer and the import is an npm import after all. The npm arm
-        // below owns it then — its runtime refusal, npm-static membership and
-        // island policy included. A mapping whose answer the npm resolver does
-        // not reproduce stays a project import (and its SC1010).
-        const installed =
-          projectAnswer !== null &&
-          projectAnswer.isDeclarationFile &&
-          isNodeModulesPath(projectAnswer.fileName)
-            ? resolveNpmImport7(sf.fileName, spec)
-            : null;
-        if (installed !== null && sameResolvedFile(installed.typesFile, projectAnswer!.fileName)) {
-          projDep = null;
-          npm = installed;
-        } else if (projectAnswer === null) {
-          npm = resolveNpmImport7(sf.fileName, spec);
-        }
-      }
+      const projDep = isBare ? resolveImport7(program, sf, spec) : null;
+      // "#" specifiers can never name an npm package — they are the
+      // imports-field family, resolved by the project arm above.
+      const npm = isBare && projDep === null && !spec.startsWith("#")
+        ? resolveNpmImport7(sf.fileName, spec)
+        : null;
       if (npm && isNodeTypesPath(npm.typesFile)) {
         diags.push(unsupportedDiag("SC1010", locOf7(stmt), unsupportedModuleFeatureOf(spec)));
         continue;
       }
       // --npm-static: an opted-in package's import is a PROGRAM-MODULE
       // edge — its resolution (types stripped) answered the shipped JS,
-      // which root discovery put in the program (allowJs), so
+      // which allowJs + maxNodeModuleJsDepth pulled into the program, so
       // the entry joins the module order like any user module and the
       // clause fences below apply to it as to program JS. A miss (the
       // resolution still answers declarations, or the file never joined
       // the program) marks the package an OFFENDER: the frontend's
-      // selection loop rebuilds without it and reports the package refusal.
+      // fallback loop rebuilds without it and the import islands as ever.
       let npmStaticDep: ts.SourceFile | null = null;
       if (npm !== null) {
         if (isNpmStaticPackage(npm.packageName)) {
@@ -7741,15 +3010,10 @@ function preflightStructure7(load: LoadResult): PreflightStructure {
           // Types resolved, but Node's RUNTIME resolution can still refuse
           // the edge (a types-only package whose exports target ships no JS,
           // most commonly): that program is Node's startup crash, not an
-
+          // island candidate — there is nothing to execute anywhere.
           const refusal = probeNodeImportRefusal(sf.fileName, spec);
           if (refusal !== null) {
-            refuse(
-              refusal.message,
-              "%Error",
-              `the '${spec}' package (its runtime resolution fails: ${refusal.message})`,
-              refusal.code,
-            );
+            refuse(refusal.message, "%Error", `the '${spec}' package (its runtime resolution fails: ${refusal.message})`);
           }
           continue;
         }
@@ -7761,16 +3025,6 @@ function preflightStructure7(load: LoadResult): PreflightStructure {
       // Node's startup crash with Node's exact message; what keeps a compile
       // fence is unsupported builtin or types-only surface.
       if (isBare && npmStaticDep === null) {
-        // A Node island package that tsconfig `paths` maps to its
-        // installed directory resolves to its declarations here: it loads
-        // in Node, typed by them, like an island package resolved through
-        // node_modules (scope-B NI-4).
-        if (
-          projDep !== null &&
-          projDep.isDeclarationFile &&
-          isFrontendIsland(packageNameOfSpecifier(spec))
-        )
-          continue;
         if (projDep !== null && projDep.isDeclarationFile) {
           diags.push(
             unsupportedDiag(
@@ -7796,37 +3050,26 @@ function preflightStructure7(load: LoadResult): PreflightStructure {
               `Invalid module "#" is not a valid internal imports specifier name imported from ${sf.fileName}`,
               "%TypeError",
               `the '#' import (Node rejects the bare '#' specifier as invalid)`,
-              "ERR_INVALID_MODULE_SPECIFIER",
             );
             continue;
           }
           if (spec.startsWith("#")) {
-            const target = packageImportTarget(sf.fileName, spec);
-            if (target !== null && !target.startsWith("./") && !target.startsWith("../")) {
-              diags.push(
-                unsupportedDiag(
-                  "SC1010",
-                  locOf7(stmt),
-                  `package.json imports entries that map to other packages (the '${spec}' import maps to '${target}')`,
-                ),
-              );
-              continue;
-            }
             const pkgJson = nearestPkgJsonPath(sf.fileName);
             refuse(
               `Package import specifier "${spec}" is not defined${pkgJson !== null ? ` in package ${pkgJson}` : ""} imported from ${sf.fileName}`,
               "%TypeError",
               `the '${spec}' import (no package.json imports-field entry maps it)`,
-              "ERR_PACKAGE_IMPORT_NOT_DEFINED",
             );
             continue;
           }
+          // Browser target: the page's bundler provides this module (host modules).
+          if (browserTarget() && isBundlerSpecifier(spec)) continue;
           const refusal = probeNodeImportRefusal(sf.fileName, spec);
           if (refusal !== null) {
             const ambientNote = ambientDeclared(spec)
               ? `the '${spec}' module (it exists only as an ambient 'declare module' type surface — there is no runtime module to import)`
               : `the '${spec}' package (nothing installed resolves it)`;
-            refuse(refusal.message, "%Error", ambientNote, refusal.code);
+            refuse(refusal.message, "%Error", ambientNote);
             continue;
           }
           // Runtime-resolvable (or a shape the probe stays conservative
@@ -7846,22 +3089,6 @@ function preflightStructure7(load: LoadResult): PreflightStructure {
       const clause = stmt.importClause;
       const dep = isRelative ? resolveImport7(program, sf, spec) : (npmStaticDep ?? projDep);
       const isJson = dep !== null && dep.fileName.endsWith(".json");
-      // A specifier that resolves ONLY to a declaration file has no runtime
-      // module to link: Node throws ERR_MODULE_NOT_FOUND at this import.
-      // Declarations are not program modules — taking one as a module-order
-      // edge would lower its imports as if it were code (SC2013 for every
-      // specifier inside a package's `.d.ts`). Type-only imports were
-      // already erased above; this is the value form.
-      if (dep !== null && dep.isDeclarationFile && !isJson && !declarationHasRuntimeFile(dep)) {
-        diags.push(
-          unsupportedDiag(
-            "SC1010",
-            locOf7(stmt),
-            `the '${spec}' import (it resolves only to type declarations — there is no runtime implementation to compile)`,
-          ),
-        );
-        continue;
-      }
       // SELF-imports: the bindings alias this module's OWN declarations,
       // so a TOP-LEVEL read lexically above the aliased declaration is
       // Node's TDZ ReferenceError at runtime (exactly what tsc's TS2448
@@ -7885,15 +3112,12 @@ function preflightStructure7(load: LoadResult): PreflightStructure {
         // stay allowed everywhere. The process default is the global process
         // alias, including when combined with named builtin imports.
         const syntheticDefaultsOn =
-          (program.getCompilerOptions() as { allowSyntheticDefaultImports?: boolean })
-            .allowSyntheticDefaultImports === true;
+          (program.getCompilerOptions() as { allowSyntheticDefaultImports?: boolean }).allowSyntheticDefaultImports === true;
         const defaultOk =
-          spec === "process" ||
-          spec === "node:process" ||
+          spec === "process" || spec === "node:process" ||
           builtinDefaultImportModule(spec) !== null ||
-          ((isJsSourceFileName(sf.fileName) || syntheticDefaultsOn) &&
-            canonicalBuiltinModule(spec) !== null);
-        if (clause.name && !isJson && dep === null && !defaultOk) {
+          ((isJsSourceFileName(sf.fileName) || syntheticDefaultsOn) && canonicalBuiltinModule(spec) !== null);
+        if (clause.name && !isJson && dep === null && !defaultOk && !(browserTarget() && isBundlerSpecifier(spec))) {
           diags.push(unsupportedDiag("SC1012", locOf7(clause.name)));
         }
         if (clause.namedBindings && ts.isNamedImports(clause.namedBindings) && isJson) {
@@ -7917,13 +3141,7 @@ function preflightStructure7(load: LoadResult): PreflightStructure {
           // and unresolved specifiers. Supported builtins pass through as
           // before (their namespace members are the declared surface).
           if (isJson) {
-            diags.push(
-              unsupportedDiag(
-                "SC1013",
-                locOf7(clause.namedBindings),
-                "namespace imports of JSON modules",
-              ),
-            );
+            diags.push(unsupportedDiag("SC1013", locOf7(clause.namedBindings), "namespace imports of JSON modules"));
           } else if (dep !== null && isCjsJsFile7(dep, program)) {
             // A CJS namespace binding whose every use is a bare expression
             // statement (`cjs;` — the corpus's "the import linked"
@@ -7931,74 +3149,32 @@ function preflightStructure7(load: LoadResult): PreflightStructure {
             // to Node's no-op, the module still evaluates through its
             // ordinary init edge, and no member is ever read through the
             // lexer facade (self-imports of a CJS module included — the
-            // partially-built exports are never observed). In JavaScript
-            // sources every use passes here: member reads lower through the
-            // names Node's lexer detects, and the other reads refuse at
-            // their site (lower-namespaces.ts, cjsNamespaceImportDep). Any
-            // A member read lowers like the named import `import { name }`
-            // (nsMemberIdentOf), and a use the lexer does not serve - the
-            // namespace as a first-class value, `default`, a name Node's
-            // lexer does not detect - refuses at its own site.
-          } else if (
-            dep === null &&
-            !(!isRelative && ambientModules.has(spec)) &&
-            // A Node island module's namespace (scope-B NI-4).
-            !(!isRelative && isFrontendIsland(packageNameOfSpecifier(spec)))
-          ) {
+            // partially-built exports are never observed). Any OTHER use
+            // keeps the fence.
+            if (!nsBindingUsesAreBareStatements7(program, sf, clause.namedBindings.name)) {
+              diags.push(unsupportedDiag("SC1013", locOf7(clause.namedBindings), "namespace imports of CommonJS modules"));
+            }
+          } else if (dep === null && !(!isRelative && ambientModules.has(spec))) {
             diags.push(unsupportedDiag("SC1013", locOf7(clause.namedBindings)));
           }
         }
       }
       if (dep && !isJson) {
         deps.push({ dep, stmt });
-        depPositions.get(sf)!.push({ dep, pos: ts.tokenStartOfNode(stmt) });
+        depPositions.get(sf)!.push({ dep, pos: stmt.getStart(sf) });
       }
     }
     {
       const jsRequireFile = isJsSourceFileName(sf.fileName);
-      const stmts = sf.statements.nodes;
-      // A binding that code running before the require can reach. Node
-      // initializes it AT the require: a const/let read earlier throws
-      // ReferenceError, which the lowering reproduces with an
-      // initialization check at every reference that can run early
-      // (require-initialization.ts). A var reads undefined there, which
-      // module aliases cannot represent; createRequire bindings have no
-      // checked form either.
-      const earlyRequireFence = (
-        req: RequireOccurrence7,
-        bindingKind: RequireCallBindingKind7,
-        loc: { file: string; start: number; end: number },
-      ): boolean => {
-        const early = req.decl !== null ? requireEarlyReference7(program, req.decl) : null;
-        if (
-          early === null ||
-          (bindingKind !== "createRequire" &&
-            req.split === undefined &&
-            ((req.decl!.parent?.flags ?? 0) & (ts.NodeFlags.Const | ts.NodeFlags.Let)) !== 0)
-        ) {
-          return false;
-        }
-        diags.push(
-          unsupportedDiag(
-            "SC1013",
-            loc,
-            bindingKind === "createRequire"
-              ? `createRequire() binding '${early.text}' below code that can reach it (Node throws ReferenceError on any earlier access, which is not modeled — move the require above the code that can run first)`
-              : req.split !== undefined
-                ? `require() binding '${early.text}' assigned below code that can reach it (Node reads undefined before the assignment runs, which is not modeled — move the assignment above the code that can run first)`
-                : `var require() binding '${early.text}' below code that can reach it (Node reads undefined before the require runs, which is not modeled — declare it with const or let, or move the require above the code that can run first)`,
-          ),
-        );
-        return true;
-      };
+      const stmts = sf.statements;
+      let firstRunnable = -1;
+      stmts.forEach((s, i) => {
+        if (firstRunnable < 0 && !purePrefixStmt7(program, s)) firstRunnable = i;
+      });
       for (let k = 0; k < stmts.length; k++) {
         const stmt = stmts[k]!;
-        for (const req of requiresOf7(stmt, program)) {
-          const loc = {
-            file: sf.fileName,
-            start: ts.tokenStartOfNode(req.node),
-            end: req.node.end,
-          };
+        for (const req of requiresOf7(stmt)) {
+          const loc = { file: sf.fileName, start: req.node.getStart(sf), end: req.node.getEnd() };
           const bindingKind = requireCallBindingKind7(program, req.node);
           // TypeScript source files join this scan only through the
           // canonical createRequire bridge. Their ordinary require-shaped
@@ -8014,99 +3190,21 @@ function preflightStructure7(load: LoadResult): PreflightStructure {
           if (load.externalTypes.has(req.spec)) {
             continue;
           }
-          // A JSON document: the require answers its cached parsed object
-          // (json-require.ts), an ordinary value the binding stores, so
-          // every destructuring form lowers as usual. No module edge.
-          const jsonDep = resolveImport7(program, sf, req.spec, "require");
-          if (jsonDep !== null && jsonDep.fileName.endsWith(".json")) {
-            if (bindingKind === "createRequire") continue;
-            if (ts.isVariableStatement(stmt) && requiresOf7(stmt, program).length > 1) {
-              const others = requiresOf7(stmt, program).some((r) => {
-                const d = resolveImport7(program, sf, r.spec, "require");
-                return d === null || !d.fileName.endsWith(".json");
-              });
-              if (others) {
-                diags.push(
-                  unsupportedDiag(
-                    "SC1012",
-                    loc,
-                    "require() of a JSON module declared together with other require() bindings",
-                  ),
-                );
-                continue;
-              }
-            }
-            earlyRequireFence(req, bindingKind, loc);
-            continue;
-          }
           if (req.decl && ts.isArrayBindingPattern(req.decl.name)) {
             diags.push(unsupportedDiag("SC1012", loc, "array-destructuring require() bindings"));
             continue;
           }
           if (req.decl && ts.isObjectBindingPattern(req.decl.name)) {
-            // A nested pattern of a builtin binds members of the sub-module
-            // its key names (`const { types: { isPromise } } =
-            // require("util")` — util.types IS util/types).
-            const builtin = canonicalBuiltinModule(req.spec);
-            const plainElements = (
-              pattern: ts.ObjectBindingPattern,
-              module: string | null,
-            ): boolean =>
-              pattern.elements.nodes.every((e) => {
-                // `const { a, ...rest } = require("./m")` of a program module:
-                // the named bindings alias the module's exports and `rest`
-                // reads the remaining export names through the same table, so
-                // the whole pattern is alias plumbing (lower-stmts.ts).
-                if (
-                  e.dotDotDotToken !== undefined &&
-                  e.initializer === undefined &&
-                  e.name !== undefined &&
-                  ts.isIdentifier(e.name) &&
-                  module === null &&
-                  builtin === null &&
-                  bindingKind !== "createRequire"
-                )
-                  return true;
-                if (e.initializer !== undefined || e.dotDotDotToken !== undefined) return false;
-                if (e.name !== undefined && ts.isIdentifier(e.name)) return true;
-                // A nested pattern under a named export of a program module
-                // destructures that export's VALUE at the require
-                // (`const { codes: { ERR_X } } = require("./errors")`): the
-                // inner bindings are ordinary destructured storage.
-                if (
-                  module === null &&
-                  builtin === null &&
-                  bindingKind !== "createRequire" &&
-                  pattern === req.decl!.name &&
-                  e.name !== undefined &&
-                  ts.isObjectBindingPattern(e.name) &&
-                  e.propertyName !== undefined &&
-                  ts.isIdentifier(e.propertyName)
-                )
-                  return true;
-                if (module === null || e.name === undefined || !ts.isObjectBindingPattern(e.name))
-                  return false;
-                const key = e.propertyName;
-                if (key === undefined || !ts.isIdentifier(key)) return false;
-                const sub = canonicalBuiltinModule(`${module}/${key.text}`);
-                return sub !== null && plainElements(e.name, sub);
-              });
-            if (!plainElements(req.decl.name, builtin)) {
+            const bad = req.decl.name.elements.find(
+              (e) => e.name === undefined || !ts.isIdentifier(e.name) || e.initializer !== undefined || e.dotDotDotToken !== undefined,
+            );
+            if (bad) {
               diags.push(
-                unsupportedDiag(
-                  "SC1012",
-                  loc,
-                  builtin !== null
-                    ? "require() destructuring with defaults, rest, or nested patterns other than builtin sub-modules"
-                    : "require() destructuring with defaults, rest, or nested patterns of program modules (JSON documents and builtin sub-modules destructure fully)",
-                ),
+                unsupportedDiag("SC1012", loc, "require() destructuring with defaults, rest, or nested patterns"),
               );
               continue;
             }
           }
-          // An npm package served as a builtin (graceful-fs as fs) is never
-          // a program-module edge, even when --npm-static names it.
-          if (npmBuiltinAliasOf(req.spec) !== null) continue;
           const isRelative = isRelativeSpecifier(req.spec);
           let dep = resolveImport7(program, sf, req.spec, "require");
           if (dep === null && !isRelative) {
@@ -8115,15 +3213,14 @@ function preflightStructure7(load: LoadResult): PreflightStructure {
             // form above (bundle dists require their workspace siblings —
             // the same resolution, the same offender discipline on a
             // miss).
-            const npmReq = !req.spec.startsWith("#")
-              ? resolveNpmImport7(sf.fileName, req.spec, "require")
-              : null;
+            const npmReq = !req.spec.startsWith("#") ? resolveNpmImport7(sf.fileName, req.spec, "require") : null;
             if (npmReq !== null && isNpmStaticPackage(npmReq.packageName)) {
               dep = npmStaticProgramDep(program, npmReq.packageName, npmReq.typesFile);
               if (dep === null) continue; // offender recorded — the fallback loop reloads
             } else {
               // createRequire's non-program targets belong to its own
-              // lowering, where missing packages become catchable
+              // lowering: installed packages select static-vs-island
+              // there, and missing packages become catchable
               // MODULE_NOT_FOUND throws. Only resolved program targets are
               // module-order edges in this preflight walk.
               if (bindingKind === "createRequire") continue;
@@ -8137,36 +3234,50 @@ function preflightStructure7(load: LoadResult): PreflightStructure {
                 // optional-dependency try/require pattern), so no fence.
                 // Binding forms keep the fence: their downstream reads
                 // would need the module that never loads.
-                if (
-                  (req.decl !== null || probeNodeRequireRefusal(sf.fileName, req.spec) === null) &&
-                  // A Node island package: loaded in Node at the require (NI-4).
-                  !isFrontendIsland(packageNameOfSpecifier(req.spec))
-                ) {
+                if (req.decl !== null || probeNodeRequireRefusal(sf.fileName, req.spec) === null) {
                   diags.push(unsupportedDiag("SC1010", loc, unsupportedModuleFeatureOf(req.spec)));
                 }
               }
               continue;
             }
           }
-          if (earlyRequireFence(req, bindingKind, loc)) continue;
-          // A declaration file is never a runtime module (see the import
-          // arm): the require throws MODULE_NOT_FOUND in Node, so it is not
-          // a module-order edge.
-          if (dep !== null && dep.isDeclarationFile) continue;
+          if (dep && dep.fileName.endsWith(".json")) {
+            if (bindingKind === "createRequire") continue;
+            diags.push(unsupportedDiag("SC1012", loc, "require() of JSON modules"));
+            continue;
+          }
+          // Earlier declarators run too: `const x = read(), dep =
+          // require('./dep')` must not lose the guard merely because both
+          // initializers share one VariableStatement.
+          const precedingDecls = req.decl && ts.isVariableStatement(stmt)
+            ? stmt.declarationList.declarations.slice(0, stmt.declarationList.declarations.indexOf(req.decl))
+            : [];
+          const prefixCanRun = (firstRunnable >= 0 && firstRunnable < k) ||
+            precedingDecls.some((decl) => !purePrefixDecl7(decl));
+          const tdzName =
+            prefixCanRun && req.decl
+              ? bindingEarlyUse7(program, sf, k, req.decl, precedingDecls)
+              : null;
+          if (tdzName !== null) {
+            diags.push(
+              unsupportedDiag(
+                "SC1013",
+                loc,
+                `require() below code that can reach its binding '${tdzName}' (Node initializes the binding AT the require and throws ReferenceError on any earlier access, which is not modeled — move the require above the code that can run first)`,
+              ),
+            );
+            continue;
+          }
           if (dep) deps.push({ dep });
         }
       }
       const nestedBareRequires = nestedBareRequiresOf7(sf);
-      program
-        .getTypeChecker()
-        .prefetchSymbolNodesExact(
-          nestedBareRequires.flatMap((call) =>
-            ts.isIdentifier(call.expression) ? [call.expression] : [],
-          ),
-        );
+      program.getTypeChecker().prefetchSymbolNodesExact(
+        nestedBareRequires.flatMap((call) => ts.isIdentifier(call.expression) ? [call.expression] : []),
+      );
       for (const call of nestedBareRequires) {
         const spec = requireSpecOf7(call)!;
-        const loc = { file: sf.fileName, start: ts.tokenStartOfNode(call), end: call.end };
+        const loc = { file: sf.fileName, start: call.getStart(sf), end: call.getEnd() };
         const bindingKind = requireCallBindingKind7(program, call);
         if (!jsRequireFile && bindingKind !== "createRequire") continue;
         if (isNodeEsmFile7(sf, program)) {
@@ -8178,21 +3289,20 @@ function preflightStructure7(load: LoadResult): PreflightStructure {
         if (load.externalTypes.has(spec)) {
           continue;
         }
-        if (npmBuiltinAliasOf(spec) !== null) continue;
         const projectDep = resolveImport7(program, sf, spec, "require");
         if (projectDep !== null) {
-          // A bare require of a JSON document only parses it: nothing to
-          // evaluate (json-require.ts creates the cached object).
-          if (projectDep.fileName.endsWith(".json")) continue;
+          if (projectDep.fileName.endsWith(".json")) {
+            if (bindingKind === "createRequire") continue;
+            diags.push(unsupportedDiag("SC1012", loc, "require() of JSON modules"));
+            continue;
+          }
           deps.push({ dep: projectDep });
           continue;
         }
         if (!isRelativeSpecifier(spec)) {
           // --npm-static: opted-in packages ride the program-module edge
           // (the statement-level require branch above).
-          const npmReq = !spec.startsWith("#")
-            ? resolveNpmImport7(sf.fileName, spec, "require")
-            : null;
+          const npmReq = !spec.startsWith("#") ? resolveNpmImport7(sf.fileName, spec, "require") : null;
           if (npmReq !== null && isNpmStaticPackage(npmReq.packageName)) {
             const nDep = npmStaticProgramDep(program, npmReq.packageName, npmReq.typesFile);
             if (nDep !== null) deps.push({ dep: nDep });
@@ -8202,45 +3312,11 @@ function preflightStructure7(load: LoadResult): PreflightStructure {
           if (canonicalBuiltinModule(spec) === null && !processModuleAliasRequire7(spec, null)) {
             // Binding-less by construction — same require-site throw
             // channel as the statement-level form above.
-            if (
-              probeNodeRequireRefusal(sf.fileName, spec) === null &&
-              !isFrontendIsland(packageNameOfSpecifier(spec))
-            ) {
+            if (probeNodeRequireRefusal(sf.fileName, spec) === null) {
               diags.push(unsupportedDiag("SC1010", loc, unsupportedModuleFeatureOf(spec)));
             }
           }
           continue;
-        }
-      }
-      // Inline requires of program modules are module edges like the bare
-      // statements above (cjs-inline-require.ts lowers each to the module's
-      // %init at its position). Only the CommonJS global in a CommonJS file
-      // counts, and targets outside the compiled graph add nothing here:
-      // their use sites keep their existing lowering fences.
-      if (jsRequireFile && !isNodeEsmFile7(sf, program)) {
-        // A split require binding's assignment is a statement-level require
-        // edge (requiresOf7 above), parenthesized or not.
-        const splitCalls = new Set(splitRequireBindings7(program, sf).values());
-        for (const call of inlineRequiresOf7(sf)) {
-          if (requireCallBindingKind7(program, call) !== "ambient") continue;
-          if (splitCalls.has(call)) continue;
-          const spec = requireSpecOf7(call)!;
-          if (load.externalTypes.has(spec) || canonicalBuiltinModule(spec) !== null) continue;
-          const lazy = inDeferredPosition7(call);
-          const edgeTo = (dep: ts.SourceFile): CycleEdge =>
-            lazy ? { dep, lazy: true, call } : { dep, call };
-          const projectDep = resolveImport7(program, sf, spec, "require");
-          if (projectDep !== null) {
-            if (!projectDep.fileName.endsWith(".json") && !projectDep.isDeclarationFile)
-              deps.push(edgeTo(projectDep));
-            continue;
-          }
-          if (isRelativeSpecifier(spec) || spec.startsWith("#")) continue;
-          const npmReq = resolveNpmImport7(sf.fileName, spec, "require");
-          if (npmReq !== null && isNpmStaticPackage(npmReq.packageName)) {
-            const nDep = npmStaticProgramDep(program, npmReq.packageName, npmReq.typesFile);
-            if (nDep !== null) deps.push(edgeTo(nDep));
-          }
         }
       }
     }
@@ -8249,10 +3325,9 @@ function preflightStructure7(load: LoadResult): PreflightStructure {
   // Node's evaluation order: depth-first postorder from the entry, each
   // module once, back-edges answered from the cache (a module already
   // evaluating is skipped) — which the guarded %init calls reproduce
-  // exactly. Cycles are admitted where Node's partially-initialized
-  // semantics are UNOBSERVABLE or exactly modeled (JS's partial
-  // initialization otherwise misbehaves without a diagnostic, so SC1016
-  // stays for the rest):
+  // exactly. Cycles are admitted only where Node's partially-initialized
+  // semantics are UNOBSERVABLE (JS's partial-initialization is otherwise a
+  // silent-misbehavior trap, so SC1016 stays for the rest):
   //  - a DIRECT SELF-IMPORT (the package self-name reference resolving to
   //    the importing module itself — Node's self-reference rule): the
   //    imported bindings alias the module's OWN top-level bindings with
@@ -8264,62 +3339,23 @@ function preflightStructure7(load: LoadResult): PreflightStructure {
   //    benign-cycle admission block: every module of the cycle's
   //    strongly-connected component has an inert top level and the
   //    closing edge's bindings are used only in deferred positions, so no
-  //    read can execute before every member initialized);
-  //  - the EXACT INITIALIZATION rule: an ES-module cluster whose early
-  //    reads are all let/const bindings with module storage, or classes —
-  //    the lowering checks each one (cycleEarlyBindings) and throws
-  //    Node's ReferenceError on a read before the declaration ran.
-  // require() of an ES module is Node 24's synchronous require(esm) — unless
-  // the target is still evaluating, which Node refuses with
-  // ERR_REQUIRE_CYCLE_MODULE. Every such target carries a %evaluating flag
-  // the require site tests at run time.
-  for (const list of edges.values()) {
-    for (const e of list) {
-      if (e.stmt === undefined && isNodeEsmFile7(e.dep, program))
-        program.analysis.requireEsmTargets.add(e.dep);
-    }
-  }
-  const cycleAdmissionReason = makeCycleAdmission(program, (sf) => {
-    const all = edges.get(sf) ?? [];
-    return all.some((e) => e.call !== undefined) ? all.filter((e) => e.call === undefined) : all;
-  });
+  //    read can execute before every member initialized).
+  const cycleAdmissionReason = makeCycleAdmission(program, (sf) => edges.get(sf) ?? []);
   const order: ts.SourceFile[] = [];
-  const inlineRequireCycleCalls = new Set<ts.Node>();
   const state = new Map<ts.SourceFile, "visiting" | "done">();
   const stack: string[] = [];
-  // The stack depth at which each enclosing lazily-loaded subtree began.
-  // The lazy require that entered the subtree lowers to its target's %init
-  // at that call site, so the subtree initializes after its own requirer's
-  // top level, not eagerly: the walk visits it here only to give its
-  // modules a place in the emission order.
-  const lazyBases: number[] = [];
   const visit = (sf: ts.SourceFile): void => {
     state.set(sf, "visiting");
     stack.push(sf.fileName);
     for (const e of edges.get(sf) ?? []) {
       if (e.dep === sf) continue; // self-import: a Node cache hit, not a cycle
-      if (e.lazy === true) continue; // visited after this module completes
       const s = state.get(e.dep);
       if (s === "done") continue;
       if (s === "visiting") {
-        if (e.call !== undefined) {
-          inlineRequireCycleCalls.add(e.call);
-          continue;
-        }
-        // A back edge into a module that was already evaluating when the
-        // enclosing lazily-loaded subtree began is a Node cache hit at run
-        // time: the subtree runs its init at the lazy require's call site,
-        // after that module's requirer's top level completed. The walk's
-        // eager visit of the subtree is only about emission order, so the
-        // edge needs no admission analysis — the same trust the walk gives
-        // a lazy edge whose target is still evaluating (skipped below) and
-        // an inline require() call that closes a cycle.
-        const lazyBase = lazyBases[lazyBases.length - 1];
-        if (lazyBase !== undefined && stack.indexOf(e.dep.fileName) < lazyBase) continue;
         // A back-edge: Node answers it from the cache (the module is
-        // already evaluating) — admitted by the cheap per-edge rule, the
-        // declaration-only init window rule, or the exact initialization
-        // rule.
+        // already evaluating) — benign exactly when nothing can observe
+        // the partial initialization through this edge's bindings, by the
+        // cheap per-edge rule or the declaration-only init window rule.
         const reason = cycleAdmissionReason(sf, e);
         if (reason !== null) {
           const cycleStart = stack.indexOf(e.dep.fileName);
@@ -8339,15 +3375,6 @@ function preflightStructure7(load: LoadResult): PreflightStructure {
     stack.pop();
     state.set(sf, "done");
     order.push(sf);
-    // Lazy inline requires run after this module's top level: their
-    // modules join the order afterwards (cache hits when already loaded).
-    for (const e of edges.get(sf) ?? []) {
-      if (e.lazy === true && state.get(e.dep) === undefined) {
-        lazyBases.push(stack.length);
-        visit(e.dep);
-        lazyBases.pop();
-      }
-    }
   };
   visit(entry);
 
@@ -8360,8 +3387,6 @@ function preflightStructure7(load: LoadResult): PreflightStructure {
   // them). A found resolution crash wins over the CJS link check below:
   // Node's fetch/resolve phase runs before instantiate.
   let resolveCrash: StartupCrash | null = null;
-  const dynamicImportRejections = new Map<ts.SourceFile, StartupCrash>();
-  const fallbacks: ScrDiagnostic[] = [];
   {
     const seen = new Set<ts.SourceFile>();
     const walk = (sf: ts.SourceFile): StartupCrash | null => {
@@ -8381,695 +3406,29 @@ function preflightStructure7(load: LoadResult): PreflightStructure {
       return null;
     };
     resolveCrash = walk(entry);
-    // A module only a literal import() loads resolves its static graph when
-    // that import runs: Node rejects the import's promise with the first
-    // refusal it meets, before any module of that graph evaluates. Such a
-    // module never joins the compiled graph, and the refusals inside its
-    // graph are that rejection, not build failures.
-    const reach = (from: ts.SourceFile, into: Set<ts.SourceFile>): void => {
-      const stack = [from];
-      while (stack.length > 0) {
-        const sf = stack.pop()!;
-        if (into.has(sf)) continue;
-        into.add(sf);
-        for (const { dep } of depPositions.get(sf) ?? []) stack.push(dep);
-      }
-    };
-    const startup = new Set<ts.SourceFile>();
-    reach(entry, startup);
-    const covered = new Set<ts.SourceFile>();
-    for (const sf of userFiles) {
-      if (!ts.sourceTextIncludes(sf, "import")) continue;
-      for (const call of moduleSourceCandidates(program, sf).calls) {
-        const arg = call.arguments.nodes[0];
-        if (call.expression.kind !== ts.SyntaxKind.ImportKeyword || arg === undefined) continue;
-        if (!ts.isStringLiteralLike(arg) || isUnloadedPackage(arg.text)) continue;
-        const root =
-          resolveImport7(program, sf, arg.text) ?? npmStaticDepSf7(program, sf, arg.text);
-        if (root === null || root.isDeclarationFile || startup.has(root)) continue;
-        // A module inside an already-rejected graph is `covered`, but a
-        // literal import() of it needs its OWN rejection entry: its graph
-        // rejects when that import runs, so it must not join the compiled
-        // graph (where lowering would fail) merely because another rejected
-        // import also reaches it. Walk each direct root independently.
-        if (dynamicImportRejections.has(root)) continue;
-        seen.clear();
-        const crash = walk(root);
-        if (crash === null) continue;
-        dynamicImportRejections.set(root, crash);
-        reach(root, covered);
-      }
-    }
     // The crash channel engages only for programs that OTHERWISE pass
     // preflight: when any other diagnostic already fails the build, every
     // refusal keeps its compile-fence fallback instead — the report names
-    // each import's story, so edges whose crash will never compile still
-    // get a diagnostic. (No reachable refusal → same: fallbacks only.) The
-    // "otherwise pass" half of that question is preflightDiagnostics7's:
-    // it alone sees the tsc gate's diagnostics, so it reports `fallbacks`.
-    for (const [sf, cands] of refusals) {
-      if (covered.has(sf) && !startup.has(sf)) continue;
-      for (const c of cands) fallbacks.push(c.fallback);
-    }
-  }
-
-  return {
-    order,
-    moduleEdges: edges,
-    dynamicImportRejections,
-    inlineRequireCycleCalls,
-    diags,
-    resolveCrash,
-    fallbacks,
-  };
-}
-
-/** The whole preflight for one load: the tsc gate, the module graph walk and
- * every diagnostic they report, in report order. The structure is memoized,
- * so a caller that asked for the order first (checkModuleOrder) pays for the
- * walk once. */
-function preflight7(load: LoadResult): {
-  diags: ScrDiagnostic[];
-  moduleOrder: ts.SourceFile[];
-  startupCrash: StartupCrash | null;
-  inlineRequireCycleCalls: ReadonlySet<ts.Node>;
-  moduleEdges?: ReadonlyMap<ts.SourceFile, readonly CycleEdge[]>;
-  dynamicImportRejections?: ReadonlyMap<ts.SourceFile, StartupCrash>;
-  admittedOpinions: readonly AdmittedOpinion[];
-} {
-  registerWorkspaceEdges(load);
-  const gate = preflightGate7(load);
-  const structure = preflightStructure(load);
-  const { diags, startupCrash } = preflightDiagnostics7(load, structure, gate.diags);
-  return {
-    diags,
-    moduleOrder: structure.order,
-    startupCrash,
-    inlineRequireCycleCalls: structure.inlineRequireCycleCalls,
-    moduleEdges: structure.moduleEdges,
-    dynamicImportRejections: structure.dynamicImportRejections,
-    admittedOpinions: gate.admittedOpinions,
-  };
-}
-
-/** The diagnostics half of preflight: the tsc gate ahead of the walk's own
- * diagnostics, then the passes that judge the completed module order. The
- * tsc gate runs first on every load whose order was not requested on its
- * own, exactly as it did inside the single pass. */
-function preflightDiagnostics7(
-  load: LoadResult,
-  structure: PreflightStructure,
-  gate: ScrDiagnostic[],
-): { diags: ScrDiagnostic[]; startupCrash: StartupCrash | null } {
-  const { program, entry } = load;
-  const order = structure.order;
-  const diags: ScrDiagnostic[] = [...load.configDiags];
-  for (const d of gate) diags.push(d);
-  for (const d of structure.diags) diags.push(d);
-  // ECMAScript's sloppy-mode WRITE to an undeclared name, which the JS
-  // relaxation above admits for READS (plan D-2): refused by name, with the
-  // island route in the text (SC1091).
-  for (const d of jsUndeclaredWriteDiags(program, order)) diags.push(d);
-  // The crash channel engages only when nothing else fails preflight.
-  let startupCrash = structure.resolveCrash;
-  if (startupCrash === null || diags.length > 0) {
-    startupCrash = null;
-    for (const d of structure.fallbacks) diags.push(d);
-  }
-  const linkCrash =
-    startupCrash !== null
-      ? null
-      : earlierLinkCrash(
-          order,
-          cjsNamedImportLinkCheck(program, entry, order, diags),
-          esmNamedImportLinkCheck(program, entry, order, diags),
-        );
-  // ECMAScript early errors the TypeScript checker does not model (plan
-  // §7.7 D-4): a JavaScript source the spec makes a SyntaxError fails here,
-  // before any lowering, exactly where a tsc parse error fails.
-  diags.push(...earlyErrorDiagnostics7(order, (sf) => isNodeEsmFile7(sf, program)));
-  return { diags, startupCrash: startupCrash ?? linkCrash };
-}
-
-/** The block-comment spans of one source file, in order. Every block comment
- * is the leading trivia of the first token after it: the token's full start
- * (which includes the trivia) precedes its start, so the comment opener lies
- * in `[node.pos, tokenStart)`. Walking the arms rather than the raw text keeps
- * a `/*` inside a string or a template off the index. */
-export function blockCommentSpansOf(sf: ts.SourceFile): readonly (readonly [number, number])[] {
-  const text = sf.text;
-  const found: [number, number][] = [];
-  const scanned = new Set<number>();
-  const collect = (from: number, to: number): void => {
-    // Search only the trivia span, not the rest of the text: `indexOf` on
-    // `text` runs to the next opener or the end of the file, and a file with
-    // one admitted setter and a large comment-free body gives every node a
-    // trivia span with no opener in it, so the walk would be quadratic in the
-    // file's length.
-    const trivia = text.slice(from, to);
-    let offset = trivia.indexOf("/*");
-    while (offset >= 0) {
-      const open = from + offset;
-      const close = text.indexOf("*/", open + 2);
-      const end = close < 0 ? text.length : close + 2;
-      // A block-comment opener in the leading trivia of several nodes (a
-      // statement and its first token share a full start) is one comment.
-      if (!scanned.has(open)) {
-        scanned.add(open);
-        found.push([open, end]);
+    // each import's story rather than silently dropping edges whose crash
+    // will never compile. (No reachable refusal → same: fallbacks only.)
+    if (resolveCrash === null || diags.length > 0) {
+      resolveCrash = null;
+      for (const cands of refusals.values()) {
+        for (const c of cands) diags.push(c.fallback);
       }
-      offset = trivia.indexOf("/*", end - from);
     }
-  };
-  let triviaFrom = -1;
-  let triviaTo = -1;
-  ts.walkPreorder(sf, (node) => {
-    const start = ts.tokenStartOfNode(node);
-    if (node.pos < 0 || node.pos >= start) return;
-    // Nodes that share a first token share a trivia span; scan it once.
-    if (node.pos === triviaFrom && start === triviaTo) return;
-    triviaFrom = node.pos;
-    triviaTo = start;
-    collect(node.pos, start);
-  });
-  found.sort((a, b) => a[0] - b[0]);
-  return found.filter((span, index) => index === 0 || span[0] !== found[index - 1]![0]);
-}
+  }
 
-/** The tsc gate, and the JavaScript opinion sites it admits on the way: the
- * program's TypeScript errors, filtered to the ones whose files the build
- * compiles, with the project-world second chance. */
-interface PreflightGate {
-  diags: ScrDiagnostic[];
-  admittedOpinions: readonly AdmittedOpinion[];
-}
-
-function preflightGate7(load: LoadResult): PreflightGate {
-  const { program, entry } = load;
-  const diags: ScrDiagnostic[] = [];
-  const unselectedPackageJsFile = unselectedPackageJsFilePredicate(entry.fileName);
-  const toPassthrough = (d: ts.Diagnostic): ScrDiagnostic => {
-    const message = ts.flattenDiagnosticMessageText(d, "\n");
-    // File-less (global/options) diagnostics anchor at the entry with a
-    // zero span, exactly like the 5.9.3 lane's `d.start ?? 0` fallback.
-    const file = d.fileName ?? entry.fileName;
-    const start = d.fileName !== undefined ? d.pos : 0;
-    const end = d.fileName !== undefined ? d.end : 0;
-    // A JavaScript source's `refuse`/`rewrite` code names the construct
-    // scriptc does not lower (tsc-codes.ts): the user sees what is missing
-    // instead of TypeScript's opinion about legal JavaScript.
-    const triaged =
-      d.fileName !== undefined && isJsSourceFileName(d.fileName) ? jsTscCodeTriage(d.code) : null;
-    if (triaged?.action === "refuse" || triaged?.action === "rewrite") {
-      const diag = unsupportedDiag(
-        "SC1090",
-        { file, start, end },
-        triaged.feature,
-        `${triaged.hint} (TypeScript reports TS${d.code} here.)`,
+  const linkCrash = resolveCrash !== null
+    ? null
+    : earlierLinkCrash(
+        order,
+        cjsNamedImportLinkCheck(program, entry, order, diags),
+        esmNamedImportLinkCheck(program, entry, order, diags),
       );
-      return diag;
-    }
-    const diag = tscPassthroughDiag(message, { file, start, end });
-    const hint = typeWorldHint(d, message, load);
-    if (hint !== null) {
-      diag.typeWorld = true;
-      diag.hint = hint;
-    }
-    return diag;
-  };
-  /* TS7 checker change (not finding 5, same discipline): tsgo types a
-   * NAMESPACE import as the spec's non-callable module namespace object
-   * even when the module is declared with the callable `export =` shape —
-   * 5.9.3 bound the callable value directly, so `import * as a from
-   * "node:assert"; a(x)` typechecked there and draws TS2349 here. Those
-   * callable module objects are scriptc's OWN declared surface, and calls
-   * through the namespace binding are fenced per site by the lowering (the
-   * assert-fences fixture pins the wording), so tsgo's extra TS2349 on
-   * exactly those callees — an identifier that is a namespace-import
-   * binding of a supported builtin module — is suppressed to the 5.9.3
-   * verdict. Nothing else rides this: any other non-callable call keeps
-   * tsc's voice in both lanes. */
-  const builtinNamespaceNames = new Map<string, Set<string>>();
-  const namespaceCalleeSuppressed = (p: ts.Program, d: ts.Diagnostic): boolean => {
-    if (d.code !== 2349 || d.fileName === undefined) return false;
-    let names = builtinNamespaceNames.get(d.fileName);
-    if (!names) {
-      names = new Set();
-      builtinNamespaceNames.set(d.fileName, names);
-      const sf = p.getSourceFile(d.fileName);
-      for (const stmt of sf?.statements?.nodes ?? []) {
-        if (!ts.isImportDeclaration(stmt) || !ts.isStringLiteral(stmt.moduleSpecifier)) continue;
-        if (canonicalBuiltinModule(stmt.moduleSpecifier.text) === null) continue;
-        const bindings = stmt.importClause?.namedBindings;
-        if (bindings && ts.isNamespaceImport(bindings)) names.add(bindings.name.text);
-      }
-    }
-    if (names.size === 0) return false;
-    const sf = p.getSourceFile(d.fileName);
-    return sf !== undefined && names.has(ts.sourceTextRange(sf, d.pos, d.end));
-  };
 
-  const npmStaticFileSuppressed = (d: ts.Diagnostic): boolean =>
-    d.fileName !== undefined && npmStaticPackageOfPath(d.fileName) !== null;
-
-  const nodeModulesJsSuppressed = (d: ts.Diagnostic): boolean =>
-    d.fileName !== undefined && unselectedPackageJsFile(d.fileName);
-  /* JSDoc TYPE positions in JS files are documentation Node never reads:
-   * a name-resolution failure THERE (2304/2552 — the pattern's utilities.js
-   * spells a mapped type over a @template name it never declared) types
-   * as the error-any and the per-site fences apply, same stance as the
-   * strictness families above. A 2300 duplicate-identifier PAIR formed by
-   * a @typedef and a same-named class/function is the same story — the
-   * typedef half sits inside the comment, and the code half is suppressed
-   * exactly when its partner (same file, same name) was comment-side, so
-   * a REAL duplicate declaration (both halves in code — Node's own
-   * SyntaxError) keeps tsc's voice. A generic written without its type
-   * arguments (`{Array}`, `{Set}`) draws 2314 from tsgo, where 5.9.3
-   * instantiates every omitted argument as `any` and reports nothing. The
-   * checker still types the reference with those `any` arguments, so
-   * admitting the diagnostic restores the 5.9.3 verdict without changing
-   * the type the lowering sees. A `@readonly` tag on a getter, setter, or
-   * method is documentation 5.9.3 ignores and tsgo turns into a synthesized
-   * modifier, which it then reports as 1024 for appearing outside a property
-   * declaration. The diagnostic sits inside the comment, so the member keeps
-   * the accessor or method its code declares. */
-  const insideBlockComment = (text: string, pos: number): boolean => {
-    const open = text.lastIndexOf("/*", pos);
-    if (open < 0) return false;
-    const close = text.indexOf("*/", open + 2);
-    return close === -1 || close >= pos;
-  };
-  const jsdocTypeSuppressed = (
-    p: ts.Program,
-    d: ts.Diagnostic,
-    commentDup: Set<string>,
-  ): boolean => {
-    if (d.fileName === undefined || !isJsSourceFileName(d.fileName)) return false;
-    if (
-      d.code !== 2304 &&
-      d.code !== 2552 &&
-      d.code !== 2300 &&
-      d.code !== 1003 &&
-      d.code !== 2314 &&
-      d.code !== 1024
-    )
-      return false;
-    if (d.pos === undefined) return false;
-    const sf = p.getSourceFile(d.fileName);
-    if (!sf) return false;
-    if (insideBlockComment(sf.text, d.pos)) return true;
-    return (
-      d.code === 2300 && commentDup.has(`${d.fileName}:${ts.sourceTextRange(sf, d.pos, d.end)}`)
-    );
-  };
-
-  /* TS1051 on a setter parameter whose `?` exists only in JSDoc
-   * (`/** @param {string | null} [next] *\/`): tsc synthesizes the optional
-   * token inside the comment, while Node parses the executable parameter,
-   * where it is mandatory. A real `?`, a default, a rest parameter, or a
-   * second parameter keeps its diagnostic, because its span is the
-   * executable token and never lies inside a comment. The comment spans are
-   * collected once per SourceFile and found by binary search: a dependency
-   * can document many setters, and scanning the file's text for every
-   * diagnostic would be quadratic. The memo is keyed by SourceFile
-   * identity, not file name, because the JSX snapshot and the lowered
-   * program carry one file name with different offsets; it lives only for
-   * this gate's diagnostics, so a plain Map is enough. */
-  const commentSpans = new Map<ts.SourceFile, readonly (readonly [number, number])[]>();
-  const commentSpansOf = (sf: ts.SourceFile): readonly (readonly [number, number])[] => {
-    let spans = commentSpans.get(sf);
-    if (spans !== undefined) return spans;
-    spans = blockCommentSpansOf(sf);
-    commentSpans.set(sf, spans);
-    return spans;
-  };
-  const jsdocOptionalSetterParameterSuppressed = (p: ts.Program, d: ts.Diagnostic): boolean => {
-    if (d.code !== 1051 || d.fileName === undefined || !isJsSourceFileName(d.fileName))
-      return false;
-    if (d.pos === undefined || d.end === undefined) return false;
-    const sf = p.getSourceFile(d.fileName);
-    if (sf === undefined) return false;
-    const spans = commentSpansOf(sf);
-    let low = 0;
-    let high = spans.length - 1;
-    while (low <= high) {
-      const middle = (low + high) >> 1;
-      const [start, end] = spans[middle]!;
-      if (d.end <= start) high = middle - 1;
-      else if (d.pos >= end) low = middle + 1;
-      else return true;
-    }
-    return false;
-  };
-
-  // A `return` at the top level of a CommonJS module (TS1108): Node runs
-  // the module as a function body, so the return ends the module's
-  // evaluation. ES modules and TypeScript keep the error.
-  const cjsTopLevelReturnSuppressed = (p: ts.Program, d: ts.Diagnostic): boolean => {
-    if (d.code !== 1108 || d.fileName === undefined || !isJsSourceFileName(d.fileName))
-      return false;
-    const sf = p.getSourceFile(d.fileName);
-    return sf !== undefined && isCjsJsFile7(sf, p);
-  };
-
-  // A resolved JavaScript module without declarations (7016) says nothing
-  // about the program when scriptc does not compile the module from that
-  // import: a workspace package (a deployment tree ships runtime files
-  // only), and a subpath of a package that runs in a Node island, whose
-  // modules reach the program as handles whether or not a declaration
-  // covers them. The binding types as `any` and its uses take the dynamic
-  // paths. A bare import of a package that ships no declarations keeps the
-  // error: that is the typed import a declaration or a type patch answers.
-  const packageModuleImplicitAnySuppressed = (p: ts.Program, d: ts.Diagnostic): boolean => {
-    if (d.code !== 7016 || d.fileName === undefined || d.pos === undefined || d.end === undefined)
-      return false;
-    const sf = p.getSourceFile(d.fileName);
-    if (!sf) return false;
-    const spec = ts.sourceTextRange(sf, d.pos, d.end).replace(/^['"]|['"]$/g, "");
-    const pkg = packageNameOfSpecifier(spec);
-    return isWorkspacePackageName(pkg) || (spec !== pkg && isFrontendIsland(pkg));
-  };
-  // A JavaScript file that TypeScript checks keeps the type errors that
-  // protect its JSDoc types: a value of another type reaching a typed slot,
-  // a call with the wrong arity, and a subclass member that does not
-  // match its base (the rows that say `checkedJs: "enforce"` in
-  // JS_OPINIONS).
-  const projectCheckJs = load.typeWorld?.projectCheckJs ?? false;
-  // The opinion sites this preflight admits (tsc-codes.ts, JS_OPINIONS),
-  // deduped across the worlds the gate consults (the lowering world, the
-  // project world, the JSX text). The lowering asks opinionAt about one of
-  // them; a view's lowering path is gated on the record, never on syntax.
-  const admittedOpinions = new Map<string, AdmittedOpinion>();
-  const recordAdmittedOpinion = (site: AdmittedOpinion): void => {
-    admittedOpinions.set(`${site.file}\0${site.pos}\0${site.end}\0${site.code}`, site);
-  };
-  // A diagnostic's span is an offset into the text of the program that
-  // answered it. With JSX sources the gate's worlds hold the files as
-  // written, while the lowering asks opinionAt about nodes of `program`,
-  // which carries the rewritten text; an original offset recorded as a site
-  // would name an unrelated node wherever a rewrite moved the text. The span
-  // moves into that text exactly as a reported diagnostic's location does
-  // below: copied text keeps its offset, a span inside JSX maps to the call
-  // it lowered to.
-  const admittedSite = (p: ts.Program, site: AdmittedOpinion): AdmittedOpinion => {
-    if (p === program) return site;
-    const lowered = load.jsxSources?.get(site.file);
-    if (lowered === undefined) return site;
-    return {
-      ...site,
-      pos: lowered.rewrittenPosition(site.pos, false),
-      end: lowered.rewrittenPosition(site.end, true),
-    };
-  };
-  // A name the project's libraries declare and scriptc's do not (`lib`
-  // names the DOM, say): the project's own tsc resolves it, and Node
-  // resolves it at run time, where nothing defines it. In a TypeScript
-  // source its "cannot find name" error is therefore the opinion the
-  // JavaScript rows for the same codes hold (tsc-codes.ts): as a type the
-  // name is the checker's error type, which the lowering stores as a
-  // checked-dynamic value, and as a value a read throws Node's
-  // ReferenceError and `typeof` answers "undefined" (view `throw`). The
-  // same name read off the global object (`globalThis.document`, TS7017
-  // under `noImplicitAny`) is a property the global object does not have:
-  // the ordinary lowering answers undefined (view `checker`). And a
-  // callback parameter that such a name would have typed
-  // (`document.addEventListener("click", (event) => …)`) is implicitly
-  // `any` here and typed in the project: `any` is a truthful bound, so the
-  // ordinary lowering applies (view `checker`). The library world answers
-  // per file which of these errors remain with the project's libraries
-  // loaded; it is built only when such an error exists.
-  const libraryRemaining = new Map<string, ReadonlySet<string>>();
-  const remainingWithProjectLibraries = (fileName: string): ReadonlySet<string> | null => {
-    let remaining = libraryRemaining.get(fileName);
-    if (remaining === undefined) {
-      const world = load.libraryWorld?.();
-      const sf = world?.getSourceFile(fileName);
-      if (world === undefined || sf === undefined) return null;
-      const found = new Set<string>();
-      for (const d of world.getSemanticDiagnostics(sf)) {
-        const family = libraryErrorFamily(d.code);
-        if (family === null || d.pos === undefined || d.end === undefined) continue;
-        found.add(`${family}:${ts.sourceTextRange(sf, d.pos, d.end)}`);
-      }
-      remaining = found;
-      libraryRemaining.set(fileName, remaining);
-    }
-    return remaining;
-  };
-  const projectLibraryName = (p: ts.Program, d: ts.Diagnostic): OpinionView | null => {
-    if (load.libraryWorld === undefined) return null;
-    const family = libraryErrorFamily(d.code);
-    if (family === null) return null;
-    if (d.fileName === undefined || d.pos === undefined || d.end === undefined) return null;
-    if (isJsSourceFileName(d.fileName)) return null;
-    const sf = p.getSourceFile(d.fileName);
-    if (sf === undefined) return null;
-    const name = ts.sourceTextRange(sf, d.pos, d.end);
-    if (family !== "implicit") {
-      const node = diagnosticNode7(sf, d.pos, d.end);
-      if (family === "member") {
-        const access = node.parent;
-        if (
-          access === undefined ||
-          !ts.isPropertyAccessExpression(access) ||
-          access.name !== node ||
-          !ts.isIdentifier(access.expression) ||
-          access.expression.text !== "globalThis"
-        )
-          return null;
-      }
-      // A global Node defines is never absent at run time. As a value such
-      // a name keeps its error (scriptc's declarations do not declare it);
-      // as a type it names no value.
-      if (NODE_GLOBAL_NAMES.has(name) && (family === "member" || !namesType(node))) return null;
-    }
-    const remaining = remainingWithProjectLibraries(d.fileName);
-    if (remaining === null || remaining.has(`${family}:${name}`)) return null;
-    return family === "name" ? "throw" : "checker";
-  };
-  // keptErrors drops every diagnostic of these files: the gate does not ask
-  // the checker for them.
-  const diagnosticsKept = (fileName: string): boolean =>
-    npmStaticPackageOfPath(fileName) === null &&
-    !unselectedPackageJsFile(fileName) &&
-    !isPackageShimFile(fileName);
-  const errorsOf = (p: ts.Program): ts.Diagnostic[] =>
-    keptErrors(p, ts.getPreEmitDiagnostics(p, diagnosticsKept));
-  const keptErrors = (p: ts.Program, all: readonly ts.Diagnostic[]): ts.Diagnostic[] => {
-    // First pass: every comment-side 2300's (file, name) — the partners
-    // the second pass forgives.
-    const commentDup = new Set<string>();
-    for (const d of all) {
-      if (d.code !== 2300 || d.fileName === undefined || d.pos === undefined || d.end === undefined)
-        continue;
-      if (!isJsSourceFileName(d.fileName)) continue;
-      const sf = p.getSourceFile(d.fileName);
-      if (sf && insideBlockComment(sf.text, d.pos))
-        commentDup.add(`${d.fileName}:${sf.text.slice(d.pos, d.end)}`);
-    }
-    // The syntactic diagnostics of a JS file, asked for only when a
-    // diagnostic names a code an opinion row covers.
-    const syntactic = new Map<string, readonly ts.Diagnostic[]>();
-    const syntacticOf = (sf: ts.SourceFile): readonly ts.Diagnostic[] => {
-      let list = syntactic.get(sf.fileName);
-      if (list === undefined) {
-        list = p.getSyntacticDiagnostics(sf);
-        syntactic.set(sf.fileName, list);
-      }
-      return list;
-    };
-    // The older filters that answer from the file name, the source text or
-    // the syntax alone. The recording pass below uses this subset: the two
-    // filters that ask the CHECKER a question
-    // (inferredJsDiagnosticSuppressed, isNpmStaticSubclassArgument) are
-    // deliberately not consulted for an admitted diagnostic. Before this
-    // table, an admitted diagnostic was dropped before the chain reached
-    // them, so asking now would add a checker query a program's compile
-    // never made — and tsgo answers the query on a destructuring pattern
-    // with a panic ("Value is not an instance of 'TupleType'"), which is how
-    // this slice's Test262 replay first failed. The kept path still consults
-    // every filter, in the order it always did.
-    const keptApartFromOpinionTextually = (d: ts.Diagnostic): boolean =>
-      !npmStaticFileSuppressed(d) &&
-      !nodeModulesJsSuppressed(d) &&
-      (d.fileName === undefined || !isPackageShimFile(d.fileName)) &&
-      !namespaceCalleeSuppressed(p, d) &&
-      !packageModuleImplicitAnySuppressed(p, d) &&
-      !cjsTopLevelReturnSuppressed(p, d) &&
-      !jsdocTypeSuppressed(p, d, commentDup) &&
-      !jsdocOptionalSetterParameterSuppressed(p, d) &&
-      !parameterPropertyOrderSuppressed(p, d, load.parameterPropertiesFirst);
-    // Every filter except the opinion admission, in its historical order.
-    const keptApartFromOpinion = (d: ts.Diagnostic): boolean =>
-      keptApartFromOpinionTextually(d) &&
-      !inferredJsDiagnosticSuppressed(p, d) &&
-      !isNpmStaticSubclassArgument(p, d);
-    // A dependency's JavaScript: a JS file outside the project's own sources
-    // — a vendored package, or a module reached only through an import — that
-    // the project's tsconfig does not check (dependencyJsPredicate above;
-    // the lowering reads the same predicate, so both stances agree). TypeScript never reports a
-    // dependency's checker opinions: a JavaScript file it does not name is
-    // either an external library it does not typecheck, or (outside
-    // node_modules) plain JavaScript, where only grammar and early errors
-    // are reported. scriptc still compiles that JavaScript, as
-    // checked-dynamic code whose values are checked at every typed boundary,
-    // so the checker's type opinions about it are not build errors. The codes
-    // that stay are the ones scriptc itself adjudicates: a triage row (a
-    // grammar or early error Node rejects too, or a construct the lowering
-    // cannot build, where the refusal stands until a lowering proof lands),
-    // an admitted opinion above, and the file's own parse errors — no
-    // lowering can compile what the parser could not read. A JSDoc error sits
-    // in a comment and tsc reports it only for a file it checks, so it goes.
-    const dependencyJsFile = load.dependencyJs ?? (() => false);
-    const dependencyJsCheckDiagnostic = (d: ts.Diagnostic): boolean => {
-      if (d.fileName === undefined || !isJsSourceFileName(d.fileName)) return false;
-      const sf = p.getSourceFile(d.fileName);
-      // A dependency's shipped JavaScript is external to the project in the
-      // `maxNodeModuleJsDepth` sense: the project's `checkJs` asks tsc to
-      // check the project's JavaScript, not a package's. `// @ts-check` is
-      // the module author's own request to be checked, and stays.
-      if (sf === undefined || isCheckedJsSourceFile(sf, false)) return false;
-      if (!dependencyJsFile(sf.fileName)) return false;
-      if (d.pos !== undefined && insideBlockComment(sf.text, d.pos)) return true;
-      if (jsTscCodeTriage(d.code) !== null) return false;
-      return !syntacticOf(sf).some((s) => s.code === d.code && s.pos === d.pos && s.end === d.end);
-    };
-    const admitted: { d: ts.Diagnostic; opinion: Opinion }[] = [];
-    const kept = all.filter((d) => {
-      if (d.category !== ts.DiagnosticCategory.Error) return false;
-      // The 8xxx range is TypeScript's JSDoc-specific diagnostic family
-      // (malformed tags, signature/tag mismatches): comment semantics with no
-      // runtime meaning in a JS file, and no lowering view to record.
-      if (
-        d.fileName !== undefined &&
-        isJsSourceFileName(d.fileName) &&
-        d.code >= 8000 &&
-        d.code <= 8999
-      )
-        return false;
-      const libraryView = projectLibraryName(p, d);
-      if (libraryView !== null) {
-        recordAdmittedOpinion(
-          admittedSite(p, {
-            file: d.fileName!,
-            pos: d.pos!,
-            end: d.end!,
-            code: d.code,
-            view: libraryView,
-          }),
-        );
-        return false;
-      }
-      const opinion = jsOpinionOf7(p, d, projectCheckJs, syntacticOf);
-      if (opinion !== null) {
-        admitted.push({ d, opinion });
-        return false;
-      }
-      return keptApartFromOpinion(d) && !dependencyJsCheckDiagnostic(d);
-    });
-    for (const { d, opinion } of admitted) {
-      // No span, no site: nothing a view's lowering could be gated on.
-      if (d.fileName === undefined || d.pos === undefined || d.end === undefined) continue;
-      if (keptApartFromOpinionTextually(d))
-        recordAdmittedOpinion(
-          admittedSite(p, {
-            file: d.fileName,
-            pos: d.pos,
-            end: d.end,
-            code: d.code,
-            view: opinion.view,
-          }),
-        );
-    }
-    return kept;
-  };
-
-  // The tsc gate, with a second chance: the LOWERING world's checker
-  // includes the divergence overrides (JSON.parse(): unknown, the Promise
-  // executor shape, ...), which are TIGHTER than the standard lib — a
-  // project that typechecks clean under its own tsc can still error here
-  // (any-typed JSON.parse results, most commonly). Those errors are OURS,
-  // not the project's, so they must not fail preflight: when the lowering
-  // world has errors, the PROJECT world (same program without the override
-  // declarations) is built and consulted. Clean there → preflight passes
-  // and the override-affected sites meet the lowerer's honest fences
-  // instead (the SC1100 checked-cast family). Dirty there → the project-
-  // world errors are the ones reported: they are reproducible with the
-  // project's own tsc, which is what "fix type errors first" asks for.
-  // With JSX sources, the program over the original text answers the tsc
-  // gate; its positions move into the rewritten text the program holds.
-  // Errors only the rewritten text has come from the calls the JSX lowers
-  // to (a factory whose signature does not accept them).
-  const tscWorld = load.tscWorld;
-  const tscErrors =
-    tscWorld === undefined
-      ? errorsOf(program)
-      : keptErrors(tscWorld.program, tscWorld.diagnostics());
-  if (tscErrors.length > 0) {
-    // A JSX file was checked in a world that hides an opted-in package's
-    // declarations: its JSX types (`JSX.IntrinsicElements` from
-    // @types/react) exist only there, so the second chance is the authored
-    // world, which types owned files against the published declarations.
-    const world =
-      tscWorld === undefined || tscWorld.declWorldFallback === true
-        ? load.projectWorld()
-        : load.jsxGateWorld !== undefined
-          ? load.jsxGateWorld()
-          : (tscWorld.projectWorld ?? tscWorld.program);
-    // The errors a tsconfig setting scriptc does not follow produces, one
-    // by one: a single SC0016 names the setting instead.
-    const legacyDecoratorFiles = load.typeWorld?.legacyDecoratorFiles;
-    const projectModule = load.typeWorld?.projectModule ?? null;
-    const moduleFormat: ScrDiagnostic[] = [];
-    for (const d of errorsOf(world)) {
-      // The legacy decorators themselves are refused where the first one
-      // stands (loadProgram7).
-      if (
-        LEGACY_DECORATOR_ERRORS.has(d.code) &&
-        d.fileName !== undefined &&
-        legacyDecoratorFiles?.has(d.fileName) === true
-      )
-        continue;
-      const diag = toPassthrough(d);
-      if (projectModule !== null && (d.code === 1202 || d.code === 1203)) {
-        moduleFormat.push(diag);
-        continue;
-      }
-      const lowered = tscWorld === undefined ? undefined : load.jsxSources?.get(diag.loc.file);
-      if (lowered !== undefined) {
-        diag.loc = {
-          ...diag.loc,
-          start: lowered.rewrittenPosition(diag.loc.start, false),
-          end: lowered.rewrittenPosition(diag.loc.end, true),
-        };
-      }
-      diags.push(diag);
-    }
-    if (moduleFormat.length > 0) {
-      diags.push(
-        unfollowedSettingDiag(
-          `"module": "${projectModule}"`,
-          "TypeScript files are compiled as ES modules, the format Node gives them, where 'import x = require(…)' and 'export =' do not exist",
-          moduleFormat[0]!.loc,
-          moduleFormat.length,
-          `write 'import x from "m"' or 'import * as x from "m"', and 'export default'`,
-        ),
-      );
-    }
-  } else if (load.jsxSources !== undefined) {
-    for (const file of load.jsxSources.keys()) {
-      const sf = program.getSourceFile(file);
-      if (sf === undefined) continue;
-      const own = [...program.getSyntacticDiagnostics(sf), ...program.getSemanticDiagnostics(sf)];
-      for (const d of keptErrors(program, own)) {
-        const diag = toPassthrough(d);
-        diag.message = `${diag.message} (in the call this JSX lowers to)`;
-        diags.push(diag);
-      }
-    }
-  }
-
-  return { diags, admittedOpinions: [...admittedOpinions.values()] };
+  frontendStamp("preflight.structure");
+  return { diags, moduleOrder: order, startupCrash: resolveCrash ?? linkCrash };
 }
 
 /* ── the CJS named-import link check ─────────────────────────────────────
@@ -9077,352 +3436,10 @@ function preflightGate7(load: LoadResult): PreflightGate {
  * mirrors it), never from execution — so a named import the checker binds
  * happily can still fail Node's instantiate phase with a SyntaxError,
  * thrown before ANY module in the graph evaluates. The checker's word is
- * NOT Node's word exactly here, and shipping the checker's answer would
- * diverge from Node without a diagnostic (`module.exports = { a: 7 }` served `a` where
+ * NOT Node's word exactly here, and shipping the checker's answer is the
+ * silent-divergence trap (`module.exports = { a: 7 }` served `a` where
  * Node refuses the program). This walk asks Node's question at compile
  * time, in Node's exact ORDER, and answers with Node's exact message. */
-
-/** The CommonJS program file a re-export (`module.exports = require(spec)`)
- * of `from` resolves to, or null: reexport targets union in only when they
- * resolve to CommonJS program files (Node's cjsPreparseModuleExports rule). */
-function cjsReexportDep7(program: ts.Program) {
-  return (from: ts.SourceFile, spec: string): ts.SourceFile | null => {
-    const dep =
-      resolveImport7(program, from, spec, "require") ??
-      npmStaticDepSf7(program, from, spec, "require");
-    return dep !== null && isCjsJsFile7(dep, program) ? dep : null;
-  };
-}
-
-/** Node's lexer analysis of a CommonJS file. A bundler rewrite spells some
- * lexer-visible names as accessors. */
-function lexWithAccessorNames(sf: ts.SourceFile): ReturnType<typeof cjsLexedExportsOfFile> {
-  const lexed = cjsLexedExportsOfFile(sf);
-  for (const name of npmStaticLexerVisibleNames(sf.fileName)) lexed.exports.add(name);
-  return lexed;
-}
-
-/** The property names of Node's namespace object for the CommonJS module
- * `dep`: the names its lexer detects, CommonJS re-exports included (the
- * rule of the named-import link check), plus `default` and
- * `module.exports`. */
-/** `dep` and every CommonJS module it re-exports, transitively (the modules
- * whose exports its namespace object shows). */
-export function cjsReexportedModules(program: ts.Program, dep: ts.SourceFile): ts.SourceFile[] {
-  const resolveDep = cjsReexportDep7(program);
-  const seen = new Set<ts.SourceFile>([dep]);
-  const order = [dep];
-  for (let i = 0; i < order.length; i++) {
-    const mod = order[i]!;
-    for (const spec of lexWithAccessorNames(mod).reexports) {
-      const next = resolveDep(mod, spec);
-      if (next !== null && !seen.has(next)) {
-        seen.add(next);
-        order.push(next);
-      }
-    }
-  }
-  return order;
-}
-
-export function cjsNamespaceExportNames(program: ts.Program, dep: ts.SourceFile): Set<string> {
-  const names = cjsVisibleNames(dep, lexWithAccessorNames, cjsReexportDep7(program), new Map());
-  return new Set([...names, "default", "module.exports"]);
-}
-
-/** Whether the checker can read `name` as a property of a CommonJS module's
- * `export =` value, the surface a named re-export of the module binds. */
-function cjsWholeExportHasProperty(
-  checker: ts.TypeChecker,
-  wholeExport: ts.Symbol,
-  at: ts.Node,
-  name: string,
-): boolean {
-  const value =
-    (wholeExport.flags & ts.SymbolFlags.Alias) !== 0
-      ? checker.getAliasedSymbol(wholeExport)
-      : wholeExport;
-  const type = checker.getTypeOfSymbolAtLocation(value, at);
-  return (
-    checker.getPropertyOfType(type, name) !== undefined ||
-    checker.getPropertyOfType(type, ts.escapedSymbolName(name) as unknown as string) !== undefined
-  );
-}
-
-/** The binding names a declaration name introduces (`a`, `{ b, c: d }`,
- * `[e, ...f]`). */
-function declaredBindingNames(name: ts.BindingName, out: Set<string>): void {
-  if (ts.isIdentifier(name)) {
-    out.add(name.text);
-    return;
-  }
-  for (const element of name.elements.nodes) {
-    if (ts.isOmittedExpression(element) || element.name === undefined) continue;
-    declaredBindingNames(element.name, out);
-  }
-}
-
-/** The names a module exports itself, from its syntax: `export`-modified
- * declarations, export lists naming local bindings, named re-exports, and
- * export assignments. `default` is included; a star export is not, and
- * neither is a type-only declaration (it has no runtime export to shadow a
- * star with). */
-function ownExportNamesOf(sf: ts.SourceFile): Set<string> {
-  const names = new Set<string>();
-  for (const stmt of sf.statements.nodes) {
-    if (ts.isExportDeclaration(stmt)) {
-      const clause = stmt.exportClause;
-      if (stmt.isTypeOnly || clause === undefined) continue;
-      if (ts.isNamedExports(clause)) {
-        for (const element of clause.elements.nodes)
-          if (!element.isTypeOnly) names.add(element.name.text);
-      } else {
-        names.add(clause.name.text);
-      }
-      continue;
-    }
-    if (ts.isExportAssignment(stmt)) {
-      names.add("default");
-      continue;
-    }
-    if (ts.isInterfaceDeclaration(stmt) || ts.isTypeAliasDeclaration(stmt)) continue;
-    const modifiers = ts.getModifiers(stmt as unknown as ts.Declaration);
-    if (modifiers === undefined) continue;
-    if (!modifiers.some((modifier) => modifier.kind === ts.SyntaxKind.ExportKeyword)) continue;
-    if (modifiers.some((modifier) => modifier.kind === ts.SyntaxKind.DeclareKeyword)) continue;
-    if (modifiers.some((modifier) => modifier.kind === ts.SyntaxKind.DefaultKeyword)) {
-      names.add("default");
-      continue;
-    }
-    if (ts.isVariableStatement(stmt)) {
-      for (const declaration of stmt.declarationList.declarations.nodes)
-        if (declaration.name !== undefined) declaredBindingNames(declaration.name, names);
-      continue;
-    }
-    const name = (stmt as { name?: ts.Node }).name;
-    if (name !== undefined && ts.isIdentifier(name)) names.add(name.text);
-  }
-  return names;
-}
-
-/* ── `export *` over a CommonJS module ───────────────────────────────────
- * Node serves a CommonJS module to the ES module graph through the facade
- * its lexer describes, so `export * from "./x.cjs"` forwards every name of
- * that facade except `default` — `module.exports` included, the module's
- * whole export value. TypeScript does not model that facade as a star
- * source. When the module's shape is an `export =` it refuses the form
- * outright (TS2498, "uses 'export =' and cannot be used with 'export *'")
- * and binds none of the names; when its `exports.name` writes type as named
- * exports it binds those but has no `module.exports` to forward, and the
- * lowering's link check does not follow the star. Either way the checker,
- * every importer of the re-export, and the lowering miss exports Node
- * serves.
- *
- * The rewrite below gives the checker the facade Node builds. Each star
- * statement becomes a side-effect import where it stood — Node initializes a
- * module's dependencies in source order, so the CommonJS module keeps its
- * place among them — and the names arrive as explicit re-exports appended
- * after the last statement, where nothing that already exists moves:
- *
- *   export * from "./x.cjs";
- * becomes (in place)   import "./x.cjs";
- * and (appended)       export { "a", "b" } from "./x.cjs";
- *                        import __scriptcCjsStar0 from "./x.cjs";
- *                        export { __scriptcCjsStar0 as "module.exports" };
- *
- * Node's precedence rules decide the names: a name the file exports itself
- * wins over the star, and a name two DIFFERENT re-exported modules provide
- * is ambiguous and excluded (probed). A name TypeScript cannot type on the
- * CommonJS module — a lexer-detected name its JavaScript inference has no
- * declaration for — is left out as well: the program could not refer to it,
- * though Node's namespace would still show it. */
-export function cjsStarReexportSources(program: ts.Program): Map<string, string> {
-  const out = new Map<string, string>();
-  const checker = program.getTypeChecker();
-  for (const sf of program.getImplementationSourceFiles()) {
-    if (sf.isDeclarationFile || isCjsJsFile7(sf, program)) continue;
-    // Every `export *` of the file takes part in Node's shadowing and
-    // ambiguity rules, so each one's names are collected; only the CommonJS
-    // targets are rewritten.
-    const reexports: {
-      stmt: ts.ExportDeclaration;
-      spec: string;
-      specNode: ts.StringLiteral;
-      target: ts.SourceFile;
-      /** The names the target's namespace contributes to the star, without
-       * `default`: Node's lexer facade names for a CommonJS module, the
-       * resolved export names for an ES module. */
-      names: Set<string>;
-      /** The CommonJS names the checker can type, the ones re-exported. */
-      typed: string[];
-      commonjs: boolean;
-    }[] = [];
-    for (const stmt of sf.statements.nodes) {
-      if (!ts.isExportDeclaration(stmt) || stmt.isTypeOnly || stmt.exportClause !== undefined)
-        continue;
-      const specNode = stmt.moduleSpecifier;
-      if (specNode === undefined || !ts.isStringLiteral(specNode)) continue;
-      const spec = specNode.text;
-      const target = resolveImport7(program, sf, spec) ?? npmStaticDepSf7(program, sf, spec);
-      if (target === null || target.isDeclarationFile || target.fileName.endsWith(".json"))
-        continue;
-      reexports.push({
-        stmt,
-        spec,
-        specNode,
-        target,
-        names: new Set(),
-        typed: [],
-        commonjs: isCjsJsFile7(target, program),
-      });
-    }
-    if (!reexports.some((entry) => entry.commonjs)) continue;
-    // A file without a CommonJS star never pays for the name census below.
-    for (const entry of reexports) {
-      const moduleSymbol = checker.getSymbolAtLocation(entry.specNode);
-      if (entry.commonjs) {
-        const wholeExport = moduleSymbol?.getExports().get("export=" as ts.__String);
-        // A name the checker gives the CommonJS module binds: a property of
-        // its `export =` value, or an export of a JavaScript module whose
-        // `exports.name` writes it types as one.
-        let plainNames: Set<string> | null = null;
-        const binds = (name: string): boolean => {
-          if (wholeExport !== undefined)
-            return cjsWholeExportHasProperty(checker, wholeExport, entry.target, name);
-          if (moduleSymbol === undefined) return false;
-          plainNames ??= new Set(
-            checker.getExportsOfModule(moduleSymbol).map((symbol) => ts.symbolName(symbol)),
-          );
-          return plainNames.has(name);
-        };
-        for (const name of cjsNamespaceExportNames(program, entry.target)) {
-          if (name === "default") continue;
-          entry.names.add(name);
-          if (name !== "module.exports" && binds(name)) entry.typed.push(name);
-        }
-      } else if (moduleSymbol !== undefined) {
-        for (const symbol of checker.getExportsOfModule(moduleSymbol)) {
-          const name = ts.symbolName(symbol);
-          if (name !== "default") entry.names.add(name);
-        }
-      }
-    }
-    const stars = reexports.filter((entry) => entry.commonjs);
-    if (stars.length === 0) continue;
-    // Node's precedence: a name the module exports itself wins over every
-    // star, and a name two DIFFERENT re-exported modules provide is
-    // ambiguous and absent (twice from the SAME module is one binding).
-    const providers = new Map<string, Set<ts.SourceFile>>();
-    for (const entry of reexports) {
-      for (const name of entry.names) {
-        let seen = providers.get(name);
-        if (seen === undefined) providers.set(name, (seen = new Set()));
-        seen.add(entry.target);
-      }
-    }
-    const own = ownExportNamesOf(sf);
-    const kept = (name: string): boolean => !own.has(name) && providers.get(name)?.size === 1;
-    const edits = stars
-      .map((star) => ({
-        start: ts.tokenStartOfNode(star.stmt),
-        end: star.stmt.end,
-        text: `import ${JSON.stringify(star.spec)};`,
-      }))
-      .sort((a, b) => a.start - b.start);
-    const emitted = new Set<ts.SourceFile>();
-    const appended = stars.flatMap((star) => {
-      // Two star statements naming the same module forward one set of names.
-      if (emitted.has(star.target)) return [];
-      emitted.add(star.target);
-      const names = star.typed.filter(kept);
-      return names.length === 0
-        ? []
-        : [
-            `export { ${names.map((name) => JSON.stringify(name)).join(", ")} } from ${JSON.stringify(star.spec)};`,
-          ];
-    });
-    // `module.exports` forwards the module's whole export value, which is
-    // its default import; two different modules providing it are ambiguous.
-    const wholeProviders = providers.get("module.exports");
-    const whole =
-      wholeProviders !== undefined && wholeProviders.size === 1 && kept("module.exports")
-        ? stars.find((star) => wholeProviders.has(star.target))!.spec
-        : null;
-    if (whole !== null) {
-      let binding = "__scriptcCjsStar";
-      for (let n = 0; sf.text.includes(binding); n++) binding = `__scriptcCjsStar${n}`;
-      appended.push(
-        `import ${binding} from ${JSON.stringify(whole)};`,
-        `export { ${binding} as "module.exports" };`,
-      );
-    }
-    let text = "";
-    let at = 0;
-    for (const edit of edits) {
-      text +=
-        sf.text.slice(at, edit.start) + padded(sf.text.slice(edit.start, edit.end), edit.text);
-      at = edit.end;
-    }
-    text += sf.text.slice(at);
-    if (appended.length > 0) text += `\n${appended.join("\n")}\n`;
-    out.set(sf.fileName, text);
-  }
-  return out;
-}
-
-/** The export names a CommonJS module assigns inside functions
- * (`exports.current = value` in a function body), or "all" when such code
- * writes a computed name, replaces module.exports or redefines exports
- * through Object.defineProperty. Node's namespace object of the module
- * holds the values the exports had when the module finished evaluating,
- * so it does not see those writes. */
-export function cjsExportsAssignedInFunctions(sf: ts.SourceFile): ReadonlySet<string> | "all" {
-  const names = new Set<string>();
-  let all = false;
-  const exportsObject = (e: ts.Expression): boolean =>
-    (ts.isIdentifier(e) && e.text === "exports") || isModuleExportsAccess(e);
-  const target = (e: ts.Expression): void => {
-    while (ts.isParenthesizedExpression(e)) e = e.expression;
-    if (isModuleExportsAccess(e)) all = true;
-    else if (ts.isPropertyAccessExpression(e) && exportsObject(e.expression))
-      names.add(e.name.text);
-    else if (ts.isElementAccessExpression(e) && exportsObject(e.expression)) {
-      if (ts.isStringLiteralLike(e.argumentExpression)) names.add(e.argumentExpression.text);
-      else all = true;
-    }
-  };
-  const visit = (node: ts.Node, inFunction: boolean): void => {
-    if (all) return;
-    const nested = inFunction || ts.isFunctionLike(node);
-    if (nested) {
-      if (
-        ts.isBinaryExpression(node) &&
-        node.operatorToken.kind >= ts.SyntaxKind.FirstAssignment &&
-        node.operatorToken.kind <= ts.SyntaxKind.LastAssignment
-      )
-        target(node.left);
-      else if (
-        (ts.isPrefixUnaryExpression(node) || ts.isPostfixUnaryExpression(node)) &&
-        (node.operator === ts.SyntaxKind.PlusPlusToken ||
-          node.operator === ts.SyntaxKind.MinusMinusToken)
-      )
-        target(node.operand);
-      else if (ts.isDeleteExpression(node)) target(node.expression);
-      else if (
-        ts.isCallExpression(node) &&
-        ts.isPropertyAccessExpression(node.expression) &&
-        ts.isIdentifier(node.expression.expression) &&
-        node.expression.expression.text === "Object" &&
-        node.arguments.nodes[0] !== undefined &&
-        exportsObject(node.arguments.nodes[0])
-      )
-        all = true;
-    }
-    ts.forEachChild(node, (child) => visit(child, nested));
-  };
-  visit(sf, false);
-  return all ? "all" : names;
-}
 
 interface BadCjsImport {
   /** The export name requested from the CJS module. */
@@ -9464,15 +3481,17 @@ function cjsNamedImportLinkCheck(
     const npmStatic = npmStaticDepSf7(program, from, spec);
     return npmStatic;
   };
-  const resolveCjsDep = cjsReexportDep7(program);
+  // Reexport targets union in only when they resolve to CommonJS program
+  // files (Node's cjsPreparseModuleExports rule).
+  const resolveCjsDep = (from: ts.SourceFile, spec: string): ts.SourceFile | null => {
+    const dep = resolveImport7(program, from, spec, "require") ?? npmStaticDepSf7(program, from, spec, "require");
+    return dep !== null && isCjsJsFile7(dep, program) ? dep : null;
+  };
   const visible = (dep: ts.SourceFile, name: string): boolean =>
-    // `default` and `module.exports` are the module.exports binding itself
-    // — always provided. The program already owns native source ASTs;
-    // reuse them without starting another syntax session or reparsing
-    // their source text.
-    name === "default" ||
-    name === "module.exports" ||
-    cjsVisibleNames(dep, lexWithAccessorNames, resolveCjsDep, lexMemo).has(name);
+    // `default` is the module.exports binding itself — always provided.
+    // The program already owns native source ASTs; reuse them without
+    // starting another syntax session or reparsing their source text.
+    name === "default" || cjsVisibleNames(dep, cjsLexedExportsOfFile, resolveCjsDep, lexMemo).has(name);
 
   /** The statement's resolved LOCAL CommonJS dependency, when it is an
    * import/re-export from one. */
@@ -9485,27 +3504,16 @@ function cjsNamedImportLinkCheck(
    * check order: all regular named imports sorted by local binding name,
    * then `export { x } from` elements in source order. */
   const firstInvisibleOf = (sf: ts.SourceFile): BadCjsImport | null => {
-    const entries: {
-      local: string;
-      exportName: string;
-      nameNode: ts.Node;
-      spec: string;
-      dep: ts.SourceFile;
-    }[] = [];
-    for (const stmt of sf.statements.nodes) {
-      if (
-        !ts.isImportDeclaration(stmt) ||
-        stmt.moduleSpecifier === undefined ||
-        !ts.isStringLiteral(stmt.moduleSpecifier)
-      )
-        continue;
+    const entries: { local: string; exportName: string; nameNode: ts.Node; spec: string; dep: ts.SourceFile }[] = [];
+    for (const stmt of sf.statements) {
+      if (!ts.isImportDeclaration(stmt) || stmt.moduleSpecifier === undefined || !ts.isStringLiteral(stmt.moduleSpecifier)) continue;
       const clause = stmt.importClause;
       if (!clause || clause.phaseModifier === ts.SyntaxKind.TypeKeyword) continue;
       if (!clause.namedBindings || !ts.isNamedImports(clause.namedBindings)) continue;
       const spec = stmt.moduleSpecifier.text;
       const dep = cjsDepOf(sf, spec);
       if (dep === null) continue;
-      for (const e of clause.namedBindings.elements.nodes) {
+      for (const e of clause.namedBindings.elements) {
         if (e.isTypeOnly) continue;
         const nameNode = e.propertyName ?? e.name;
         entries.push({ local: e.name.text, exportName: nameNode.text, nameNode, spec, dep });
@@ -9513,17 +3521,16 @@ function cjsNamedImportLinkCheck(
     }
     entries.sort((a, b) => (a.local < b.local ? -1 : a.local > b.local ? 1 : 0));
     for (const e of entries) {
-      if (!visible(e.dep, e.exportName))
-        return { exportName: e.exportName, spec: e.spec, nameNode: e.nameNode, sf };
+      if (!visible(e.dep, e.exportName)) return { exportName: e.exportName, spec: e.spec, nameNode: e.nameNode, sf };
     }
-    for (const stmt of sf.statements.nodes) {
+    for (const stmt of sf.statements) {
       if (!ts.isExportDeclaration(stmt) || stmt.isTypeOnly) continue;
       if (stmt.moduleSpecifier === undefined || !ts.isStringLiteral(stmt.moduleSpecifier)) continue;
       if (!stmt.exportClause || !ts.isNamedExports(stmt.exportClause)) continue;
       const spec = stmt.moduleSpecifier.text;
       const dep = cjsDepOf(sf, spec);
       if (dep === null) continue;
-      for (const e of stmt.exportClause.elements.nodes) {
+      for (const e of stmt.exportClause.elements) {
         if (e.isTypeOnly) continue;
         const nameNode = e.propertyName ?? e.name;
         if (!visible(dep, nameNode.text)) return { exportName: nameNode.text, spec, nameNode, sf };
@@ -9540,15 +3547,10 @@ function cjsNamedImportLinkCheck(
   const dfs = (sf: ts.SourceFile): BadCjsImport | null => {
     if (visited.has(sf)) return null;
     visited.add(sf);
-    for (const stmt of sf.statements.nodes) {
-      if (!ts.isImportDeclaration(stmt) && !(ts.isExportDeclaration(stmt) && !stmt.isTypeOnly))
-        continue;
+    for (const stmt of sf.statements) {
+      if (!ts.isImportDeclaration(stmt) && !(ts.isExportDeclaration(stmt) && !stmt.isTypeOnly)) continue;
       if (ts.isExportDeclaration(stmt) && isPrunedNpmReexport(program, stmt)) continue;
-      if (
-        ts.isImportDeclaration(stmt) &&
-        stmt.importClause?.phaseModifier === ts.SyntaxKind.TypeKeyword
-      )
-        continue;
+      if (ts.isImportDeclaration(stmt) && stmt.importClause?.phaseModifier === ts.SyntaxKind.TypeKeyword) continue;
       const specNode = stmt.moduleSpecifier;
       if (specNode === undefined || !ts.isStringLiteral(specNode)) continue;
       const spec = specNode.text;
@@ -9585,17 +3587,11 @@ function cjsNamedImportLinkCheck(
   // it is CommonJS (module_job.js consults the ROOT job's moduleRequests/
   // commonJsDeps — a deep module's failure keeps the generic wording).
   let flavored = false;
-  for (const stmt of entry.statements.nodes) {
-    if (!ts.isImportDeclaration(stmt) && !(ts.isExportDeclaration(stmt) && !stmt.isTypeOnly))
-      continue;
-    if (
-      ts.isImportDeclaration(stmt) &&
-      stmt.importClause?.phaseModifier === ts.SyntaxKind.TypeKeyword
-    )
-      continue;
+  for (const stmt of entry.statements) {
+    if (!ts.isImportDeclaration(stmt) && !(ts.isExportDeclaration(stmt) && !stmt.isTypeOnly)) continue;
+    if (ts.isImportDeclaration(stmt) && stmt.importClause?.phaseModifier === ts.SyntaxKind.TypeKeyword) continue;
     const specNode = stmt.moduleSpecifier;
-    if (specNode === undefined || !ts.isStringLiteral(specNode) || specNode.text !== bad.spec)
-      continue;
+    if (specNode === undefined || !ts.isStringLiteral(specNode) || specNode.text !== bad.spec) continue;
     if (cjsDepOf(entry, bad.spec) !== null) {
       flavored = true;
       break;
@@ -9603,18 +3599,14 @@ function cjsNamedImportLinkCheck(
   }
   const loc = locOf7(bad.nameNode);
   if (!flavored) {
-    return {
-      message: `The requested module '${bad.spec}' does not provide an export named '${bad.exportName}'`,
-      className: "%SyntaxError",
-      loc,
-    };
+    return { message: `The requested module '${bad.spec}' does not provide an export named '${bad.exportName}'`, className: "%SyntaxError", loc };
   }
   // The destructuring hint: Node regexes the failing name's SOURCE LINE
   // for its brace group (greedy, first `{` to last `}` on the line) and
-  // swaps ` as ` for `: ` — reproduced exactly, quirks included
+  // swaps ` as ` for `: ` — reproduced byte for byte, quirks included
   // (multi-line import statements simply lose the hint).
   const text = bad.sf.text;
-  const pos = ts.tokenStartOfNode(bad.nameNode);
+  const pos = bad.nameNode.getStart(bad.sf);
   const lineStart = text.lastIndexOf("\n", pos - 1) + 1;
   const lineEnd = text.indexOf("\n", pos);
   let line = text.slice(lineStart, lineEnd < 0 ? text.length : lineEnd);
@@ -9648,9 +3640,6 @@ interface BadEsmImport {
   spec: string;
   nameNode: ts.Node;
   sf: ts.SourceFile;
-  /** The module the request names: a source file, or a builtin module by
-   * its name. */
-  dep: ts.SourceFile | string;
 }
 
 interface EsmNamedImportLinkAnalysis {
@@ -9682,19 +3671,16 @@ function analyzeEsmNamedImportLinks(
     return npmStaticDepSf7(program, from, spec);
   };
 
-  /** One identity per CommonJS module a star re-export spreads, so a name
-   * the same module contributes through two paths stays unambiguous. */
-  const cjsStarExports = new Map<ts.SourceFile, object>();
   const runtimeExport = (
     dep: ts.SourceFile,
     name: string,
     seenModules: ReadonlySet<ts.SourceFile> = new Set(),
-  ): unknown => {
+  ): ts.Symbol | undefined => {
     if (seenModules.has(dep)) return undefined;
     const nextSeen = new Set(seenModules);
     nextSeen.add(dep);
     const module = checker.getSymbolAtLocation(dep);
-    const exported = module?.getExports().get(ts.escapedSymbolName(name));
+    const exported = module?.getExports().get(ts.escapeLeadingUnderscores(name));
     if (exported !== undefined) {
       let resolved = exported;
       const seenSymbols = new Set<ts.Symbol>();
@@ -9710,15 +3696,11 @@ function analyzeEsmNamedImportLinks(
       if (
         name === "default" &&
         hasNodeTsDefaultInterfacePlaceholder7(dep) &&
-        resolved.declarations.some(
+        checker.declarationsOf(resolved).some(
           (declaration) =>
             ts.isInterfaceDeclaration(declaration) &&
-            ts
-              .getModifiers(declaration)
-              ?.some((modifier) => modifier.kind === ts.SyntaxKind.DefaultKeyword) === true &&
-            ts
-              .getModifiers(declaration)
-              ?.some((modifier) => modifier.kind === ts.SyntaxKind.ExportKeyword) === true,
+            ts.getModifiers(declaration)?.some((modifier) => modifier.kind === ts.SyntaxKind.DefaultKeyword) === true &&
+            ts.getModifiers(declaration)?.some((modifier) => modifier.kind === ts.SyntaxKind.ExportKeyword) === true,
         )
       ) {
         return resolved;
@@ -9732,56 +3714,12 @@ function analyzeEsmNamedImportLinks(
     // resolved symbol may arrive through multiple stars, while distinct
     // symbols make the name unavailable. `default` never star-reexports.
     if (name === "default") return undefined;
-    let starExport: unknown;
-    for (const stmt of dep.statements.nodes) {
-      if (!ts.isExportDeclaration(stmt) || stmt.isTypeOnly || stmt.exportClause !== undefined)
-        continue;
+    let starExport: ts.Symbol | undefined;
+    for (const stmt of dep.statements) {
+      if (!ts.isExportDeclaration(stmt) || stmt.isTypeOnly || stmt.exportClause !== undefined) continue;
       if (stmt.moduleSpecifier === undefined || !ts.isStringLiteral(stmt.moduleSpecifier)) continue;
       const target = resolveEdge(dep, stmt.moduleSpecifier.text);
-      if (target === null || target.fileName.endsWith(".json")) continue;
-      if (!isNodeEsmFile7(target, program)) {
-        // `export *` over a CommonJS module: Node re-exports the names its
-        // lexer detects through the module's ESM facade (a member a branch
-        // attaches counts — the lexer reads bytes, not control flow), its
-        // CommonJS re-exports included, and never `default`. Each CommonJS
-        // module contributes bindings of its own, so one name arriving from
-        // two of them is ambiguous exactly as two ES modules' would be.
-        if (!isCjsJsFile7(target, program)) continue;
-        if (!cjsNamespaceExportNames(program, target).has(name)) continue;
-        // The member's own symbol when the checker declares it: a named
-        // re-export of the same member (`export { name } from './x.cjs'`,
-        // reached directly or through another star) resolves to that symbol,
-        // so both paths agree and the name is not called ambiguous. Node
-        // spreads bindings, not paths.
-        const member = checker
-          .getSymbolAtLocation(target)
-          ?.getExports()
-          .get(ts.escapedSymbolName(name));
-        if (member !== undefined) {
-          let resolved = member;
-          const seenSymbols = new Set<ts.Symbol>();
-          while ((resolved.flags & ts.SymbolFlags.Alias) !== 0 && !seenSymbols.has(resolved)) {
-            seenSymbols.add(resolved);
-            resolved = checker.getAliasedSymbol(resolved);
-          }
-          if (resolved.flags & ts.SymbolFlags.Value) {
-            if (starExport !== undefined && starExport !== resolved) return undefined;
-            starExport = resolved;
-            continue;
-          }
-        }
-        // A name only the lexer detects (the checker declares no member):
-        // one identity per contributing module, so the same module reached
-        // through two stars stays unambiguous.
-        let sentinel = cjsStarExports.get(target);
-        if (sentinel === undefined) {
-          sentinel = { commonJsStar: target.fileName };
-          cjsStarExports.set(target, sentinel);
-        }
-        if (starExport !== undefined && starExport !== sentinel) return undefined;
-        starExport = sentinel;
-        continue;
-      }
+      if (target === null || target.fileName.endsWith(".json") || !isNodeEsmFile7(target, program)) continue;
       const candidate = runtimeExport(target, name, nextSeen);
       if (candidate === undefined) continue;
       if (starExport !== undefined && starExport !== candidate) return undefined;
@@ -9791,54 +3729,27 @@ function analyzeEsmNamedImportLinks(
   };
 
   const firstMissingOf = (sf: ts.SourceFile): BadEsmImport | null => {
-    // A request's target: a program ES module, or a builtin module by its
-    // canonical name. Node links a builtin's named imports against the
-    // enumerable own keys of its exports object (and `default`), the names
-    // the member census records: a name the exports object owns without
-    // enumerating it (`Z_NO_FLUSH` of node:zlib) is not an export.
-    const imports: {
-      local: string;
-      exportName: string;
-      spec: string;
-      nameNode: ts.Node;
-      dep: ts.SourceFile | string;
-    }[] = [];
-    for (const stmt of sf.statements.nodes) {
+    const imports: { local: string; exportName: string; spec: string; nameNode: ts.Node; dep: ts.SourceFile }[] = [];
+    for (const stmt of sf.statements) {
       if (!ts.isImportDeclaration(stmt) || !ts.isStringLiteral(stmt.moduleSpecifier)) continue;
       const clause = stmt.importClause;
       if (clause === undefined || clause.phaseModifier === ts.SyntaxKind.TypeKeyword) continue;
       const spec = stmt.moduleSpecifier.text;
-      const builtin = npmBuiltinAliasOf(spec) === null ? canonicalBuiltinModule(spec) : null;
-      if (builtin !== null) {
-        if (clause.namedBindings === undefined || !ts.isNamedImports(clause.namedBindings))
-          continue;
-        for (const element of clause.namedBindings.elements.nodes) {
-          if (element.isTypeOnly) continue;
-          const nameNode = element.propertyName ?? element.name;
-          imports.push({
-            local: element.name.text,
-            exportName: nameNode.text,
-            spec,
-            nameNode,
-            dep: builtin,
-          });
-        }
-        continue;
-      }
       const dep = resolveEdge(sf, spec);
       if (dep === null || dep.fileName.endsWith(".json") || !isNodeEsmFile7(dep, program)) continue;
       if (clause.name !== undefined) {
-        imports.push({
-          local: clause.name.text,
-          exportName: "default",
-          spec,
-          nameNode: clause.name,
-          dep,
-        });
+        imports.push({ local: clause.name.text, exportName: "default", spec, nameNode: clause.name, dep });
       }
       if (clause.namedBindings === undefined || !ts.isNamedImports(clause.namedBindings)) continue;
-      for (const element of clause.namedBindings.elements.nodes) {
+      for (const element of clause.namedBindings.elements) {
         if (element.isTypeOnly) continue;
+        // Browser target: the page's bundler (esbuild/Vite, isolatedModules) erases an import whose binding is only a type,
+        // so it never reaches the linker; Node's type stripping keeps it and fails to link. Follow the bundler there.
+        if (browserTarget()) {
+          let target = checker.getSymbolAtLocation(element.name);
+          if (target && (target.flags & ts.SymbolFlags.Alias) !== 0) target = checker.getAliasedSymbol(target);
+          if (target && (target.flags & ts.SymbolFlags.Value) === 0) continue;
+        }
         const nameNode = element.propertyName ?? element.name;
         imports.push({
           local: element.name.text,
@@ -9854,22 +3765,17 @@ function analyzeEsmNamedImportLinks(
     // more than one erased TypeScript export.
     imports.sort((a, b) => (a.local < b.local ? -1 : a.local > b.local ? 1 : 0));
     for (const request of imports) {
-      const missing =
-        typeof request.dep === "string"
-          ? builtinModuleHasMember(request.dep, "esm", request.exportName) === false
-          : runtimeExport(request.dep, request.exportName) === undefined;
-      if (missing) {
+      if (runtimeExport(request.dep, request.exportName) === undefined) {
         return {
           exportName: request.exportName,
           spec: request.spec,
           nameNode: request.nameNode,
           sf,
-          dep: request.dep,
         };
       }
     }
 
-    for (const stmt of sf.statements.nodes) {
+    for (const stmt of sf.statements) {
       if (!ts.isExportDeclaration(stmt) || stmt.isTypeOnly) continue;
       const moduleSpecifier = stmt.moduleSpecifier;
       const exportClause = stmt.exportClause;
@@ -9878,11 +3784,11 @@ function analyzeEsmNamedImportLinks(
       const spec = moduleSpecifier.text;
       const dep = resolveEdge(sf, spec);
       if (dep === null || dep.fileName.endsWith(".json") || !isNodeEsmFile7(dep, program)) continue;
-      for (const element of exportClause.elements.nodes) {
+      for (const element of exportClause.elements) {
         if (element.isTypeOnly) continue;
         const nameNode = element.propertyName ?? element.name;
         if (runtimeExport(dep, nameNode.text) === undefined) {
-          return { exportName: nameNode.text, spec, nameNode, sf, dep };
+          return { exportName: nameNode.text, spec, nameNode, sf };
         }
       }
     }
@@ -9896,15 +3802,10 @@ function analyzeEsmNamedImportLinks(
   const dfs = (sf: ts.SourceFile): BadEsmImport | null => {
     if (visited.has(sf)) return null;
     visited.add(sf);
-    for (const stmt of sf.statements.nodes) {
-      if (!ts.isImportDeclaration(stmt) && !(ts.isExportDeclaration(stmt) && !stmt.isTypeOnly))
-        continue;
+    for (const stmt of sf.statements) {
+      if (!ts.isImportDeclaration(stmt) && !(ts.isExportDeclaration(stmt) && !stmt.isTypeOnly)) continue;
       if (ts.isExportDeclaration(stmt) && isPrunedNpmReexport(program, stmt)) continue;
-      if (
-        ts.isImportDeclaration(stmt) &&
-        stmt.importClause?.phaseModifier === ts.SyntaxKind.TypeKeyword
-      )
-        continue;
+      if (ts.isImportDeclaration(stmt) && stmt.importClause?.phaseModifier === ts.SyntaxKind.TypeKeyword) continue;
       const moduleSpecifier = stmt.moduleSpecifier;
       if (moduleSpecifier === undefined || !ts.isStringLiteral(moduleSpecifier)) continue;
       const dep = resolveEdge(sf, moduleSpecifier.text);
@@ -9920,23 +3821,11 @@ function analyzeEsmNamedImportLinks(
   // promise rejection rather than a startup crash.
   const bad = isNodeEsmFile7(entry, program) ? dfs(entry) : null;
   if (bad !== null) {
-    // The usual cause: the name is a type, which Node's type stripping
-    // leaves in a plain import. A builtin module has no source file to ask.
-    const dep = bad.dep;
-    const declaresType =
-      typeof dep !== "string" &&
-      checker.getSymbolAtLocation(dep)?.getExports().get(ts.escapedSymbolName(bad.exportName)) !==
-        undefined;
     return {
       crash: {
         message: `The requested module '${bad.spec}' does not provide an export named '${bad.exportName}'`,
         className: "%SyntaxError",
         loc: locOf7(bad.nameNode),
-        ...(declaresType
-          ? {
-              hint: `'${bad.exportName}' is a type, and Node's type stripping keeps a plain import of it: mark it 'type' (import type { … } or import { type … }). In a project whose tsconfig.json does not set verbatimModuleSyntax, scriptc drops such imports as tsc does`,
-            }
-          : {}),
       },
       visited,
       firstMissingOf,
@@ -10006,16 +3895,16 @@ function earlierLinkCrash(
     if (sf === undefined) return first.loc.start < second.loc.start ? first : second;
     const rank = (crash: StartupCrash): [number, number] => {
       const entries: { local: string; start: number; kind: 0 | 1 }[] = [];
-      for (const stmt of sf.statements.nodes) {
+      for (const stmt of sf.statements) {
         if (ts.isImportDeclaration(stmt) && ts.isStringLiteral(stmt.moduleSpecifier)) {
           const clause = stmt.importClause;
           if (clause?.phaseModifier === ts.SyntaxKind.TypeKeyword) continue;
           if (clause?.namedBindings && ts.isNamedImports(clause.namedBindings)) {
-            for (const element of clause.namedBindings.elements.nodes) {
+            for (const element of clause.namedBindings.elements) {
               if (!element.isTypeOnly) {
                 entries.push({
                   local: element.name.text,
-                  start: ts.tokenStartOfNode(element.propertyName ?? element.name),
+                  start: (element.propertyName ?? element.name).getStart(sf),
                   kind: 0,
                 });
               }
@@ -10027,20 +3916,11 @@ function earlierLinkCrash(
       const direct = entries.findIndex((entry) => entry.start === crash.loc.start);
       if (direct >= 0) return [0, direct];
       let reexport = 0;
-      for (const stmt of sf.statements.nodes) {
+      for (const stmt of sf.statements) {
         const exportClause = ts.isExportDeclaration(stmt) ? stmt.exportClause : undefined;
-        if (
-          !ts.isExportDeclaration(stmt) ||
-          stmt.isTypeOnly ||
-          exportClause === undefined ||
-          !ts.isNamedExports(exportClause)
-        )
-          continue;
-        for (const element of exportClause.elements.nodes) {
-          if (
-            !element.isTypeOnly &&
-            ts.tokenStartOfNode(element.propertyName ?? element.name) === crash.loc.start
-          ) {
+        if (!ts.isExportDeclaration(stmt) || stmt.isTypeOnly || exportClause === undefined || !ts.isNamedExports(exportClause)) continue;
+        for (const element of exportClause.elements) {
+          if (!element.isTypeOnly && (element.propertyName ?? element.name).getStart(sf) === crash.loc.start) {
             return [1, reexport];
           }
           if (!element.isTypeOnly) reexport++;
@@ -10071,7 +3951,6 @@ const nodeBuiltinNames: ReadonlySet<string> = new Set(builtinModules);
 export {
   ambientDtsPath,
   fallbackDtsPath,
-  isFallbackDtsPath,
   isNodeTypesPath,
   overridesDtsPath,
 } from "./dts-paths.js";
@@ -10079,24 +3958,22 @@ export {
 export {
   builtinDefaultImportModule,
   canonicalBuiltinModule,
-  npmBuiltinAliasOf,
   SUPPORTED_BUILTIN_MODULES,
 } from "./builtin-modules.js";
 
-export { npmPackageNameOf, workspacePackageOfPath } from "./workspace-registry.js";
+export {
+  npmPackageNameOf,
+  workspacePackageOfPath,
+} from "./workspace-registry.js";
 
 export {
   requireSpecOf7 as requireSpecOf,
-  requireCallBindingKind7 as requireCallBindingKind,
   isRequireStatement7 as isRequireStatement,
   requiresOf7 as requiresOf,
-  splitRequireCallOf7 as splitRequireCallOf,
   isNodeEsmFile7 as isNodeEsmFile,
   resolveImport7 as resolveImport,
   resolveNpmImport7 as resolveNpmImport,
   locOf7 as locOf,
-  requireEarlyReference7 as requireEarlyReference,
-  inDeferredPosition7 as inDeferredPosition,
 };
 
 /** True for JavaScript source files (.js/.mjs/.cjs) — the files whose
@@ -10106,16 +3983,60 @@ export function isJsSourceFile(sf: ts.SourceFile): boolean {
   return isJsSourceFileName(sf.fileName);
 }
 
-export { isCheckedJsSourceFile };
+/** `import type …` declarations and named clauses whose every element is
+ * `type`-qualified are ERASED by tsc at emit — Node's module graph has no
+ * edge there, so module order, cycle detection, init calls, and the
+ * startup-refusal probe must not count them either (zod v4's core modules
+ * are "cyclic" only through `import type * as ns` namespaces — 27 phantom
+ * SC1016 sites against 1 real value-level cycle; and a type-only import
+ * of a module Node cannot resolve is NOT a startup crash — Node never
+ * resolves it). Originated as the provenance-sources pilot's flag-gated
+ * prototype (SCRIPTC_TYPE_ONLY_EDGES), promoted to always-on with the
+ * full-suite differential green. Side-effect imports (no clause) stay
+ * real edges. */
+function erasedTypeOnlyImport(stmt: ts.ImportDeclaration): boolean {
+  const clause = stmt.importClause;
+  if (clause === undefined) return false; // side-effect import: a real edge
+  if (clause.phaseModifier === ts.SyntaxKind.TypeKeyword) return true;
+  return (
+    clause.name === undefined &&
+    clause.namedBindings !== undefined &&
+    ts.isNamedImports(clause.namedBindings) &&
+    clause.namedBindings.elements.length > 0 &&
+    clause.namedBindings.elements.every((e) => e.isTypeOnly)
+  );
+}
 
+/** The re-export twin: `export { type X } from "./m"` with every element
+ * `type`-qualified erases at emit exactly like `export type { X } from`
+ * (which stmt.isTypeOnly already covers) — no module edge. */
+function erasedTypeOnlyReexport(stmt: ts.ExportDeclaration): boolean {
+  return (
+    stmt.exportClause !== undefined &&
+    ts.isNamedExports(stmt.exportClause) &&
+    stmt.exportClause.elements.length > 0 &&
+    stmt.exportClause.elements.every((e) => e.isTypeOnly)
+  );
+}
+
+/** A file's import declarations — and value re-exports with a specifier
+ * (`export { x } from "./y.js"`, `export * from "./y.js"`), which Node
+ * evaluates exactly like imports — in SOURCE ORDER, each with its resolved
+ * user-module dependency (null for npm/builtin/JSON specifiers — those are
+ * not module-order edges). The per-file %init header (lowerFileInit) uses
+ * this to interleave island imports with user-module init calls exactly
+ * where Node would evaluate them. CommonJS require statements are
+ * deliberately NOT here: Node evaluates a require AT ITS STATEMENT, inline
+ * in the module body, so the statement lowering emits their guarded %init
+ * calls in place instead of hoisting them. */
 export function orderedImportsOf(
   program: ts.Program,
   sf: ts.SourceFile,
 ): { stmt: ts.Statement; dep: ts.SourceFile | null }[] {
   const out: { stmt: ts.Statement; dep: ts.SourceFile | null }[] = [];
-  for (const stmt of sf.statements.nodes) {
+  for (const stmt of sf.statements) {
     if (ts.isExportDeclaration(stmt) && isPrunedNpmReexport(program, stmt)) continue;
-    if (ts.isExportDeclaration(stmt) && (stmt.isTypeOnly || !stmt.moduleSpecifier)) continue;
+    if (ts.isExportDeclaration(stmt) && (stmt.isTypeOnly || erasedTypeOnlyReexport(stmt) || !stmt.moduleSpecifier)) continue;
     if (!ts.isImportDeclaration(stmt) && !ts.isExportDeclaration(stmt)) continue;
     if (ts.isImportDeclaration(stmt) && erasedTypeOnlyImport(stmt)) continue;
     if (!stmt.moduleSpecifier || !ts.isStringLiteral(stmt.moduleSpecifier)) continue;
@@ -10124,74 +4045,12 @@ export function orderedImportsOf(
     // resolves to the same dep so the importer's %init header calls theirs.
     // Builtin and npm bare specifiers stay null — EXCEPT opted-in --npm-static
     // packages, whose entries are program modules the header must init.
-    const dep = resolveImport7(program, sf, spec) ?? npmStaticDepSf7(program, sf, spec);
+    // Browser target: host modules (the page's JavaScript) are never program edges.
+    const dep = isHostModule(spec) ? null : resolveImport7(program, sf, spec) ?? npmStaticDepSf7(program, sf, spec);
     const isJson = dep !== null && dep.fileName.endsWith(".json");
     out.push({ stmt, dep: isJson ? null : dep });
   }
   return out;
-}
-
-/** The files a compiled program can load: the module order closed over
- * every literal require() and import() call it contains (deferred and
- * nested ones included) and, for opted-in package JavaScript, over every
- * import and export declaration as well. A package file outside this set
- * is reachable only through types, so whatever it spells cannot affect
- * the compiled program. Null when a reachable file loads a computed
- * specifier: then any file may load. */
-export function npmStaticLoadableFiles(
-  program: ts.Program,
-  moduleOrder: readonly ts.SourceFile[],
-): Set<string> | null {
-  const seen = new Set<ts.SourceFile>();
-  const work: ts.SourceFile[] = [];
-  const add = (sf: ts.SourceFile | null | undefined): void => {
-    if (sf === null || sf === undefined || seen.has(sf) || sf.isDeclarationFile) return;
-    seen.add(sf);
-    work.push(sf);
-  };
-  for (const sf of moduleOrder) add(sf);
-  let computed = false;
-  // The bounder a computed import() site needs (SPEC §3.1); built on the
-  // first such site only.
-  let boundContext: SpecifierBoundContext | null = null;
-  while (work.length > 0 && !computed) {
-    const sf = work.pop()!;
-    const packageJs =
-      npmStaticPackageOfPath(sf.fileName) !== null && isJsSourceFileName(sf.fileName);
-    const follow = (spec: string, kind: "import" | "require"): void => {
-      if (canonicalBuiltinModule(spec) !== null) return;
-      add(resolveImport7(program, sf, spec, kind) ?? npmStaticDepSf7(program, sf, spec, kind));
-    };
-    ts.walkPreorder(sf, (n) => {
-      if (computed) return "stop";
-      if (ts.isCallExpression(n)) {
-        const isImport = n.expression.kind === ts.SyntaxKind.ImportKeyword;
-        const isRequire = ts.isIdentifier(n.expression) && n.expression.text === "require";
-        if (!isImport && !isRequire) return undefined;
-        const arg = n.arguments.nodes[0];
-        if (arg !== undefined && ts.isStringLiteralLike(arg))
-          follow(arg.text, isImport ? "import" : "require");
-        else if (isImport) {
-          // A bounded site is its literal values, one edge each; a site
-          // whose values cannot be bounded has no build-time closure
-          // (SPEC §7 B2).
-          boundContext ??= specifierBoundContextOf(program);
-          const bound = arg === undefined ? null : boundSpecifier(boundContext, arg);
-          if (bound === null || bound.kind !== "set") computed = true;
-          else for (const value of bound.values) follow(value, "import");
-        } else if (packageJs) computed = true;
-      } else if (
-        packageJs &&
-        (ts.isImportDeclaration(n) || ts.isExportDeclaration(n)) &&
-        n.moduleSpecifier !== undefined &&
-        ts.isStringLiteral(n.moduleSpecifier)
-      ) {
-        follow(n.moduleSpecifier.text, "import");
-      }
-      return undefined;
-    });
-  }
-  return computed ? null : new Set([...seen].map((sf) => sf.fileName.split("\\").join("/")));
 }
 
 /** The program source file a bare specifier reaches when it names an
@@ -10199,12 +4058,7 @@ export function npmStaticLoadableFiles(
  * as a module edge), else null. No offender reporting here — preflight
  * already classified the import; this is the lookup the module-order and
  * lowering paths share. */
-export function npmStaticDepSf7(
-  program: ts.Program,
-  sf: ts.SourceFile,
-  spec: string,
-  resolutionKind: "import" | "require" = "import",
-): ts.SourceFile | null {
+export function npmStaticDepSf7(program: ts.Program, sf: ts.SourceFile, spec: string, resolutionKind: "import" | "require" = "import"): ts.SourceFile | null {
   if (!npmStaticActive() || isRelativeSpecifier(spec)) return null;
   if (spec.startsWith("node:") || spec.startsWith("#")) return null;
   const npm = resolveNpmImport7(sf.fileName, spec, resolutionKind);
@@ -10232,60 +4086,14 @@ export function isModuleExportsAccess(expr: ts.Expression): expr is ts.PropertyA
  * Null for everything else. Callers gate on top-level position in a JS
  * module file — these forms anywhere else keep their generic fences. */
 export function cjsExportAssignmentOf(stmt: ts.Statement):
-  | {
-      kind: "table";
-      obj: ts.ObjectLiteralExpression | null;
-      expr: ts.BinaryExpression;
-      /** `exports = module.exports = value`: the `exports` binding names
-       * the new value too, so later `exports.f =` members attach to it. */
-      rebindsExports?: true;
-    }
+  | { kind: "table"; obj: ts.ObjectLiteralExpression | null; expr: ts.BinaryExpression }
   | { kind: "member"; name: ts.MemberName; value: ts.Expression; expr: ts.BinaryExpression }
   | null {
-  if (ts.isVariableStatement(stmt)) {
-    // `var x = module.exports = <value>` / `var x = (module.exports = <value>)`:
-    // Node's whole-export replacement spelled as a declaration initializer
-    // (the value is stored in module.exports and in `x` alike, evaluated
-    // once). The declaration's own binding is the module's export storage,
-    // so this statement owns the export exactly like the expression
-    // statement spelling. An object-literal value keeps its own statement
-    // path (its members are export globals), and a destructured declarator
-    // has no single binding to read the export through.
-    const decls = stmt.declarationList.declarations.nodes;
-    if (decls.length !== 1) return null;
-    const decl = decls[0]!;
-    if (!ts.isIdentifier(decl.name) || decl.initializer === undefined) return null;
-    let init: ts.Expression = decl.initializer;
-    while (ts.isParenthesizedExpression(init)) init = init.expression;
-    if (
-      ts.isBinaryExpression(init) &&
-      init.operatorToken.kind === ts.SyntaxKind.EqualsToken &&
-      isModuleExportsAccess(init.left) &&
-      !ts.isObjectLiteralExpression(init.right)
-    ) {
-      return { kind: "table", obj: null, expr: init };
-    }
-    return null;
-  }
   if (!ts.isExpressionStatement(stmt)) return null;
   const e = stmt.expression;
   if (!ts.isBinaryExpression(e) || e.operatorToken.kind !== ts.SyntaxKind.EqualsToken) return null;
   if (isModuleExportsAccess(e.left)) {
     return { kind: "table", obj: ts.isObjectLiteralExpression(e.right) ? e.right : null, expr: e };
-  }
-  if (ts.isIdentifier(e.left) && e.left.text === "exports") {
-    let inner: ts.Expression = e.right;
-    while (ts.isParenthesizedExpression(inner)) inner = inner.expression;
-    if (
-      ts.isBinaryExpression(inner) &&
-      inner.operatorToken.kind === ts.SyntaxKind.EqualsToken &&
-      isModuleExportsAccess(inner.left) &&
-      // `exports = module.exports = {}` is the fresh-table reset, which the
-      // export walk handles on its own.
-      !ts.isObjectLiteralExpression(inner.right)
-    ) {
-      return { kind: "table", obj: null, expr: inner, rebindsExports: true };
-    }
   }
   if (ts.isPropertyAccessExpression(e.left) && !e.left.questionDotToken) {
     const recv = e.left.expression;
@@ -10297,412 +4105,20 @@ export function cjsExportAssignmentOf(stmt: ts.Statement):
   return null;
 }
 
-/** The declarator of a chained whole-export declaration (`var x =
- * module.exports = <value>` — cjsExportAssignmentOf's declaration
- * spelling), or null when the assignment is the expression-statement
- * spelling. The declarator's binding is where the export value lives. */
-export function cjsExportDeclaratorOf(assign: ts.BinaryExpression): ts.VariableDeclaration | null {
-  // `var x = (module.exports = value)` wraps the assignment in parens.
-  let node: ts.Node = assign;
-  while (node.parent !== undefined && ts.isParenthesizedExpression(node.parent)) node = node.parent;
-  const decl = node.parent;
-  if (!ts.isVariableDeclaration(decl) || !ts.isIdentifier(decl.name)) return null;
-  const list = decl.parent;
-  if (!ts.isVariableDeclarationList(list)) return null;
-  const stmt = list.parent;
-  if (!ts.isVariableStatement(stmt) || !ts.isSourceFile(stmt.parent)) return null;
-  return decl;
-}
-
-/** `var x = module.exports = <value>` and `var x = exports.name = <value>`
- * (also through `module.exports.name`, and through several members:
- * `var x = exports.a = exports.b = <value>`): the value the declarator is
- * initialized with. Node assigns the export and the binding the same value,
- * so the declaration's own storage takes that value's type and
- * initialization, not the type of the assignment expression around it (the
- * checker types `exports.name = []` as `never[]`, where the value alone is
- * the array every later write grows). Null when the declaration is not a
- * chained export declaration at the top level of its file. */
-export function cjsChainedExportValueOf(decl: ts.VariableDeclaration): ts.Expression | null {
-  const stmt = decl.parent?.parent;
-  if (stmt === undefined || !ts.isVariableStatement(stmt)) return null;
-  const cjs = cjsExportAssignmentOf(stmt);
-  if (cjs?.kind === "table" && cjs.obj === null && cjsExportDeclaratorOf(cjs.expr) === decl) {
-    let rhs: ts.Expression = cjs.expr.right;
-    while (ts.isParenthesizedExpression(rhs)) rhs = rhs.expression;
-    return rhs;
-  }
-  if (!ts.isSourceFile(stmt.parent) || !ts.isIdentifier(decl.name)) return null;
-  let value: ts.Expression | undefined = decl.initializer;
-  let chained = false;
-  for (;;) {
-    while (value !== undefined && ts.isParenthesizedExpression(value)) value = value.expression;
-    if (
-      value === undefined ||
-      !ts.isBinaryExpression(value) ||
-      value.operatorToken.kind !== ts.SyntaxKind.EqualsToken ||
-      !ts.isPropertyAccessExpression(value.left) ||
-      value.left.questionDotToken ||
-      !ts.isIdentifier(value.left.name)
-    )
-      break;
-    const recv = value.left.expression;
-    if (!(ts.isIdentifier(recv) && recv.text === "exports") && !isModuleExportsAccess(recv)) break;
-    chained = true;
-    value = value.right;
-  }
-  return chained && value !== undefined ? value : null;
-}
-
-/** The value a chain of plain assignments evaluates to: `a.b = c = <value>`
- * is `<value>`, since JavaScript's `=` answers its right-hand side unchanged
- * whatever the target is (a member of a function, of an object, another
- * binding). The expression itself when it is not such a chain. A declaration
- * initialized by a chain (`var list = holder.list = []`) therefore holds
- * exactly that value, and its storage is classified from it. */
-export function assignmentChainValueOf(e: ts.Expression): ts.Expression {
-  let value: ts.Expression = e;
-  let chained = false;
-  for (;;) {
-    let inner: ts.Expression = value;
-    while (ts.isParenthesizedExpression(inner)) inner = inner.expression;
-    if (!ts.isBinaryExpression(inner) || inner.operatorToken.kind !== ts.SyntaxKind.EqualsToken)
-      return chained ? inner : e;
-    chained = true;
-    value = inner.right;
-  }
-}
-
-/** The tsc VOID-INIT PREAMBLE (`exports.a = exports.b = void 0;` with the
- * real `exports.a = a;` further down; every tsc-emitted dist file opens its
- * exports this way): when every name in the chain has a later real
- * assignment, the export takes its value there and the preamble lowers to
- * nothing. Returns those later assignments by name, or null when this is
- * not such a preamble (a preamble with no later real assignment keeps the
- * ordinary path: the export IS undefined then). */
-export function cjsVoidInitPreambleReals(
-  cjs: Extract<ReturnType<typeof cjsExportAssignmentOf>, { kind: "member" }>,
-): Map<string, Extract<ReturnType<typeof cjsExportAssignmentOf>, { kind: "member" }>> | null {
-  if (!ts.isIdentifier(cjs.name)) return null;
-  const isExportsMember = (e: ts.Expression): e is ts.PropertyAccessExpression =>
-    ts.isPropertyAccessExpression(e) &&
-    ts.isIdentifier(e.name) &&
-    ((ts.isIdentifier(e.expression) && e.expression.text === "exports") ||
-      (ts.isPropertyAccessExpression(e.expression) &&
-        ts.isIdentifier(e.expression.expression) &&
-        e.expression.expression.text === "module" &&
-        ts.isIdentifier(e.expression.name) &&
-        e.expression.name.text === "exports"));
-  const isVoid = (e: ts.Expression): boolean => {
-    while (ts.isParenthesizedExpression(e)) e = e.expression;
-    return (
-      e.kind === ts.SyntaxKind.VoidExpression || (ts.isIdentifier(e) && e.text === "undefined")
-    );
-  };
-  // chains: `exports.a = exports.b = void 0;` collects every name
-  const names: string[] = [cjs.name.text];
-  let tail: ts.Expression = cjs.value;
-  while (
-    ts.isBinaryExpression(tail) &&
-    tail.operatorToken.kind === ts.SyntaxKind.EqualsToken &&
-    isExportsMember(tail.left)
-  ) {
-    names.push((tail.left.name as ts.Identifier).text);
-    tail = tail.right;
-  }
-  if (!isVoid(tail)) return null;
-  const sf = ts.getSourceFileOfNode(cjs.expr);
-  const myPos = ts.tokenStartOfNode(cjs.expr);
-  const reals = new Map<
-    string,
-    Extract<ReturnType<typeof cjsExportAssignmentOf>, { kind: "member" }>
-  >();
-  for (const name of names) {
-    const real = sf.statements.nodes
-      .map((s) => cjsExportAssignmentOf(s))
-      .find(
-        (other) =>
-          other?.kind === "member" &&
-          ts.isIdentifier(other.name) &&
-          other.name.text === name &&
-          ts.tokenStartOfNode(other.expr) > myPos &&
-          !isVoid(other.value),
-      );
-    if (real?.kind !== "member") return null;
-    reals.set(name, real);
-  }
-  return reals;
-}
-
-/** Whether `e` is `void <operand>` or `undefined` as written. */
-function isVoidWritten(e: ts.Expression): boolean {
-  while (ts.isParenthesizedExpression(e)) e = e.expression;
-  return e.kind === ts.SyntaxKind.VoidExpression || (ts.isIdentifier(e) && e.text === "undefined");
-}
-
-/** The operand a `void <operand>` expression evaluates, or null when the
- * value is `undefined` itself (nothing to run). */
-function voidValueOperand(e: ts.Expression): ts.Expression | null {
-  while (ts.isParenthesizedExpression(e)) e = e.expression;
-  return e.kind === ts.SyntaxKind.VoidExpression
-    ? ((e.expression as ts.Expression | undefined) ?? null)
-    : null;
-}
-
-/** Whether evaluating `operand` runs nothing: a literal, `undefined`, a
- * sign applied to one, or a `void` of such. */
-function pureVoidOperand(operand: ts.Expression): boolean {
-  while (ts.isParenthesizedExpression(operand)) operand = operand.expression;
-  if (
-    ts.isNumericLiteral(operand) ||
-    ts.isStringLiteral(operand) ||
-    ts.isNoSubstitutionTemplateLiteral(operand)
-  )
-    return true;
-  if (
-    operand.kind === ts.SyntaxKind.TrueKeyword ||
-    operand.kind === ts.SyntaxKind.FalseKeyword ||
-    operand.kind === ts.SyntaxKind.NullKeyword
-  )
-    return true;
-  if (ts.isIdentifier(operand) && operand.text === "undefined") return true;
-  if (operand.kind === ts.SyntaxKind.VoidExpression) {
-    const inner = operand.expression as ts.Expression | undefined;
-    return inner === undefined || pureVoidOperand(inner);
-  }
-  if (
-    ts.isPrefixUnaryExpression(operand) &&
-    (operand.operator === ts.SyntaxKind.MinusToken || operand.operator === ts.SyntaxKind.PlusToken)
-  )
-    return pureVoidOperand(operand.operand);
-  return false;
-}
-
-/** The export member `exports.<name>` / `module.exports.<name>` names, or
- * null for any other target. Syntactic: callers have already established
- * that the receiver is the module's exports object. */
-function writtenExportMemberName(target: ts.Expression): string | null {
-  if (
-    !ts.isPropertyAccessExpression(target) ||
-    target.questionDotToken ||
-    !ts.isIdentifier(target.name)
-  )
-    return null;
-  const recv = target.expression;
-  const isExports = ts.isIdentifier(recv) && recv.text === "exports";
-  return isExports || isModuleExportsAccess(recv) ? target.name.text : null;
-}
-
-/** Whether `expr` assigns export member `name` a value other than
- * `void 0`/`undefined`, directly or through a chain
- * (`exports.a = exports.name = value`). */
-function assignsExportMember(expr: ts.Expression, name: string): boolean {
-  let e: ts.Expression = expr;
-  for (;;) {
-    while (ts.isParenthesizedExpression(e)) e = e.expression;
-    if (!ts.isBinaryExpression(e) || e.operatorToken.kind !== ts.SyntaxKind.EqualsToken)
-      return false;
-    if (writtenExportMemberName(e.left) === name && !isVoidWritten(e.right))
-      // A value that reads the member it initializes observes `undefined`
-      // before the store, so the statement is a read, not an assignment.
-      return !readsExportMember(e.right, name);
-    e = e.right;
-  }
-}
-
-/** Whether running `node` can read export member `name` through the
- * exports object. Nested function bodies are skipped: they run later, if at
- * all (`this` is declined for a different reason). */
-function readsExportMember(node: ts.Node, name: string): boolean {
-  let found = false;
-  ts.walkPreorder(node, (n) => {
-    if (found) return "stop";
-    if (n !== node && ts.isFunctionLike(n)) return "skip";
-    if (ts.isPropertyAccessExpression(n) && ts.isIdentifier(n.name) && n.name.text === name) {
-      const recv = n.expression;
-      if ((ts.isIdentifier(recv) && recv.text === "exports") || isModuleExportsAccess(recv)) {
-        found = true;
-        return "stop";
-      }
-    }
-    return undefined;
-  });
-  return found;
-}
-
-/** How a statement bears on whether export member `name` is assigned before
- * the statement list ends: it assigns it (`assigns`), it lets execution
- * continue without touching it (`neutral`), or it can end execution, or
- * observe the member while it is still `undefined`, first (`exits`). */
-type ExportAssignState = "assigns" | "neutral" | "exits";
-
-function exportAssignState(stmt: ts.Statement, name: string): ExportAssignState {
-  if (ts.isExpressionStatement(stmt)) {
-    if (assignsExportMember(stmt.expression, name)) return "assigns";
-    return readsExportMember(stmt.expression, name) ? "exits" : "neutral";
-  }
-  if (ts.isVariableStatement(stmt)) {
-    for (const declaration of stmt.declarationList.declarations.nodes)
-      if (declaration.initializer !== undefined && readsExportMember(declaration.initializer, name))
-        return "exits";
-    return "neutral";
-  }
-  if (ts.isFunctionDeclaration(stmt) || ts.isEmptyStatement(stmt)) return "neutral";
-  // A class declaration runs its heritage and static initializers here.
-  if (ts.isClassDeclaration(stmt)) return "exits";
-  if (ts.isBlock(stmt)) {
-    for (const inner of stmt.statements.nodes) {
-      const state = exportAssignState(inner, name);
-      if (state !== "neutral") return state;
-    }
-    return "neutral";
-  }
-  if (ts.isIfStatement(stmt)) {
-    // The condition runs before either arm and may observe the member.
-    if (readsExportMember(stmt.expression, name)) return "exits";
-    const thenState = exportAssignState(stmt.thenStatement, name);
-    const elseState =
-      stmt.elseStatement === undefined ? "neutral" : exportAssignState(stmt.elseStatement, name);
-    if (thenState === "assigns" && elseState === "assigns") return "assigns";
-    if (thenState === "exits" || elseState === "exits") return "exits";
-    return "neutral";
-  }
-  // Loops may run zero times or observe the member, `try` may not reach its
-  // assignments, and the abrupt-completion statements end execution here.
-  return "exits";
-}
-
-/** A `void 0` export preamble write the lowering may elide. */
-export interface CjsVoidInitPreamble {
-  /** The export members the chain writes, outermost first. */
-  targets: ts.PropertyAccessExpression[];
-  /** The `void` operand the write evaluates (and whose value is discarded),
-   * or null for a pure `void 0`/`undefined`. The operand's effects still
-   * run when the write is elided. */
-  effect: ts.Expression | null;
-}
-
-/** The export preamble a `void`-valued assignment chain writes
- * (`exports.a = exports.b = void 0` names both, outermost first), or null
- * when any target is not such a member or the chain ends in something
- * else. */
-function voidInitExportTargets(assign: ts.BinaryExpression): CjsVoidInitPreamble | null {
-  const targets: ts.PropertyAccessExpression[] = [];
-  let e: ts.Expression = assign;
-  for (;;) {
-    while (ts.isParenthesizedExpression(e)) e = e.expression;
-    if (!ts.isBinaryExpression(e) || e.operatorToken.kind !== ts.SyntaxKind.EqualsToken)
-      return null;
-    if (writtenExportMemberName(e.left) === null) return null;
-    targets.push(e.left as ts.PropertyAccessExpression);
-    let right: ts.Expression = e.right;
-    while (ts.isParenthesizedExpression(right)) right = right.expression;
-    if (ts.isBinaryExpression(right) && right.operatorToken.kind === ts.SyntaxKind.EqualsToken) {
-      e = right;
-      continue;
-    }
-    if (!isVoidWritten(right)) return null;
-    const operand = voidValueOperand(right);
-    return { targets, effect: operand !== null && !pureVoidOperand(operand) ? operand : null };
-  }
-}
-
-/** The `void` operand an export assignment chain would evaluate before
- * discarding its value, or null when the chain is not a `void` write or its
- * operand is provably pure. */
-export function cjsVoidInitWriteEffect(assign: ts.BinaryExpression): ts.Expression | null {
-  return voidInitExportTargets(assign)?.effect ?? null;
-}
-
-/** The export members of a tsc-style `void 0` preamble write
- * (`exports.name = void 0`, or a chain of them) whose member every path
- * continuing past the write's statement list assigns a real value before
- * execution ends or a statement that mentions the member, or null when the
- * write should keep its ordinary lowering. The export takes its value at
- * those assignments, so a lowering may elide the write — the same reasoning
- * as the top-level preamble, extended to a preamble whose real assignments
- * sit inside a conditional (scheduler's `if (…performance…) { exports.now =
- * f } else { exports.now = g }`). A write that some path or some statement
- * the scan reaches can observe keeps its ordinary lowering (Node answers
- * `undefined` there); a call in the window that reaches module code reading
- * the member is the same transient-undefined window the top-level preamble
- * accepts. An elided write still evaluates an effectful `void` operand. */
-export function cjsVoidInitPreambleTargets(
-  assign: ts.BinaryExpression,
-): CjsVoidInitPreamble | null {
-  const target = voidInitExportTargets(assign);
-  if (target === null) return null;
-  let outer: ts.Node = assign;
-  while (outer.parent !== undefined && ts.isParenthesizedExpression(outer.parent))
-    outer = outer.parent;
-  const stmt = outer.parent;
-  if (stmt === undefined || !ts.isExpressionStatement(stmt) || stmt.expression !== outer)
-    return null;
-  const list = stmt.parent;
-  if (list === undefined || (!ts.isBlock(list) && !ts.isSourceFile(list))) return null;
-  const index = list.statements.nodes.indexOf(stmt);
-  if (index < 0) return null;
-  for (const access of target.targets) {
-    const name = (access.name as ts.Identifier).text;
-    let assigned = false;
-    for (let i = index + 1; i < list.statements.nodes.length; i++) {
-      const state = exportAssignState(list.statements.nodes[i]!, name);
-      if (state === "exits") return null;
-      if (state === "assigns") {
-        assigned = true;
-        break;
-      }
-    }
-    if (!assigned) return null;
-  }
-  return target;
-}
-
-/** The members and shared value of a CHAINED member export
- * `exports.a = exports.b = module.exports.c = value` (outermost name
- * first), or null when the assignment is not a chain of at least two
- * identifier-named export members or its value is undefined. */
-export function cjsExportChainOf(
-  e: ts.BinaryExpression,
-): { names: ts.Identifier[]; value: ts.Expression } | null {
-  const names: ts.Identifier[] = [];
-  let cur: ts.Expression = e;
-  for (;;) {
-    while (ts.isParenthesizedExpression(cur)) cur = cur.expression;
-    if (!ts.isBinaryExpression(cur) || cur.operatorToken.kind !== ts.SyntaxKind.EqualsToken) break;
-    const left = cur.left;
-    if (
-      !ts.isPropertyAccessExpression(left) ||
-      left.questionDotToken ||
-      !ts.isIdentifier(left.name)
-    )
-      break;
-    const recv = left.expression;
-    if (!((ts.isIdentifier(recv) && recv.text === "exports") || isModuleExportsAccess(recv))) break;
-    names.push(left.name);
-    cur = cur.right;
-  }
-  // tsc's `exports.a = exports.b = void 0;` preamble is not a value chain
-  // (the export-statement lowering owns it).
-  const isVoid =
-    cur.kind === ts.SyntaxKind.VoidExpression || (ts.isIdentifier(cur) && cur.text === "undefined");
-  return names.length >= 2 && !isVoid ? { names, value: cur } : null;
-}
-
 /** Why Node would DISCARD this CommonJS export statement, or null when it
  * survives (Node's export-object identity rules — checker-free, pure
  * AST): `module.exports = {...}` REPLACES the export object, so members
  * attached before it (either spelling), any earlier table, and
  * `exports.f =` after it (exports still references the replaced object)
  * are never seen by importers. Lowering fences these instead of shipping
- * the checker's everything-is-live answer — the checker/runtime split
- * would otherwise diverge from Node without a diagnostic. */
+ * the checker's everything-is-live answer — the checker/runtime split is
+ * exactly the silent-divergence trap. */
 export function cjsExportDiscardReason(stmt: ts.Statement): string | null {
   const sf = stmt.parent;
   if (!ts.isSourceFile(sf)) return null;
   const mine = cjsExportAssignmentOf(stmt);
   if (!mine) return null;
-  const stmts = sf.statements.nodes;
+  const stmts = sf.statements;
   let lastTable = -1;
   for (let i = 0; i < stmts.length; i++) {
     if (cjsExportAssignmentOf(stmts[i]!)?.kind === "table") lastTable = i;
@@ -10718,8 +4134,6 @@ export function cjsExportDiscardReason(stmt: ts.Statement): string | null {
     return "export members attached before a 'module.exports =' assignment (Node replaces the export object — importers never see this member; attach it to module.exports AFTER the table)";
   }
   const left = mine.expr.left as ts.PropertyAccessExpression;
-  const last = cjsExportAssignmentOf(stmts[lastTable]!);
-  if (last?.kind === "table" && last.rebindsExports === true) return null;
   return ts.isIdentifier(left.expression) && left.expression.text === "exports"
     ? "'exports.f =' after a 'module.exports =' assignment ('exports' still references the replaced object — Node discards this member; write module.exports.f instead)"
     : null;
@@ -10732,31 +4146,23 @@ export function cjsExportDiscardReason(stmt: ts.Statement): string | null {
  * program: every member access is statically resolved against the
  * target's own type); or an identifier naming a top-level const whose
  * initializer is the literal. Null for everything else. */
-export function cjsExportTargetLiteral(
-  e: ts.Expression,
-  sf: ts.SourceFile,
-): ts.ObjectLiteralExpression | null {
+export function cjsExportTargetLiteral(e: ts.Expression, sf: ts.SourceFile): ts.ObjectLiteralExpression | null {
   while (ts.isParenthesizedExpression(e)) e = e.expression;
   if (ts.isObjectLiteralExpression(e)) return e;
   if (
     ts.isNewExpression(e) &&
     ts.isIdentifier(e.expression) &&
     e.expression.text === "Proxy" &&
-    (e.arguments?.nodes.length ?? 0) >= 1
+    (e.arguments?.length ?? 0) >= 1
   ) {
-    return cjsExportTargetLiteral(e.arguments!.nodes[0]!, sf);
+    return cjsExportTargetLiteral(e.arguments![0]!, sf);
   }
   if (ts.isIdentifier(e)) {
-    for (const stmt of sf.statements.nodes) {
+    for (const stmt of sf.statements) {
       if (!ts.isVariableStatement(stmt)) continue;
       if ((stmt.declarationList.flags & ts.NodeFlags.Const) === 0) continue;
-      for (const d of stmt.declarationList.declarations.nodes) {
-        if (
-          d.name !== undefined &&
-          ts.isIdentifier(d.name) &&
-          d.name.text === e.text &&
-          d.initializer
-        ) {
+      for (const d of stmt.declarationList.declarations) {
+        if (d.name !== undefined && ts.isIdentifier(d.name) && d.name.text === e.text && d.initializer) {
           let init: ts.Expression = d.initializer;
           while (ts.isParenthesizedExpression(init)) init = init.expression;
           return ts.isObjectLiteralExpression(init) ? init : null;
@@ -10776,7 +4182,7 @@ export function cjsClassExprWholeExportOf(
   sf: ts.SourceFile,
 ): { classExpr: ts.ClassExpression; stmt: ts.Statement } | null {
   let last: { classExpr: ts.ClassExpression; stmt: ts.Statement } | null = null;
-  for (const stmt of sf.statements.nodes) {
+  for (const stmt of sf.statements) {
     const cjs = cjsExportAssignmentOf(stmt);
     if (!cjs || cjs.kind !== "table") continue;
     let rhs: ts.Expression = cjs.expr.right;
@@ -10807,211 +4213,13 @@ export function isCjsExportTableLiteral(obj: ts.ObjectLiteralExpression): boolea
   }
   const decl = obj.parent;
   if (!ts.isVariableDeclaration(decl) || decl.initializer !== obj) return false;
-  const sf = ts.getSourceFileOfNode(obj);
+  const sf = obj.getSourceFile();
   if (!isJsSourceFile(sf)) return false;
-  for (const stmt of sf.statements.nodes) {
+  for (const stmt of sf.statements) {
     const cjs = cjsExportAssignmentOf(stmt);
     if (cjs?.kind === "table" && cjsExportDiscardReason(stmt) === null) {
       return cjsExportTargetLiteral(cjs.expr.right, sf) === obj;
     }
-  }
-  return false;
-}
-
-/** Names other runtimes and the DOM declare that scriptc's type world
- * (the ES2025 library plus Node types) does not. */
-const FOREIGN_RUNTIME_GLOBALS = new Set(["Deno", "Bun"]);
-const DOM_GLOBALS = new Set([
-  "window",
-  "document",
-  "navigator",
-  "location",
-  "localStorage",
-  "sessionStorage",
-  "HTMLElement",
-  "Element",
-  "Document",
-  "Window",
-  "BodyInit",
-  "HeadersInit",
-  "RequestInfo",
-  "XMLHttpRequest",
-  "requestAnimationFrame",
-]);
-/** Root identifiers whose members the bundled Node fallback declares. */
-const NODE_GLOBAL_ROOTS = new Set(["process", "Buffer", "console", "globalThis"]);
-
-/** TypeScript's errors about a decorator's signature when it is checked as
- * a standard decorator: TS1238 to TS1241 (unable to resolve the signature of
- * a class, parameter, property or method decorator), TS1270 and TS1271 (its
- * return type). */
-const LEGACY_DECORATOR_ERRORS: ReadonlySet<number> = new Set([1238, 1239, 1240, 1241, 1270, 1271]);
-
-/** TS2729 ("Property 'x' is used before its initialization") for a field
- * initializer that reads a parameter property, in a file whose tsconfig
- * compiles class fields in the constructor: there the parameter properties
- * are assigned first, the lowering follows that order
- * (LoadResult.parameterPropertiesFirst), and the read is defined. The same
- * error about a field declared further down stays: that read is undefined
- * in either order. */
-function parameterPropertyOrderSuppressed(
-  program: ts.Program,
-  d: ts.Diagnostic,
-  files: ReadonlySet<string> | undefined,
-): boolean {
-  if (d.code !== 2729 || files === undefined || d.fileName === undefined) return false;
-  if (d.pos === undefined || !files.has(d.fileName)) return false;
-  const sf = program.getSourceFile(d.fileName);
-  if (sf === undefined) return false;
-  const pos = d.pos;
-  // The property's name, where the error stands.
-  const name = ts.sourceTextRange(sf, pos, d.end ?? pos);
-  // The innermost class around the read, and its constructor's parameters.
-  let owner: ts.Node | null = null;
-  ts.walkPreorder(
-    sf,
-    (node) => {
-      if (ts.tokenStartOfNode(node) > pos || node.end <= pos) return "skip";
-      owner = node;
-      return undefined;
-    },
-    CLASSES,
-  );
-  if (owner === null) return false;
-  const members = (owner as ts.ClassDeclaration).members.nodes;
-  for (const member of members) {
-    if (!ts.isConstructorDeclaration(member)) continue;
-    for (const parameter of member.parameters.nodes) {
-      if (!ts.isIdentifier(parameter.name) || parameter.name.text !== name) continue;
-      if ((ts.getModifiers(parameter)?.length ?? 0) > 0) return true;
-    }
-  }
-  return false;
-}
-
-const CLASSES: ReadonlySet<ts.SyntaxKind> = new Set([
-  ts.SyntaxKind.ClassDeclaration,
-  ts.SyntaxKind.ClassExpression,
-]);
-
-/** A hint when a TypeScript error comes from scriptc's own type world rather
- * than from the project: a library member newer than ES2025, a global of
- * another runtime or of the DOM, a Node member the bundled fallback types
- * leave out, or the strictNullChecks scriptc enforces. Null otherwise. */
-function typeWorldHint(d: ts.Diagnostic, message: string, load: LoadResult): string | null {
-  const world = load.typeWorld;
-  if (world === undefined) return null;
-  const quoted = /'([^']+)'/.exec(message)?.[1];
-  // TS2304/TS2552: Cannot find name; TS2580/TS2591/TS2592: missing type
-  // packages; TS2583: needs a newer library.
-  if (d.code === 2304 || d.code === 2552 || d.code === 2583) {
-    if (quoted !== undefined && FOREIGN_RUNTIME_GLOBALS.has(quoted)) {
-      return `'${quoted}' is another runtime's global; scriptc's type world declares the ES2025 library and Node only — feature-test it through globalThis instead, e.g. '(globalThis as { ${quoted}?: unknown }).${quoted}' (the native program runs as Node would, where it is undefined)`;
-    }
-    if (quoted !== undefined && DOM_GLOBALS.has(quoted)) {
-      // With the DOM library in the project's "lib" the name is admitted
-      // (preflightGate7, projectLibraryName) unless it is read as a value
-      // and Node defines a global of that name (`navigator`).
-      if (NODE_GLOBAL_NAMES.has(quoted)) {
-        return `'${quoted}' is a Node.js global, but the Node declarations this build type-checks with do not declare it — install a current @types/node in the project`;
-      }
-      return `'${quoted}' comes from the DOM library, which the project's tsconfig does not name in "lib" (scriptc checks with the ES2025 library, Node types and the names of the libraries "lib" lists) — add "dom" to "lib": the name then type-checks as under the project's tsc, and at run time it is absent as under Node.js (a read throws ReferenceError, typeof answers "undefined"); or declare the shape you need locally`;
-    }
-    if (d.code === 2583) {
-      return `scriptc checks with the ES2025 library regardless of the project's "lib" setting, and '${quoted ?? "this name"}' comes from a newer library that does not compile yet`;
-    }
-  }
-  // TS2339/TS2550/TS2551: property does not exist (2550: on this lib).
-  if (d.code === 2339 || d.code === 2550 || d.code === 2551) {
-    const typeText = /on type '([^']+)'/.exec(message)?.[1] ?? "";
-    const newerLib =
-      world.projectLib !== null &&
-      world.projectLib.some((lib) => /esnext|es202[6-9]|es20[3-9]\d/i.test(lib));
-    if (d.code === 2550 || (newerLib && /^[A-Z][A-Za-z0-9]*(?:Constructor)?$/.test(typeText))) {
-      return `scriptc checks with the ES2025 library regardless of the project's "lib" setting, and '${quoted ?? "this member"}' comes from a newer library that does not compile yet — use an ES2025 equivalent here`;
-    }
-    if (world.nodeFallback && d.fileName !== undefined) {
-      const root = receiverRoot(load.program.getSourceFile(d.fileName)?.text ?? "", d.pos);
-      if (
-        root !== null &&
-        (NODE_GLOBAL_ROOTS.has(root) || importsNodeBuiltin(load, d.fileName, root))
-      ) {
-        return `the project has no @types/node, so scriptc types Node with its bundled declarations, which list only the members that compile natively — '${quoted ?? "this member"}' does not compile natively yet (https://scriptc.dev/limitations); installing @types/node turns this into a located refusal with a hint`;
-      }
-    }
-  }
-  // TS2503: Cannot find namespace. A CommonJS project reads a package's
-  // `require` entry, whose declarations (`export =` merged with a namespace)
-  // can differ from the `import` entry's that an ES module resolves.
-  if (
-    d.code === 2503 &&
-    world.projectModule === "commonjs" &&
-    quoted !== undefined &&
-    d.fileName !== undefined &&
-    importsPackageAs(load, d.fileName, quoted)
-  ) {
-    return `this project compiles to CommonJS ("module": "commonjs"), where a package resolves through its 'require' entry and that entry's declarations; scriptc compiles TypeScript files as ES modules, the format Node gives them, and resolved the package's 'import' entry, which declares no namespace '${quoted}'`;
-  }
-  if (world.forcedStrictNullChecks && /\b(?:null|undefined)\b/.test(message)) {
-    return `the project disables strictNullChecks, which scriptc always enables — this error appears only under strict null checks; narrow the value (or enable "strictNullChecks" in the project to see the same errors from its own tsc)`;
-  }
-  return null;
-}
-
-/** The root identifier of the property access whose member name starts at
- * `pos` (`process.version` → `process`), or null. */
-function receiverRoot(text: string, pos: number): string | null {
-  let i = pos - 1;
-  while (i >= 0 && /\s/.test(text[i]!)) i--;
-  if (text[i] !== ".") return null;
-  i--;
-  if (text[i] === "?") i--;
-  let root: string | null = null;
-  for (;;) {
-    while (i >= 0 && /\s/.test(text[i]!)) i--;
-    let j = i;
-    while (j >= 0 && /[\w$]/.test(text[j]!)) j--;
-    if (j === i) return root;
-    root = text.slice(j + 1, i + 1);
-    i = j;
-    while (i >= 0 && /\s/.test(text[i]!)) i--;
-    if (text[i] !== ".") return root;
-    i--;
-    if (text[i] === "?") i--;
-  }
-}
-
-/** Whether `name` is the default or namespace binding of an import of a
- * package (a bare specifier) in `fileName`. */
-function importsPackageAs(load: LoadResult, fileName: string, name: string): boolean {
-  const sf = load.program.getSourceFile(fileName);
-  for (const stmt of sf?.statements?.nodes ?? []) {
-    if (!ts.isImportDeclaration(stmt) || !ts.isStringLiteral(stmt.moduleSpecifier)) continue;
-    if (isRelativeSpecifier(stmt.moduleSpecifier.text)) continue;
-    const clause = stmt.importClause;
-    if (clause?.name?.text === name) return true;
-    const bindings = clause?.namedBindings;
-    if (bindings && ts.isNamespaceImport(bindings) && bindings.name.text === name) return true;
-  }
-  return false;
-}
-
-/** Whether `name` is bound in `fileName` by an import of a Node builtin. */
-function importsNodeBuiltin(load: LoadResult, fileName: string, name: string): boolean {
-  const sf = load.program.getSourceFile(fileName);
-  for (const stmt of sf?.statements?.nodes ?? []) {
-    if (!ts.isImportDeclaration(stmt) || !ts.isStringLiteral(stmt.moduleSpecifier)) continue;
-    if (canonicalBuiltinModule(stmt.moduleSpecifier.text) === null) continue;
-    const clause = stmt.importClause;
-    if (clause?.name?.text === name) return true;
-    const bindings = clause?.namedBindings;
-    if (bindings && ts.isNamespaceImport(bindings) && bindings.name.text === name) return true;
-    if (
-      bindings &&
-      ts.isNamedImports(bindings) &&
-      bindings.elements.nodes.some((e) => e.name.text === name)
-    )
-      return true;
   }
   return false;
 }

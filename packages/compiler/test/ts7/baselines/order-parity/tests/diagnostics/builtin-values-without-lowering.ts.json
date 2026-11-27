@@ -1,6 +1,0 @@
-{
- "order": [
-  "<repo>/tests/diagnostics/builtin-values-without-lowering.ts"
- ],
- "diags": []
-}

@@ -1,9 +1,0 @@
-{
-  "entry": "workloads/intern-table.ts",
-  "args": [
-    "map",
-    "8",
-    "100000"
-  ],
-  "scaleArg": 2
-}

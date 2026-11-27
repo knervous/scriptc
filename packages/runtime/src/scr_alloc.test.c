@@ -1,7 +1,9 @@
 /* White-box checks for the small-object allocator (scr_alloc.c). Built by
  * scr_alloc.test.ts without ASan (the size-class allocator is live), with
  * ASan (every call must reach the system allocator), and as a worker
- * executable's allocator (per-thread arenas, also under ThreadSanitizer). */
+ * executable's allocator (per-thread arenas, also under ThreadSanitizer).
+ * On Windows also as a thread-instanced executable's (-DSCR_THREAD_INSTANCES:
+ * per-thread arenas, parked when their threads exit). */
 #include "scr_runtime.h"
 #include <assert.h>
 #include <stdio.h>
@@ -349,7 +351,7 @@ static void check_heap_huge_pages(void) {
 #endif
 #endif
 
-#if defined(SCR_WORKERS) && SCR_SMALL_ALLOC
+#ifdef SCR_SA_PER_THREAD
 #include <pthread.h>
 
 /* Script threads own disjoint arenas; blocks freed by another thread return
@@ -1324,8 +1326,10 @@ static void check_program_lifetime_region_threads(void) {
 
 
 #if defined(SCR_SA_WINDOW_TEST_CHUNKS) && SCR_SMALL_ALLOC
+#ifndef _WIN32
 #include <sys/wait.h>
 #include <unistd.h>
+#endif
 /* A window of SCR_SA_WINDOW_TEST_CHUNKS chunks fills up: later small blocks
  * come from the system allocator and behave as before, and freeing either
  * kind is safe. */
@@ -1604,7 +1608,7 @@ static void check_large_blocks_stats(void) {
 }
 #endif
 
-#if defined(SCR_WORKERS) && SCR_SMALL_ALLOC
+#ifdef SCR_SA_PER_THREAD
 /* Large blocks freed by another thread go back to their arena, and a large
  * run freed by another thread goes back to the window. */
 enum { LARGE_HANDOFF = 200 };
@@ -1642,6 +1646,96 @@ static void check_large_threads(void) {
   assert(pthread_create(&t, NULL, large_reuse, NULL) == 0);
   assert(pthread_join(t, NULL) == 0);
 }
+
+#ifndef SCR_WORKERS
+/* Two threads trade blocks both ways (as a threaded program's main and ui
+ * threads trade values): each frees what the other allocated, small and
+ * large blocks and runs, with the contents intact, and the arenas reuse the
+ * remote frees, so steady trading does not grow the process's memory. */
+#include <sched.h>
+#include <stdatomic.h>
+#ifdef _WIN32
+#include <windows.h>
+#include <psapi.h>
+/* The process's commit charge (private bytes). */
+static size_t private_bytes(void) {
+  PROCESS_MEMORY_COUNTERS_EX m = {0};
+  m.cb = sizeof m;
+  assert(GetProcessMemoryInfo(GetCurrentProcess(), (PROCESS_MEMORY_COUNTERS *)&m, sizeof m));
+  return m.PrivateUsage;
+}
+#endif
+enum { TRADE_RING = 1024, TRADE_ROUNDS = 6, TRADE_PER_ROUND = 200000 };
+typedef struct {
+  unsigned char *slot[TRADE_RING];
+  size_t len[TRADE_RING];
+  _Atomic(size_t) head, tail;
+} TradeRing;
+static TradeRing trade_rings[2];
+static _Atomic(int) trade_round_done[2];
+static size_t trade_private[TRADE_ROUNDS];
+
+static size_t trade_size(uint32_t x) {
+  if (x % 4096 == 0) return ((size_t)3 << 20) + x % 1000; /* a run */
+  if (x % 64 == 0) return 513 + x % 8000;                 /* a large class */
+  return 1 + x % SCR_SA_MAX;
+}
+
+static void *trade(void *arg) {
+  unsigned me = (unsigned)(uintptr_t)arg;
+  TradeRing *out = &trade_rings[me], *in = &trade_rings[1 - me];
+  uint32_t x = me ? 0x2545f491u : 0x9e3779b9u;
+  for (unsigned round = 0; round < TRADE_ROUNDS; round++) {
+    for (unsigned sent = 0, got = 0; sent < TRADE_PER_ROUND || got < TRADE_PER_ROUND;) {
+      size_t h = atomic_load_explicit(&out->head, memory_order_relaxed);
+      if (sent < TRADE_PER_ROUND && h - atomic_load_explicit(&out->tail, memory_order_acquire) < TRADE_RING) {
+        x ^= x << 13;
+        x ^= x >> 17;
+        x ^= x << 5;
+        size_t n = trade_size(x);
+        unsigned char *p = (x & 2) ? scr_mem_calloc_ref(n) : scr_mem_alloc(n);
+        assert(p);
+        fill(p, n < 64 ? n : 64, (unsigned char)h);
+        out->slot[h % TRADE_RING] = p;
+        out->len[h % TRADE_RING] = n;
+        atomic_store_explicit(&out->head, h + 1, memory_order_release);
+        sent++;
+      }
+      size_t t = atomic_load_explicit(&in->tail, memory_order_relaxed);
+      if (t != atomic_load_explicit(&in->head, memory_order_acquire)) {
+        unsigned char *p = in->slot[t % TRADE_RING];
+        size_t n = in->len[t % TRADE_RING];
+        verify(p, n < 64 ? n : 64, (unsigned char)t);
+        if (t % 3 == 0) p = scr_mem_realloc(p, n + 16); /* another arena's block moves here */
+        scr_mem_free(p);
+        atomic_store_explicit(&in->tail, t + 1, memory_order_release);
+        got++;
+      }
+    }
+    /* Both threads finish a round before either starts the next. */
+    atomic_fetch_add_explicit(&trade_round_done[me], 1, memory_order_acq_rel);
+    while (atomic_load_explicit(&trade_round_done[1 - me], memory_order_acquire) <= (int)round) sched_yield();
+#ifdef _WIN32
+    if (me == 0) trade_private[round] = private_bytes();
+#endif
+  }
+  return NULL;
+}
+
+static void check_trade(void) {
+  pthread_t a, b;
+  assert(pthread_create(&a, NULL, trade, (void *)(uintptr_t)0) == 0);
+  assert(pthread_create(&b, NULL, trade, (void *)(uintptr_t)1) == 0);
+  assert(pthread_join(a, NULL) == 0);
+  assert(pthread_join(b, NULL) == 0);
+#ifdef _WIN32
+  /* Past the first round the arenas recycle what the other thread freed:
+   * the commit charge stays within a few MiB of where it was. */
+  for (unsigned round = 2; round < TRADE_ROUNDS; round++)
+    assert(trade_private[round] < trade_private[1] + ((size_t)16 << 20));
+#endif
+}
+#endif
 #endif
 
 #if SCR_SMALL_ALLOC && defined(__linux__) && !defined(SCR_WORKERS) && !defined(SCR_SA_WINDOW_TEST_CHUNKS)
@@ -1798,7 +1892,12 @@ int main(int argc, char **argv) {
   check_program_lifetime_region_threads();
 #endif
 #endif
-#if defined(SCR_WORKERS) && SCR_SMALL_ALLOC
+#if defined(SCR_SA_PER_THREAD) && !defined(SCR_WORKERS)
+  check_threads();
+  check_large_threads();
+  check_trade();
+  printf("allocator checks passed: size-class threads\n");
+#elif defined(SCR_WORKERS) && SCR_SMALL_ALLOC
   /* A short discard delay, which stays at its start until check_discard_delay_grows. */
   setenv("SCR_SA_DISCARD_DELAY_MS", "100", 1);
   setenv("SCR_SA_DISCARD_DELAY_MAX_MS", "0", 1);

@@ -1,6 +1,0 @@
-{
- "order": [
-  "<repo>/tests/corpus/types-only-workspace-package/main.ts"
- ],
- "diags": []
-}

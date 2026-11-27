@@ -1,7 +1,0 @@
-The `SystemError` that the buffer size methods throw (`ERR_SOCKET_BUFFER_SIZE`, for example from `getRecvBufferSize()` before `bind()`) has Node's `message`, `code`, `errno` and `syscall`, but no `info` object.
-
-`socket.send()` accepts Node's whole argument ladder from TypeScript and JavaScript: lists of buffers, the offset/length slice, a connected socket's one-argument send, and the completion callback, which receives `null` and the byte count, or the send's failure instead of an `'error'` event.
-The callback runs after the socket's pending events, where Node runs it on the next tick.
-JavaScript can read a socket's `on`, `once`, `addListener`, `removeListener`, `off`, `emit`, `send`, `close`, `bind`, `connect`, `disconnect`, `address`, `ref`, and `unref` as function values, for example `socket.emit.bind(socket)`; reading other members as values is refused with `SC1090`.
-Listeners registered that way, or with untyped parameters, take only the `message`, `error`, `close`, `listening`, and `connect` events.
-When a socket closes, listeners registered from TypeScript are released, so an `emit()` from JavaScript after `'close'` reaches only listeners registered from JavaScript.

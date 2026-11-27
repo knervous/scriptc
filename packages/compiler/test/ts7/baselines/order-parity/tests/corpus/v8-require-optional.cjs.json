@@ -1,6 +1,0 @@
-{
- "order": [
-  "<repo>/tests/corpus/v8-require-optional.cjs"
- ],
- "diags": []
-}

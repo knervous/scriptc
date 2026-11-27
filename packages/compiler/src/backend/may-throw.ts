@@ -1,3 +1,4 @@
+// This file was modified from scriptc (Apache-2.0); see MODIFICATIONS.md.
 /* Cheap whole-module may-throw analysis (see computeMayThrow). Pure function
  * of the IR module; the emitter consults the result to place unwind checks. */
 import type { IrExpr, IrStmt, IrModule, IrType, SrcLoc } from "../ir/ir.js";
@@ -351,6 +352,15 @@ export function computeMayThrow(
           )
             f.throws = true;
           break;
+        case "jsOp":
+        case "jsExit":
+        case "jsMarshal":
+        case "jsBridgePromise":
+          // Island operations bridge engine exceptions into the cell
+          // (jsMarshal only on engine-level surprise, but the emitted
+          // pending check exists — seed conservatively).
+          f.throws = true;
+          break;
         case "libCall":
           // The may-throw seed hook: throwing library calls (fs.*,
           // json.parse) count exactly like a `throw` statement.
@@ -400,7 +410,9 @@ export function computeMayThrow(
             rec.method === "matchAll" ||
             rec.method === "matchAllCaptures" ||
             rec.method === "matchAllInto" ||
-            rec.method === "matchAllCapturesInto"
+            rec.method === "matchAllCapturesInto" ||
+            rec.method === "replaceFn" ||
+            rec.method === "replaceAllFn"
           ) {
             f.throws = true;
           }

@@ -1,3 +1,4 @@
+// This file was modified from scriptc (Apache-2.0); see MODIFICATIONS.md.
 /* scriptc runtime — zlib (scr_zlib.c). Included by scr_runtime.h, which says
  * where new declarations go. */
 #ifndef SCR_ZLIB_H
@@ -13,7 +14,9 @@
  * ("incorrect header check", ...). Borrow their input; results +1. */
 ScrBytes *scr_zlib_deflate(const ScrBytes *data);
 ScrBytes *scr_zlib_inflate(const ScrBytes *data);
-
+/* The format-mode variants (0 zlib / 1 raw / 2 gzip; inflate adds
+ * 3 = auto-detect). Static one-shot codecs call these directly, and
+ * scr_zlib_island.c bridges them into the embedded engine's node:zlib shim. */
 ScrBytes *scr_zlib_deflate_mode(const ScrBytes *data, double mode, double level);
 ScrBytes *scr_zlib_inflate_mode(const ScrBytes *data, double mode);
 double scr_zlib_crc32(const ScrBytes *data, double value);

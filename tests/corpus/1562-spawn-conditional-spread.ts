@@ -10,7 +10,9 @@ import { tmpdir } from "node:os";
 const dir = mkdtempSync(join(tmpdir(), "scr-spawn-cs-"));
 const isWindows = process.platform === "win32";
 
-const detachedChild = spawn("sh", ["-c", `ps -o pgid= -p $$ > ${join(dir, "a.txt")}`], {
+// The report path is quoted for sh: unquoted, a Windows temp path's backslashes are escapes, and the file lands
+// in the working directory under a name made of the whole path.
+const detachedChild = spawn("sh", ["-c", `ps -o pgid= -p $$ > '${join(dir, "a.txt")}'`], {
   stdio: "ignore",
   ...(isWindows ? {} : { detached: true }),
 });
@@ -21,7 +23,7 @@ detachedChild.on("exit", (code) => {
 
   // The other orientation, condition false: stays attached — the child's
   // pgid is the parent's, not its own.
-  const attached = spawn("sh", ["-c", `ps -o pgid= -p $$ > ${join(dir, "b.txt")}`], {
+  const attached = spawn("sh", ["-c", `ps -o pgid= -p $$ > '${join(dir, "b.txt")}'`], {
     stdio: "ignore",
     ...(isWindows ? { detached: true } : {}),
   });

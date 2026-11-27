@@ -1,3 +1,4 @@
+// This file was modified from scriptc (Apache-2.0); see MODIFICATIONS.md.
 import type { IrRecordShape, IrType, IrUnionDef, IrUnionDiscriminant } from "../ir/ir.js";
 
 export type UnionLiteral = string | number | boolean;
@@ -5,18 +6,12 @@ export type UnionLiteral = string | number | boolean;
 /** Only ordinary data slots have a safe literal-comparison ABI. */
 export function discriminantField(shape: IrRecordShape | undefined, field: string): IrType | null {
   if (field.startsWith("%") || !shape || shape.tuple) return null;
-  if (
-    shape.fields.some((entry) => entry.name === `%get:${field}` || entry.name === `%set:${field}`)
-  )
-    return null;
+  if (shape.fields.some((entry) => entry.name === `%get:${field}` || entry.name === `%set:${field}`)) return null;
   const type = shape.fields.find((entry) => entry.name === field)?.type;
-  return type && (type.kind === "string" || type.kind === "f64" || type.kind === "bool")
-    ? type
-    : null;
+  return type && (type.kind === "string" || type.kind === "f64" || type.kind === "bool") ? type : null;
 }
 
-/** Whether a field of IR type `type` stores the literal `value`. */
-export function matchesLiteral(type: IrType, value: UnionLiteral): boolean {
+function matchesLiteral(type: IrType, value: UnionLiteral): boolean {
   if (type.kind === "string") return typeof value === "string";
   if (type.kind === "bool") return typeof value === "boolean";
   return type.kind === "f64" && typeof value === "number" && Number.isFinite(value);
@@ -34,8 +29,7 @@ export function discriminantOwners(
   const tags = new Set<number>();
   for (const entry of discriminant.cases) {
     const arm = union.arms[entry.tag];
-    if (!Number.isInteger(entry.tag) || !arm || arm.kind !== "record" || tags.has(entry.tag))
-      return null;
+    if (!Number.isInteger(entry.tag) || !arm || arm.kind !== "record" || tags.has(entry.tag)) return null;
     tags.add(entry.tag);
     const type = discriminantField(shapeOf(arm.shapeId), discriminant.field);
     if (!type || entry.values.length === 0) return null;
@@ -62,8 +56,7 @@ export function literalUnionArm(
   validatedOwners?: ReadonlyMap<string, number> | null,
 ): (IrType & { kind: "record" }) | null {
   if (values.length === 0) return null;
-  const owners =
-    validatedOwners === undefined ? discriminantOwners(union, shapeOf) : validatedOwners;
+  const owners = validatedOwners === undefined ? discriminantOwners(union, shapeOf) : validatedOwners;
   if (owners === null) return null;
   let tag: number | undefined;
   for (const value of values) {
@@ -98,13 +91,7 @@ export function remapUnionDiscriminant(
   const cases: IrUnionDiscriminant["cases"] = [];
   for (const entry of original.cases) {
     const arm = source.arms[entry.tag];
-    if (
-      !Number.isInteger(entry.tag) ||
-      !arm ||
-      arm.kind !== "record" ||
-      seen.has(entry.tag) ||
-      entry.values.length === 0
-    ) {
+    if (!Number.isInteger(entry.tag) || !arm || arm.kind !== "record" || seen.has(entry.tag) || entry.values.length === 0) {
       return undefined;
     }
     seen.add(entry.tag);

@@ -8,14 +8,12 @@ async function main(): Promise<void> {
   const result = await compile(request.entry, {
     outDir: request.workDir,
     outPath: request.binary,
+    dynamic: false,
     sanitize: request.sanitize,
     ...(request.backend === "default" ? {} : { backend: request.backend }),
-    // The native lane keeps the whole program strict; the island lane lets
-    // the pre-scan island sloppy user modules (decision S3).
-    nodeIslands: { mode: request.islands ? "auto" : "off" },
   });
   writeFileSync(request.result, JSON.stringify(result.ok
-    ? { ok: true, backend: result.backend, islands: result.islands ?? null }
+    ? { ok: true, backend: result.backend }
     : { ok: false, diagnostics: result.diagnostics }));
 }
 

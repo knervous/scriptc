@@ -1,6 +1,0 @@
-{
- "order": [
-  "<repo>/tests/corpus/2531-array-tuple-destructuring-decl.ts"
- ],
- "diags": []
-}

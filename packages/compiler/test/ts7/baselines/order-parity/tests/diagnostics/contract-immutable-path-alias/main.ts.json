@@ -1,6 +1,0 @@
-{
- "order": [
-  "<repo>/tests/diagnostics/contract-immutable-path-alias/main.ts"
- ],
- "diags": []
-}

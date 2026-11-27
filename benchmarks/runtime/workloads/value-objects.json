@@ -1,7 +1,0 @@
-{
-  "entry": "workloads/value-objects.ts",
-  "args": [
-    "2"
-  ],
-  "scaleArg": 0
-}

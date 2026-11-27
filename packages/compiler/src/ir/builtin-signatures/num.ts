@@ -1,3 +1,4 @@
+// This file was modified from scriptc (Apache-2.0); see MODIFICATIONS.md.
 import { BOOL, DYN, F64, STRING } from "../ir.js";
 import { defineLibFnSignatures } from "./shared.js";
 
@@ -50,4 +51,6 @@ export const numSignatures = defineLibFnSignatures({
    * result; never throws. (Union-armed operands take unionEq's sameValue
    * flag instead — this is the both-f64 fast path.) */
   "num.sameValue": { argTypes: [F64, F64], result: BOOL },
+"num.isUndefined": { argTypes: [F64], result: BOOL },
+"num.typeof": { argTypes: [F64], result: STRING },
 });

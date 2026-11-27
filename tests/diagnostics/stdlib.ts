@@ -6,7 +6,7 @@
 import { mkdirSync, openSync, readFileSync, writeFileSync } from "node:fs";
 import { writeFile } from "node:fs/promises";
 const read = readFileSync; console.log(read);
-const exit = process.exit;
+const cwd = process.cwd;
 const p = process;
 const env = process.env;
 const flo = Math.floor; // fixed-arity Math functions have native value forms

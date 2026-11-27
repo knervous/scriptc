@@ -1,6 +1,0 @@
-{
- "order": [
-  "<repo>/tests/corpus/6924-instanceof-class-values-native.mjs"
- ],
- "diags": []
-}

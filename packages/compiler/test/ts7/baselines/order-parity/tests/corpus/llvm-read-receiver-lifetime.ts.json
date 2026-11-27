@@ -1,6 +1,0 @@
-{
- "order": [
-  "<repo>/tests/corpus/llvm-read-receiver-lifetime.ts"
- ],
- "diags": []
-}

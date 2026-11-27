@@ -1,6 +1,0 @@
-{
- "order": [
-  "<repo>/tests/fixtures/npm/cases/hono-zod-default-hook/main.ts"
- ],
- "diags": []
-}

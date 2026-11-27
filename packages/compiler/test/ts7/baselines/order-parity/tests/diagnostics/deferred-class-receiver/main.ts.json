@@ -1,7 +1,0 @@
-{
- "order": [
-  "<repo>/tests/diagnostics/deferred-class-receiver/shelf.ts",
-  "<repo>/tests/diagnostics/deferred-class-receiver/main.ts"
- ],
- "diags": []
-}

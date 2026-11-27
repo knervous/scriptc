@@ -205,7 +205,7 @@ test("mutually recursive closures only drop their own capture", () => {
   ]);
 });
 
-test("a closure's jsval body drops the same capture as the closure", () => {
+test("a closure's jsword body drops the same capture as the closure", () => {
   const n = local("n.0", { type: F64 });
   const walk = lifted("walk", [use(ref("n.0", F64)), ret(call("f.0"))], [n, local("f.0")]);
   walk.jsEntry = "%js.walk";

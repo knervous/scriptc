@@ -1,6 +1,0 @@
-{
- "order": [
-  "<repo>/tests/corpus/3097-json-callback-reentrancy.ts"
- ],
- "diags": []
-}

@@ -1,3 +1,4 @@
+// This file was modified from scriptc (Apache-2.0); see MODIFICATIONS.md.
 /* Shared storage is neutral: only its backing allocation and synchronization
  * cross contexts. ScrBytes wrappers and their reference counts remain local.
  * Every access to shared bytes is atomic: Atomics operations as sequentially
@@ -17,7 +18,7 @@
 #include <sys/mman.h>
 #define SCR_SHARED_MMAP 1
 #endif
-#if defined(SCR_WORKERS) || (defined(SCR_LIB) && defined(SCR_THREAD_INSTANCES))
+#if defined(SCR_WORKERS) || defined(SCR_THREAD_INSTANCES)
 #ifdef _WIN32
 #include <windows.h>
 #else
@@ -264,164 +265,11 @@ double scr_atomics_op(ScrBytes *bytes, double index, double value, double replac
   }
 }
 
-/* Waiters queue per bucket, chosen by storage and byte offset. A bucket's
- * lock orders a wait's value check and registration against notify for the
- * same location; other Atomics operations never take it. */
-typedef struct ScrAtomicWaiter {
-  ScrSharedBytes *storage;
-  size_t offset;
-  bool notified;
-  struct ScrAtomicWaiter *next;
-} ScrAtomicWaiter;
-
-#define SCR_WAIT_BUCKETS 64
-#if defined(SCR_WORKERS) || (defined(SCR_LIB) && defined(SCR_THREAD_INSTANCES))
-#define SCR_WAIT_THREADS 1
-#endif
-
-typedef struct ScrWaitBucket {
-#ifdef SCR_WAIT_THREADS
-#ifdef _WIN32
-  SRWLOCK lock;
-  CONDITION_VARIABLE condition;
-#else
-  pthread_mutex_t lock;
-  pthread_cond_t condition;
-#endif
-#endif
-  ScrAtomicWaiter *waiters;
-} ScrWaitBucket;
-
-static ScrWaitBucket scr_wait_buckets[SCR_WAIT_BUCKETS];
-#if defined(SCR_WAIT_THREADS) && !defined(_WIN32)
-static pthread_once_t scr_wait_once = PTHREAD_ONCE_INIT;
-static void scr_wait_init(void) {
-  for (size_t b = 0; b < SCR_WAIT_BUCKETS; b++) {
-    pthread_mutex_init(&scr_wait_buckets[b].lock, NULL);
-    pthread_cond_init(&scr_wait_buckets[b].condition, NULL);
-  }
-}
-#endif
-
-/* Locked bucket for a location (SRWLOCK and CONDITION_VARIABLE are valid
- * when zero-initialized). */
-static ScrWaitBucket *scr_wait_lock(ScrSharedBytes *storage, size_t offset) {
-  uintptr_t key = (uintptr_t)storage ^ (uintptr_t)(offset / 4) * 0x9E3779B1u;
-  ScrWaitBucket *bucket = &scr_wait_buckets[(key ^ (key >> 7)) % SCR_WAIT_BUCKETS];
-#ifdef SCR_WAIT_THREADS
-#ifdef _WIN32
-  AcquireSRWLockExclusive(&bucket->lock);
-#else
-  pthread_once(&scr_wait_once, scr_wait_init);
-  pthread_mutex_lock(&bucket->lock);
-#endif
-#endif
-  return bucket;
-}
-
-static void scr_wait_unlock(ScrWaitBucket *bucket) {
-#ifdef SCR_WAIT_THREADS
-#ifdef _WIN32
-  ReleaseSRWLockExclusive(&bucket->lock);
-#else
-  pthread_mutex_unlock(&bucket->lock);
-#endif
-#else
-  (void)bucket;
-#endif
-}
-
-/* Sleep up to ms with the bucket locked; returns with it locked. */
-static void scr_atomics_pause(ScrWaitBucket *bucket, double ms) {
-#ifdef SCR_WAIT_THREADS
-#ifdef _WIN32
-  SleepConditionVariableSRW(&bucket->condition, &bucket->lock, (DWORD)ceil(ms), 0);
-#else
-  struct timespec until;
-  clock_gettime(CLOCK_REALTIME, &until);
-  until.tv_nsec += (long)(ms * 1000000.0);
-  until.tv_sec += until.tv_nsec / 1000000000;
-  until.tv_nsec %= 1000000000;
-  pthread_cond_timedwait(&bucket->condition, &bucket->lock, &until);
-#endif
-#else
-  (void)bucket;
-  struct timespec duration = {(time_t)(ms / 1000), (long)(fmod(ms, 1000) * 1000000)};
-  nanosleep(&duration, NULL);
-#endif
-}
-
-ScrStr *scr_atomics_wait(ScrBytes *bytes, double index, double expected, double timeout) {
-  size_t i;
-  if (!scr_atomics_index(bytes, index, true, &i)) return NULL;
-  if (!bytes->shared) {
-    static const char message[] = "[object Int32Array] is not a shared typed array.";
-    scr_throw_error_msg(SCR_ERR_TYPE, message, sizeof message - 1);
-    return NULL;
-  }
-  int32_t compare;
-  uint32_t bits = scr_numeric_to_u32(expected);
-  memcpy(&compare, &bits, sizeof compare);
-  size_t offset = (size_t)(bytes->data - bytes->shared->data) + i * 4;
-  int32_t *cell = (int32_t *)(bytes->data + i * 4);
-  ScrWaitBucket *bucket = scr_wait_lock(bytes->shared, offset);
-  /* Under the bucket lock, a notify for this location cannot fall between
-   * this check and the registration below. */
-  if (__atomic_load_n(cell, __ATOMIC_SEQ_CST) != compare) {
-    scr_wait_unlock(bucket);
-    return scr_str_new("not-equal", 9);
-  }
-  double duration = isnan(timeout) ? INFINITY : fmax(timeout, 0);
-  double end = scr_perf_now() + duration;
-  ScrAtomicWaiter waiter = {bytes->shared, offset, false, NULL};
-  ScrAtomicWaiter **tail = &bucket->waiters;
-  while (*tail) tail = &(*tail)->next;
-  *tail = &waiter;
-  bool stopped = false;
-  while (!waiter.notified) {
-    double remaining = end - scr_perf_now();
-    if (!(remaining > 0)) break;
-    /* A bounded wait gives cooperative termination a safe cancellation point. */
-    scr_atomics_pause(bucket, fmin(remaining, 10));
-#ifdef SCR_WORKERS
-    scr_wait_unlock(bucket);
-    stopped = scr_context_checkpoint();
-    bucket = scr_wait_lock(bytes->shared, offset);
-    if (stopped) break;
-#endif
-  }
-  ScrAtomicWaiter **slot = &bucket->waiters;
-  while (*slot != &waiter) slot = &(*slot)->next;
-  *slot = waiter.next;
-  scr_wait_unlock(bucket);
-  return stopped ? NULL : scr_str_new(waiter.notified ? "ok" : "timed-out", waiter.notified ? 2 : 9);
-}
-
-double scr_atomics_notify(ScrBytes *bytes, double index, double count) {
-  size_t i;
-  if (!scr_atomics_index(bytes, index, true, &i)) return 0;
-  if (!bytes->shared) return 0;
-  double limit = isnan(count) ? 0 : fmax(trunc(count), 0);
-  size_t offset = (size_t)(bytes->data - bytes->shared->data) + i * 4;
-  double notified = 0;
-  ScrWaitBucket *bucket = scr_wait_lock(bytes->shared, offset);
-  /* Waiters are woken in the order they arrived (ECMA-262 WaiterList). */
-  for (ScrAtomicWaiter *waiter = bucket->waiters; waiter && notified < limit; waiter = waiter->next) {
-    if (waiter->storage == bytes->shared && waiter->offset == offset && !waiter->notified) {
-      waiter->notified = true;
-      notified++;
-    }
-  }
-#ifdef SCR_WAIT_THREADS
-#ifdef _WIN32
-  if (notified) WakeAllConditionVariable(&bucket->condition);
-#else
-  if (notified) pthread_cond_broadcast(&bucket->condition);
-#endif
-#endif
-  scr_wait_unlock(bucket);
-  return notified;
-}
+/* Atomics.wait and Atomics.notify live in scr_lib.c in this fork: one
+ * address-keyed waiter table for every integer typed array (thread instances
+ * share typed arrays by address, with or without a SharedArrayBuffer), with
+ * Atomics.waitAsync beside them. Upstream's shared-storage-only pair is left
+ * out so the two definitions do not collide. */
 
 /* V8's text for a value in the TypeErrors below: a typed array as
  * [object Int8Array] and so on, an array as [object Array], an ArrayBuffer

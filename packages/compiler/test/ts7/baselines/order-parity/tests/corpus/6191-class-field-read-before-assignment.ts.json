@@ -1,6 +1,0 @@
-{
- "order": [
-  "<repo>/tests/corpus/6191-class-field-read-before-assignment.ts"
- ],
- "diags": []
-}

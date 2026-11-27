@@ -1,3 +1,4 @@
+// @dynamic
 async function main(): Promise<void> {
   console.log("before import");
   const module = await import("scriptc-dynamic-self/dep");

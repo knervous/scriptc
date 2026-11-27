@@ -1,21 +1,7 @@
-import { unionComparison } from "./union-comparison.js";
+// This file was modified from scriptc (Apache-2.0); see MODIFICATIONS.md.
 import { InternalCompilerError } from "../../errors.js";
-import {
-  BOOL,
-  DYN,
-  DYN_HANDLE_KINDS,
-  F64,
-  STRING,
-  type IrExpr,
-  type IrStmt,
-  type IrType,
-  type SrcLoc,
-  isUnitType,
-  typeEquals,
-} from "../../ir/ir.js";
+import { BOOL, DYN, DYN_HANDLE_KINDS, F64, type IrExpr, type IrStmt, type IrType, type SrcLoc, isUnitType, typeEquals } from "../../ir/ir.js";
 import { boolLit, numLit, varRef } from "../../ir/build.js";
-import * as ts from "../ts7/adapter.js";
-import { refuseShadowedImplicitReader } from "./handle-properties.js";
 import type { Lowerer } from "./lowerer.js";
 
 /**
@@ -62,7 +48,7 @@ function supportsPair(lowerer: Lowerer, left: IrType, right: IrType): boolean {
   }
   if (isUnitType(left) || isUnitType(right)) {
     const other = isUnitType(left) ? right : left;
-    return other.kind !== "dyn" && other.kind !== "caught" && other.kind !== "void";
+    return other.kind !== "dyn" && other.kind !== "jsval" && other.kind !== "caught" && other.kind !== "void";
   }
 
   if (PRIMITIVE_KINDS.has(left.kind) && PRIMITIVE_KINDS.has(right.kind)) return true;
@@ -72,10 +58,7 @@ function supportsPair(lowerer: Lowerer, left: IrType, right: IrType): boolean {
   if (DYN_HANDLE_KINDS.has(left.kind) && typeEquals(left, right)) return true;
 
   if (left.kind === "object" && right.kind === "object") {
-    return (
-      lowerer.isSubclassOf(left.className, right.className) ||
-      lowerer.isSubclassOf(right.className, left.className)
-    );
+    return lowerer.isSubclassOf(left.className, right.className) || lowerer.isSubclassOf(right.className, left.className);
   }
   return false;
 }
@@ -127,24 +110,10 @@ function primitivePair(
       return { kind: "bin", op: "===", left, right, type: BOOL, loc };
     }
     if (lowerer.isSubclassOf(left.type.className, right.type.className)) {
-      return {
-        kind: "bin",
-        op: "===",
-        left: lowerer.upcastTo(left, right.type.className),
-        right,
-        type: BOOL,
-        loc,
-      };
+      return { kind: "bin", op: "===", left: lowerer.upcastTo(left, right.type.className), right, type: BOOL, loc };
     }
     if (lowerer.isSubclassOf(right.type.className, left.type.className)) {
-      return {
-        kind: "bin",
-        op: "===",
-        left,
-        right: lowerer.upcastTo(right, left.type.className),
-        type: BOOL,
-        loc,
-      };
+      return { kind: "bin", op: "===", left, right: lowerer.upcastTo(right, left.type.className), type: BOOL, loc };
     }
   }
 
@@ -180,10 +149,8 @@ function primitivePair(
     return { kind: "bin", op: "===", left, right, type: BOOL, loc };
   }
   // Boolean first recurses as ToNumber(boolean), per ECMA-262 7.2.13.
-  if (left.type.kind === "bool")
-    return primitivePair(lowerer, boolAsNumber(left, loc), right, nanEqualsNan, loc);
-  if (right.type.kind === "bool")
-    return primitivePair(lowerer, left, boolAsNumber(right, loc), nanEqualsNan, loc);
+  if (left.type.kind === "bool") return primitivePair(lowerer, boolAsNumber(left, loc), right, nanEqualsNan, loc);
+  if (right.type.kind === "bool") return primitivePair(lowerer, left, boolAsNumber(right, loc), nanEqualsNan, loc);
 
   // Symbols never equal a different primitive type. Object/symbol would
   // require ToPrimitive and was rejected by supportsPair.
@@ -204,23 +171,11 @@ function primitivePair(
     return { kind: "libCall", fn: "bigint.eqString", args: [right, left], type: BOOL, loc };
   }
   if (left.type.kind === "bigint" && right.type.kind === "f64") {
-    const cmp: IrExpr = {
-      kind: "libCall",
-      fn: "bigint.cmpNumber",
-      args: [left, right],
-      type: F64,
-      loc,
-    };
+    const cmp: IrExpr = { kind: "libCall", fn: "bigint.cmpNumber", args: [left, right], type: F64, loc };
     return { kind: "bin", op: "===", left: cmp, right: numLit(0, loc), type: BOOL, loc };
   }
   if (left.type.kind === "f64" && right.type.kind === "bigint") {
-    const cmp: IrExpr = {
-      kind: "libCall",
-      fn: "bigint.cmpNumber",
-      args: [right, left],
-      type: F64,
-      loc,
-    };
+    const cmp: IrExpr = { kind: "libCall", fn: "bigint.cmpNumber", args: [right, left], type: F64, loc };
     return { kind: "bin", op: "===", left: cmp, right: numLit(0, loc), type: BOOL, loc };
   }
 
@@ -236,15 +191,51 @@ function pairExpr(
   nanEqualsNan: boolean,
   loc: SrcLoc,
 ): IrExpr {
-  const result = unionComparison(
-    lowerer,
-    left,
-    right,
-    (a, b) => primitivePair(lowerer, a, b, nanEqualsNan, loc),
-    loc,
-  );
-  if (!result) throw new InternalCompilerError("abstract equality over an unknown union");
-  return result;
+  if (left.type.kind === "union") {
+    const unionId = left.type.unionId;
+    const def = lowerer.unions.get(unionId);
+    if (!def || def.arms.length === 0) throw new InternalCompilerError(`abstract equality over unknown union ${unionId}`);
+    const branch = (tag: number): IrExpr => {
+      const arm = def.arms[tag];
+      if (!arm) throw new InternalCompilerError(`abstract equality union ${unionId} lacks tag ${tag}`);
+      return pairExpr(lowerer, { kind: "unionNarrow", unionId, tag, value: left, type: arm, loc }, right, nanEqualsNan, loc);
+    };
+    let out = branch(def.arms.length - 1);
+    for (let tag = def.arms.length - 2; tag >= 0; tag--) {
+      out = {
+        kind: "ternary",
+        cond: { kind: "unionIsTag", unionId, tag, negated: false, value: left, type: BOOL, loc },
+        then: branch(tag),
+        else_: out,
+        type: BOOL,
+        loc,
+      };
+    }
+    return out;
+  }
+  if (right.type.kind === "union") {
+    const unionId = right.type.unionId;
+    const def = lowerer.unions.get(unionId);
+    if (!def || def.arms.length === 0) throw new InternalCompilerError(`abstract equality over unknown union ${unionId}`);
+    const branch = (tag: number): IrExpr => {
+      const arm = def.arms[tag];
+      if (!arm) throw new InternalCompilerError(`abstract equality union ${unionId} lacks tag ${tag}`);
+      return pairExpr(lowerer, left, { kind: "unionNarrow", unionId, tag, value: right, type: arm, loc }, nanEqualsNan, loc);
+    };
+    let out = branch(def.arms.length - 1);
+    for (let tag = def.arms.length - 2; tag >= 0; tag--) {
+      out = {
+        kind: "ternary",
+        cond: { kind: "unionIsTag", unionId, tag, negated: false, value: right, type: BOOL, loc },
+        then: branch(tag),
+        else_: out,
+        type: BOOL,
+        loc,
+      };
+    }
+    return out;
+  }
+  return primitivePair(lowerer, left, right, nanEqualsNan, loc);
 }
 
 export function abstractEqualitySupported(lowerer: Lowerer, left: IrType, right: IrType): boolean {
@@ -259,9 +250,7 @@ export function abstractEqualityExpr(
   nanEqualsNan = false,
 ): IrExpr {
   if (!supportsPair(lowerer, left.type, right.type)) {
-    throw new InternalCompilerError(
-      `abstract equality expression built for unsupported ${left.type.kind}/${right.type.kind} pair`,
-    );
+    throw new InternalCompilerError(`abstract equality expression built for unsupported ${left.type.kind}/${right.type.kind} pair`);
   }
   return pairExpr(lowerer, left, right, nanEqualsNan, loc);
 }
@@ -273,68 +262,10 @@ export function lowerAbstractEquality(
   right: IrExpr,
   negated: boolean,
   loc: SrcLoc,
-  node?: ts.Node,
 ): IrExpr | null {
-  if (
-    (left.type.kind === "dyn" || right.type.kind === "dyn") &&
-    lowerer.dynConvertible(left.type) &&
-    lowerer.dynConvertible(right.type)
-  ) {
-    const result: IrExpr = {
-      kind: "libCall",
-      fn: "dyn.abstractEq",
-      args: [lowerer.coerceToExpected(left, DYN), lowerer.coerceToExpected(right, DYN)],
-      type: BOOL,
-      loc,
-    };
+  if ((left.type.kind === "dyn" || right.type.kind === "dyn") && lowerer.dynConvertible(left.type) && lowerer.dynConvertible(right.type)) {
+    const result: IrExpr = { kind: "libCall", fn: "dyn.abstractEq", args: [lowerer.coerceToExpected(left, DYN), lowerer.coerceToExpected(right, DYN)], type: BOOL, loc };
     return negated ? { kind: "unary", op: "!", operand: result, type: BOOL, loc } : result;
-  }
-  // Two Dates are equal when they are the same object, as with ===.
-  if (left.type.kind === "date" && right.type.kind === "date")
-    return { kind: "bin", op: negated ? "!==" : "===", left, right, type: BOOL, loc };
-  // A Date and a string or number compare through the Date's default
-  // primitive, its toString() text.
-  if (left.type.kind === "date" || right.type.kind === "date") {
-    const otherType = left.type.kind === "date" ? right.type : left.type;
-    if (otherType.kind === "string" || otherType.kind === "f64") {
-      // The conversion reads the Date's toString, which the program may
-      // have replaced with an own property this typed path cannot see.
-      if (node)
-        refuseShadowedImplicitReader(
-          lowerer,
-          node,
-          left.type.kind === "date" ? left.type : right.type,
-          "toString",
-          "loose equality",
-        );
-      // Both operands evaluate before the Date converts.
-      const l = lowerer.declareHiddenLocal("%looseA", left.type);
-      const r = lowerer.declareHiddenLocal("%looseB", right.type);
-      const stmts: IrStmt[] = [
-        { kind: "varDecl", localId: l.id, init: left, loc },
-        { kind: "varDecl", localId: r.id, init: right, loc },
-      ];
-      const primitive = (value: IrExpr): IrExpr => {
-        if (value.type.kind !== "date") return value;
-        const text: IrExpr = {
-          kind: "libCall",
-          fn: "date.toString",
-          args: [value],
-          type: STRING,
-          loc,
-        };
-        return otherType.kind === "string"
-          ? text
-          : { kind: "libCall", fn: "num.fromString", args: [text], type: F64, loc };
-      };
-      const a = primitive(varRef(l.id, left.type, loc));
-      const b = primitive(varRef(r.id, right.type, loc));
-      const result: IrExpr =
-        otherType.kind === "string"
-          ? { kind: "strEq", negated, left: a, right: b, type: BOOL, loc }
-          : { kind: "bin", op: negated ? "!==" : "===", left: a, right: b, type: BOOL, loc };
-      return { kind: "seqExpr", stmts, result, type: BOOL, loc };
-    }
   }
   if (!supportsPair(lowerer, left.type, right.type)) return null;
   if (left.kind === "strLit" && right.kind === "strLit") {
@@ -344,12 +275,7 @@ export function lowerAbstractEquality(
   const stable = (value: IrExpr, name: string): IrExpr => {
     if (isUnitType(value.type)) {
       if (value.kind !== "unitLit") stmts.push({ kind: "exprStmt", expr: value, loc });
-      return {
-        kind: "unitLit",
-        unit: value.type.kind === "nullT" ? "null" : "undefined",
-        type: value.type,
-        loc,
-      };
+      return { kind: "unitLit", unit: value.type.kind === "nullT" ? "null" : "undefined", type: value.type, loc };
     }
     const local = lowerer.declareHiddenLocal(name, value.type);
     stmts.push({ kind: "varDecl", localId: local.id, init: value, loc });

@@ -1,3 +1,4 @@
+// This file was modified from scriptc (Apache-2.0); see MODIFICATIONS.md.
 /** Ordered executable link plans for scriptc-owned program objects.
  *
  * The plan is data, not a compiler-driver command line.  Runtime-pack
@@ -14,6 +15,7 @@ import { needsDarwinDebugSymbols } from "./debug-symbols.js";
 import { loadRuntimePack, type RuntimePackSelection } from "./runtime-pack.js";
 import { executableLinkInputs } from "./link-plan-core.js";
 import { hugeTextProgram } from "./huge-text.js";
+import { resolveHostLink, type HostLink, type HostLinkOptions } from "./host-island.js";
 import type { NativeTargetSpec, WindowsSubsystem } from "./targets.js";
 
 export interface NativeLinkPlan {
@@ -28,6 +30,9 @@ export interface NativeLinkPlan {
   /** Inputs already snapshotted by the program-object emitter. */
   programObjectDependencies: NativeArtifactDependency[];
   runtimePack: RuntimePackSelection;
+  /** The host archive of a host-island link (host-island.ts), already in
+   * `inputs`, and the link arguments that follow the system libraries. */
+  host?: HostLink;
   darwinDebugSymbols?: boolean;
   /** Linked with `--static`: the linked executable is checked before use. */
   staticLink?: boolean;
@@ -57,6 +62,9 @@ export async function createNativeLinkPlan(options: {
   programObjectDependencies?: readonly NativeArtifactDependency[];
   env?: NodeJS.ProcessEnv;
   resolver?: (specifier: string) => string;
+  /** The host for a hostIsland link (host-island.ts). */
+  host?: HostLinkOptions;
+  hostResolver?: (specifier: string) => string;
 }): Promise<NativeLinkPlan> {
   if (options.ffi?.frameworks?.length && options.target.platform !== "darwin")
     throw new Error("FFI frameworks require a Darwin target");
@@ -68,9 +76,42 @@ export async function createNativeLinkPlan(options: {
     features:
       options.staticLink === true ? { ...options.features, staticLink: true } : options.features,
   });
+  // A host-island link takes exactly one archive defining scr_host_ops(),
+  // after the runtime objects that reference it.
+  const host =
+    options.features.hostIsland === true
+      ? await resolveHostLink({
+          target: options.target,
+          host: options.host ?? {},
+          runtimeHostAbi: runtimePack.manifest.host_abi ?? null,
+          ...(options.env === undefined ? {} : { env: options.env }),
+          ...(options.hostResolver === undefined ? {} : { resolver: options.hostResolver }),
+        })
+      : undefined;
   const hugeText =
     options.hugeText !== false &&
     hugeTextProgram(options.target, [options.programObject, ...(options.programPartitions ?? [])]);
+  const inputs = executableLinkInputs({
+    target: options.target,
+    programObject: options.programObject,
+    ...(options.programPartitions === undefined
+      ? {}
+      : { programPartitions: options.programPartitions }),
+    ffiLibraries: options.ffi?.libraries ?? [],
+    ffiSystemLibraries: options.ffi?.systemLibraries ?? [],
+    ffiFrameworks: options.ffi?.frameworks ?? [],
+    runtimeObjects: runtimePack.runtimeObjects,
+    runtimeArchives: host === undefined ? runtimePack.archives : [host.archive, ...runtimePack.archives],
+    runtimeSystemLibraries: runtimePack.systemLibraries,
+    optimization: options.optimization,
+    ...(options.strip === undefined ? {} : { strip: options.strip }),
+    ...(options.staticLink === true ? { staticLink: true } : {}),
+    ...(options.windowsSubsystem === undefined
+      ? {}
+      : { windowsSubsystem: options.windowsSubsystem }),
+    ...(options.profileGenerate === true ? { profileGenerate: true } : {}),
+    ...(options.profileLayout === true ? { profileLayout: true } : {}),
+  });
   return {
     target: options.target,
     darwinDebugSymbols: needsDarwinDebugSymbols(
@@ -79,30 +120,20 @@ export async function createNativeLinkPlan(options: {
       options.strip,
     ),
     outputPath: options.outPath,
-    ...executableLinkInputs({
-      target: options.target,
-      programObject: options.programObject,
-      ...(options.programPartitions === undefined
-        ? {}
-        : { programPartitions: options.programPartitions }),
-      ffiLibraries: options.ffi?.libraries ?? [],
-      ffiSystemLibraries: options.ffi?.systemLibraries ?? [],
-      ffiFrameworks: options.ffi?.frameworks ?? [],
-      runtimeObjects: runtimePack.runtimeObjects,
-      runtimeArchives: runtimePack.archives,
-      runtimeSystemLibraries: runtimePack.systemLibraries,
-      optimization: options.optimization,
-      ...(options.strip === undefined ? {} : { strip: options.strip }),
-      ...(options.staticLink === true ? { staticLink: true } : {}),
-      ...(options.windowsSubsystem === undefined
-        ? {}
-        : { windowsSubsystem: options.windowsSubsystem }),
-      ...(options.profileGenerate === true ? { profileGenerate: true } : {}),
-      ...(options.profileLayout === true ? { profileLayout: true } : {}),
-    }),
-    dependencyPaths: [...runtimePack.dependencyPaths, ...(options.ffi?.libraries ?? [])],
+    ...inputs,
+    dependencyPaths: [
+      ...runtimePack.dependencyPaths,
+      ...(host?.dependencyPaths ?? []),
+      ...(options.ffi?.libraries ?? []),
+    ],
     programObjectDependencies: [...(options.programObjectDependencies ?? [])],
     runtimePack,
+    ...(host === undefined ? {} : { host }),
+    // The host's entry points: rooted before the inputs, so the archive
+    // members that define them link (and a shared library exports them).
+    ...(host !== undefined && host.exports.length > 0
+      ? { driverFlags: [...inputs.driverFlags, ...host.exports.map((symbol) => `-Wl,--undefined=${symbol}`)] }
+      : {}),
     ...(options.staticLink === true ? { staticLink: true } : {}),
     ...(hugeText ? { hugeText: true } : {}),
     ...(options.startupSymbols === undefined || options.startupSymbols.length === 0

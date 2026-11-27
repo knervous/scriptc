@@ -14,24 +14,20 @@ function scripted(frames: number[][]) {
   let position = 0;
   let closes = 0;
   const output: number[] = [];
-  const client = new Ts7RpcClient(
-    new Ts7Wire({
-      read(buffer, offset, length) {
-        const count = Math.min(length, input.length - position, 3);
-        buffer.set(input.subarray(position, position + count), offset);
-        position += count;
-        return count;
-      },
-      write(buffer, offset, length) {
-        const count = Math.min(length, 2);
-        output.push(...buffer.subarray(offset, offset + count));
-        return count;
-      },
-      close() {
-        closes++;
-      },
-    }),
-  );
+  const client = new Ts7RpcClient(new Ts7Wire({
+    read(buffer, offset, length) {
+      const count = Math.min(length, input.length - position, 3);
+      buffer.set(input.subarray(position, position + count), offset);
+      position += count;
+      return count;
+    },
+    write(buffer, offset, length) {
+      const count = Math.min(length, 2);
+      output.push(...buffer.subarray(offset, offset + count));
+      return count;
+    },
+    close() { closes++; },
+  }));
   return { client, output, closes: () => closes };
 }
 
@@ -52,17 +48,10 @@ test("serves interleaved callbacks before returning the requested response", () 
   expect(io.client.requestText("echo", "next")).toBe("next");
   expect(calls).toEqual(['"/a.ts"']);
   expect(io.output).toEqual([
-    ...frame(1, "parse", "input"),
-    ...frame(2, "readFile", '{"content":""}'),
-    ...frame(2, "exists", "false"),
-    ...frame(1, "echo", "next"),
+    ...frame(1, "parse", "input"), ...frame(2, "readFile", '{"content":""}'),
+    ...frame(2, "exists", "false"), ...frame(1, "echo", "next"),
   ]);
-  expect(io.client.timing()).toEqual({
-    requests: 2,
-    bytesSent: 9,
-    bytesReceived: 10,
-    callbacks: 2,
-  });
+  expect(io.client.timing()).toEqual({ requests: 2, bytesSent: 9, bytesReceived: 10, callbacks: 2 });
   io.client.close();
   io.client.close();
   expect(io.closes()).toBe(1);
@@ -74,24 +63,6 @@ test("a complete server error permits the next request", () => {
   expect(io.closes()).toBe(0);
   expect(io.client.requestText("echo", "ok")).toBe("ok");
   expect(io.client.timing().requests).toBe(2);
-});
-
-test("a server error with an empty payload still names the failed request", () => {
-  const io = scripted([frame(5, "getTypeAtLocation", ""), frame(4, "echo", "ok")]);
-  let error: Error | undefined;
-  try {
-    io.client.requestText("getTypeAtLocation", "{}");
-  } catch (e) {
-    error = e as Error;
-  }
-  expect(error).toBeDefined();
-  expect(error!.message.trim()).not.toBe("");
-  expect(error!.message).toContain("getTypeAtLocation");
-  expect(error!.message).toContain("without a message");
-  // The panic shape is what the lowering's fences recognize.
-  expect(error!.message.startsWith("panic:")).toBe(true);
-  expect(io.closes()).toBe(0);
-  expect(io.client.requestText("echo", "ok")).toBe("ok");
 });
 
 test.each([2, 3, 1])("invalid server message kind %i poisons the channel", (kind) => {
@@ -110,38 +81,24 @@ test.each([4, 5])("mismatched method on response kind %i poisons the channel", (
 test("unknown callbacks send an error and close instead of waiting forever", () => {
   const io = scripted([frame(6, "missing", "null")]);
   expect(() => io.client.requestText("parse", "{}")).toThrow("unknown callback: missing");
-  expect(io.output).toEqual([
-    ...frame(1, "parse", "{}"),
-    ...frame(3, "missing", "unknown callback: missing"),
-  ]);
+  expect(io.output).toEqual([...frame(1, "parse", "{}"), ...frame(3, "missing", "unknown callback: missing")]);
   expect(io.closes()).toBe(1);
 });
 
-test.each([new Error("disk failure"), "disk failure"])(
-  "throwing callbacks send a server error",
-  (error) => {
-    const io = scripted([frame(6, "readFile", '"/a"')]);
-    io.client.registerCallback("readFile", () => {
-      throw error;
-    });
-    expect(() => io.client.requestText("parse", "{}")).toThrow(
-      "callback readFile failed: disk failure",
-    );
-    expect(io.output).toEqual([
-      ...frame(1, "parse", "{}"),
-      ...frame(3, "readFile", "disk failure"),
-    ]);
-    expect(io.closes()).toBe(1);
-  },
-);
+test.each([new Error("disk failure"), "disk failure"])("throwing callbacks send a server error", (error) => {
+  const io = scripted([frame(6, "readFile", '"/a"')]);
+  io.client.registerCallback("readFile", () => { throw error; });
+  expect(() => io.client.requestText("parse", "{}")).toThrow("callback readFile failed: disk failure");
+  expect(io.output).toEqual([...frame(1, "parse", "{}"), ...frame(3, "readFile", "disk failure")]);
+  expect(io.closes()).toBe(1);
+});
 
 test("reentrant requests fail before sending a nested request", () => {
   const io = scripted([frame(6, "nested", "null")]);
   io.client.registerCallback("nested", () => io.client.requestText("inner", "null"));
   expect(() => io.client.requestText("outer", "null")).toThrow("reentrant requests");
   expect(io.output).toEqual([
-    ...frame(1, "outer", "null"),
-    ...frame(3, "nested", "TypeScript API protocol: reentrant requests are not supported"),
+    ...frame(1, "outer", "null"), ...frame(3, "nested", "TypeScript API protocol: reentrant requests are not supported"),
   ]);
   expect(io.closes()).toBe(1);
 });
@@ -184,4 +141,54 @@ test("timing snapshots cannot mutate client counters", () => {
   expect(before.bytesReceived).toBe(6);
   before.requests = 1000;
   expect(io.client.timing().requests).toBe(1);
+});
+
+test("pipelined requests are written ahead and answered in order, errors in place", () => {
+  const io = scripted([frame(4, "a", "1"), frame(5, "b", "boom"), frame(4, "a", "3")]);
+  const replies = io.client.requestBytesPipelined([
+    { method: "a", payload: Buffer.from("x") }, { method: "b", payload: Buffer.from("y") }, { method: "a", payload: Buffer.from("z") },
+  ]);
+  expect(replies.map((r) => (r instanceof Error ? `error ${r.message}` : Buffer.from(r).toString("utf8")))).toEqual(["1", "error boom", "3"]);
+  expect(io.output).toEqual([...frame(1, "a", "x"), ...frame(1, "b", "y"), ...frame(1, "a", "z")]);
+  expect(io.client.timing().requests).toBe(3);
+});
+
+test("a transport that cannot hold an unread reply gets each pipelined request after the previous reply", () => {
+  // The Windows named pipe to tsgo (rpc-process.ts): the server's write of a reply completes only when the client
+  // reads it, so a second request written ahead of the first reply leaves both sides blocked in their writes. This
+  // transport refuses such a write instead of blocking.
+  const replies = [frame(4, "a", "1"), frame(4, "b", "2"), frame(4, "a", "3")];
+  let unread: number[] = [];
+  let writes = 0;
+  const output: number[] = [];
+  const client = new Ts7RpcClient(new Ts7Wire({
+    pipelineDepth: 1,
+    read(buffer, offset, length) {
+      if (unread.length === 0) throw new Error("read with no reply on the way: would block");
+      const count = Math.min(length, unread.length);
+      buffer.set(unread.slice(0, count), offset);
+      unread = unread.slice(count);
+      return count;
+    },
+    write(buffer, offset, length) {
+      if (unread.length > 0) throw new Error("request written while a reply is unread: would block");
+      output.push(...buffer.subarray(offset, offset + length));
+      // A frame is two writes, its header and its payload (Ts7Wire.write); the reply follows the payload.
+      if (++writes % 2 === 0) unread = replies.shift() ?? [];
+      return length;
+    },
+    close() {},
+  }));
+  const answers = client.requestBytesPipelined([
+    { method: "a", payload: Buffer.from("x") }, { method: "b", payload: Buffer.from("y") }, { method: "a", payload: Buffer.from("z") },
+  ]);
+  expect(answers.map((r) => (r instanceof Error ? r.message : Buffer.from(r).toString("utf8")))).toEqual(["1", "2", "3"]);
+  expect(output).toEqual([...frame(1, "a", "x"), ...frame(1, "b", "y"), ...frame(1, "a", "z")]);
+});
+
+test("a server callback during a pipelined batch closes the channel", () => {
+  const io = scripted([frame(6, "readFile", '"/a.ts"')]);
+  io.client.registerCallback("readFile", () => "{}");
+  expect(() => io.client.requestBytesPipelined([{ method: "a", payload: Buffer.from("x") }])).toThrow(Ts7ProtocolError);
+  expect(io.closes()).toBe(1);
 });

@@ -1,0 +1,1 @@
+const a=new Uint8Array(8);const d=new DataView(a.buffer);d.setUint32(0,1,true);d.setUint32(4,0x7ff40000,true);const f=new Float64Array(a.buffer);console.log(typeof f[0],Number.isNaN(f[0]),String(f[0]),typeof d.getFloat64(0,true));

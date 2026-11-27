@@ -1,3 +1,4 @@
+// This file was modified from scriptc (Apache-2.0); see MODIFICATIONS.md.
 /* LLVM basic-block builder
  * lowering the structured statement tree to labeled blocks with explicit
  * terminators. clang -O0 style — every local is an alloca, every read a
@@ -11,6 +12,9 @@
  * definition can leak into a later block. */
 import { UNWIND_RESUME, UNWIND_SLOT } from "./unwind-abi.js";
 
+// SCRIPTC_LLVM_TRACE_LINE=<regex>: the stack of each instruction line that matches, once per emitting call site.
+const traceLine = process.env["SCRIPTC_LLVM_TRACE_LINE"] ? new RegExp(process.env["SCRIPTC_LLVM_TRACE_LINE"]) : null;
+const tracedSites = new Set<string>();
 /** An inline dyn release call, and the comment that marks one emitted
  * inside a loop: the sites limitInlineReleases keeps inline first. */
 export const DYN_RELEASE_CALL = "call void @sc_rc_release_dyn(";
@@ -68,6 +72,14 @@ export class BlockBuilder {
   }
 
   line(s: string): void {
+    if (traceLine !== null && traceLine.test(s)) {
+      const stack = new Error().stack ?? "";
+      const site = stack.split("\n")[2] ?? "";
+      if (!tracedSites.has(site)) {
+        tracedSites.add(site);
+        console.error(`llvm trace line: ${s}\n${stack}`);
+      }
+    }
     if (this.cur.term === null) {
       const call = this.unmergedCalls && s.startsWith("call ") ? `${s} nomerge` : s;
       const marked = this.loopDepth > 0 && s.startsWith(DYN_RELEASE_CALL) ? call + LOOP_SITE : call;

@@ -1,3 +1,4 @@
+// This file was modified from scriptc (Apache-2.0); see MODIFICATIONS.md.
 #include "target.h"
 
 #include "llvm/MC/TargetRegistry.h"
@@ -140,7 +141,8 @@ TargetOptions targetOptions(const Triple &TargetTriple) {
 std::unique_ptr<TargetMachine> createTargetMachine(StringRef TripleName,
                                                    StringRef OptLevel,
                                                    std::string &Error,
-                                                   bool RequireAllowed) {
+                                                   bool RequireAllowed,
+                                                   StringRef Cpu) {
   initializeTargets();
   if (RequireAllowed && !supportsTarget(TripleName)) {
     Error = (Twine("target '") + TripleName + "' was not compiled into this helper").str();
@@ -151,7 +153,7 @@ std::unique_ptr<TargetMachine> createTargetMachine(StringRef TripleName,
   if (Definition == nullptr)
     return nullptr;
   return std::unique_ptr<TargetMachine>(Definition->createTargetMachine(
-      TargetTriple, "generic", "", targetOptions(TargetTriple), Reloc::PIC_,
+      TargetTriple, Cpu, "", targetOptions(TargetTriple), Reloc::PIC_,
       CodeModel::Small, codeGenLevel(OptLevel)));
 }
 

@@ -1,6 +1,0 @@
-{
- "order": [
-  "<repo>/tests/corpus/7001-package-declared-types/main.ts"
- ],
- "diags": []
-}

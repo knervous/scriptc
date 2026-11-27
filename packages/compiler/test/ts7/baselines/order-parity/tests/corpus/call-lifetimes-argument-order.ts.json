@@ -1,6 +1,0 @@
-{
- "order": [
-  "<repo>/tests/corpus/call-lifetimes-argument-order.ts"
- ],
- "diags": []
-}

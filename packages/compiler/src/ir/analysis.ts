@@ -1,3 +1,4 @@
+// This file was modified from scriptc (Apache-2.0); see MODIFICATIONS.md.
 import { InternalCompilerError } from "../errors.js";
 import { byteNumberAccess } from "./byte-numbers.js";
 import {
@@ -132,37 +133,24 @@ export function dynDesc(
   unionsById: ReadonlyMap<string, IrUnionDef>,
 ): string {
   switch (t.kind) {
-    case "f64":
-      return "number";
-    case "bigint":
-      return "bigint";
-    case "symbol":
-      return "symbol";
-    case "string":
-      return "string";
-    case "bool":
-      return "boolean";
-    case "record": {
-      const shape = recordsById.get(t.shapeId);
-      return shape?.tuple ? "array" : ((shape && recordTextCodecClass(shape)) ?? "object");
-    }
-    case "array":
-      return "array";
-    case "nullT":
-      return "null";
-    case "undefinedT":
-      return "undefined";
-    case "dyn":
-    case "jsval":
-      return "unknown";
-    case "promise":
-      return "Promise";
-    case "procStream":
-      return "ProcessStream";
-    case "bytes":
-      return BYTES_ELEMENT_NAME[t.elem];
-    case "object":
-      return t.className.replace(/^%/, "");
+    case "f64": return "number";
+    case "bigint": return "bigint";
+    case "symbol": return "symbol";
+    case "string": return "string";
+    case "bool": return "boolean";
+    case "record": return recordsById.get(t.shapeId)?.tuple ? "array" : "object";
+    case "array": return "array";
+    case "nullT": return "null";
+    case "undefinedT": return "undefined";
+    case "dyn": return "unknown";
+    // A page value slot takes any value.
+    case "jsval": return "unknown";
+    case "jsword": return "unknown";
+    case "promise": return "Promise";
+    case "moduleNs": return "module namespace";
+    case "procStream": return "ProcessStream";
+    case "bytes": return BYTES_ELEMENT_NAME[t.elem];
+    case "object": return t.className.replace(/^%/, "");
     case "union": {
       const def = unionsById.get(t.unionId);
       if (!def)

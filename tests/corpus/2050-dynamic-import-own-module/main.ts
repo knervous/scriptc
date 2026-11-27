@@ -1,3 +1,4 @@
+// @dynamic
 // Dynamic import() of the program's OWN modules: the compiled module's
 // exports marshal into the engine as a namespace object, and a module
 // first reached through import() evaluates on the microtask — after the

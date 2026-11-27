@@ -1,1 +1,0 @@
-{ "name": "island-deferred-unused", "private": true, "type": "module", "scriptc": { "packages": { "lazy-pkg": "node" } } }

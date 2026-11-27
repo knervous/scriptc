@@ -1,6 +1,0 @@
-{
- "order": [
-  "<repo>/tests/corpus/switch-integer-dispatch.ts"
- ],
- "diags": []
-}

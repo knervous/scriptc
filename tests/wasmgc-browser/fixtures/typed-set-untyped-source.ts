@@ -1,0 +1,30 @@
+function pass(x: any): any { return x; }
+const dst = new Uint8Array(8);
+dst.set(pass([1, 2, 3]), 1);
+console.log(Array.from(dst).join());
+dst.set(pass(new Uint8Array([9, 8])), 5);
+console.log(Array.from(dst).join());
+dst.set(pass(new Float32Array([1.5, 300.7, -1])), 0);
+console.log(Array.from(dst).join());
+dst.set(pass(["4", true, null, undefined, "x"]));
+console.log(Array.from(dst).join());
+dst.set(pass({ length: 2, "0": 7, "1": 6 }), 6);
+console.log(Array.from(dst).join());
+dst.set(pass(5));
+dst.set(pass("12"), 3);
+console.log(Array.from(dst).join());
+const buf = new Uint8Array([1, 2, 3, 4, 5, 6]);
+buf.set(pass(buf.subarray(0, 4)), 2);
+console.log(Array.from(buf).join());
+const f = new Float64Array(3);
+f.set(pass([0.5, "2", NaN]));
+console.log(f.join());
+const c = new Uint8ClampedArray(3);
+c.set(pass([300, -5, 1.5]));
+console.log(Array.from(c).join());
+function attempt(fn: () => void): string { try { fn(); return "ok"; } catch (e) { return String(e); } }
+console.log(attempt(() => dst.set(pass([1, 2, 3]), 6)));
+console.log(attempt(() => dst.set(pass([1]), -1)));
+console.log(attempt(() => dst.set(pass(null))));
+console.log(attempt(() => dst.set(pass(undefined))));
+console.log(attempt(() => dst.set(pass(new Uint8Array(9)))));

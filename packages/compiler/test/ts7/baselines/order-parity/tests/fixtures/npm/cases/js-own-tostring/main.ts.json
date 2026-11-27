@@ -1,6 +1,0 @@
-{
- "order": [
-  "<repo>/tests/fixtures/npm/cases/js-own-tostring/main.ts"
- ],
- "diags": []
-}

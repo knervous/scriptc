@@ -1,7 +1,0 @@
-{
-  "type": "module",
-  "imports": {
-    "#jsx": "./runtime/index.ts",
-    "#jsx/jsx-runtime": "./runtime/jsx-runtime.ts"
-  }
-}

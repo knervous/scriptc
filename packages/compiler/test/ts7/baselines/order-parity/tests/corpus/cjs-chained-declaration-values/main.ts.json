@@ -1,6 +1,0 @@
-{
- "order": [
-  "<repo>/tests/corpus/cjs-chained-declaration-values/main.ts"
- ],
- "diags": []
-}

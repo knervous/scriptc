@@ -1,7 +1,0 @@
-{
- "order": [
-  "<repo>/tests/corpus/1732-symbol-field-cross-module/timer.js",
-  "<repo>/tests/corpus/1732-symbol-field-cross-module/main.js"
- ],
- "diags": []
-}

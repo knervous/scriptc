@@ -1,6 +1,0 @@
-{
-  "name": "lending-types",
-  "version": "0.2.0",
-  "main": "./lending.d.ts",
-  "types": "./lending.d.ts"
-}

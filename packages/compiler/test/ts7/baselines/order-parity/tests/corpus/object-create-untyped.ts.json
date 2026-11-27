@@ -1,6 +1,0 @@
-{
- "order": [
-  "<repo>/tests/corpus/object-create-untyped.ts"
- ],
- "diags": []
-}

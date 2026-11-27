@@ -1,0 +1,1 @@
+export function symbolKey() { const sym = Symbol.for("dk"); const arr = ["a", sym]; const k = arr[1]; const o = { [k]: 1 }; return typeof k + " " + (k === sym) + " " + Object.keys(o).join(",") + " " + (o[sym] === 1); }

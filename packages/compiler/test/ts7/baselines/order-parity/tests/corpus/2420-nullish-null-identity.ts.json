@@ -1,6 +1,0 @@
-{
- "order": [
-  "<repo>/tests/corpus/2420-nullish-null-identity.ts"
- ],
- "diags": []
-}

@@ -1,7 +1,0 @@
-{
-  "entry": "workloads/published-graphs.ts",
-  "args": [
-    "1"
-  ],
-  "scaleArg": 0
-}

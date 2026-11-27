@@ -1,6 +1,0 @@
-{
- "order": [
-  "<repo>/tests/corpus/union-destructuring-join-narrow.ts"
- ],
- "diags": []
-}

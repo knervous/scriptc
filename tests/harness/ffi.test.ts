@@ -18,7 +18,11 @@ const repoRoot = join(import.meta.dirname, "../..");
 const fixtureRoot = join(repoRoot, "tests/ffi");
 const sanitize = process.env["SCRIPTC_SAN"] === "1";
 const flavor = sanitize ? "san" : "plain";
-const cacheRoot = join(repoRoot, "node_modules/.cache/scriptc-tests/ffi", flavor);
+const cacheRoot = join(
+  repoRoot,
+  "node_modules/.cache/scriptc-tests/ffi",
+  flavor,
+);
 
 function nativeArchive(): string {
   const outDir = join(cacheRoot, "native");
@@ -40,9 +44,9 @@ function nativeArchive(): string {
 function manifest(archive: string): string {
   const outDir = join(cacheRoot, "manifest");
   mkdirSync(outDir, { recursive: true });
-  const profile = JSON.parse(readFileSync(join(fixtureRoot, "profile.json"), "utf8")) as {
-    libraries: string[];
-  };
+  const profile = JSON.parse(
+    readFileSync(join(fixtureRoot, "profile.json"), "utf8"),
+  ) as { libraries: string[] };
   profile.libraries = [archive];
   const path = join(outDir, "profile.json");
   writeFileSync(path, JSON.stringify(profile, null, 2));
@@ -94,9 +98,13 @@ describe.each(["llvm"] as const)("outbound native FFI, %s backend", (backend) =>
       ffiProfilePath: manifest(nativeArchive()),
     });
     if (!result.ok) {
-      throw new Error(result.diagnostics.map((d) => `${d.code}: ${d.message}`).join("\n"));
+      throw new Error(
+        result.diagnostics.map((d) => `${d.code}: ${d.message}`).join("\n"),
+      );
     }
-    expect(execFileSync(result.binaryPath, [], { encoding: "utf8" })).toBe(expected);
+    expect(
+      execFileSync(result.binaryPath, [], { encoding: "utf8" }),
+    ).toBe(expected);
   });
 
   test("traps a NULL callback cstring with a precise boundary error", async () => {
@@ -116,24 +124,19 @@ describe.each(["llvm"] as const)("outbound native FFI, %s backend", (backend) =>
       profilePath,
       JSON.stringify({
         ffi_format: 3,
-        functions: [
-          {
-            name: "nativeNullCString",
-            symbol: "sf_null_cstring",
-            params: [
-              {
-                callback: {
-                  id: "nullCString",
-                  params: ["cstring", { context: "nullCString" }],
-                  returns: "void",
-                  lifetime: "call",
-                },
-              },
-              { context: "nullCString" },
-            ],
-            returns: "void",
-          },
-        ],
+        functions: [{
+          name: "nativeNullCString",
+          symbol: "sf_null_cstring",
+          params: [{
+            callback: {
+              id: "nullCString",
+              params: ["cstring", { context: "nullCString" }],
+              returns: "void",
+              lifetime: "call",
+            },
+          }, { context: "nullCString" }],
+          returns: "void",
+        }],
         libraries: [nativeArchive()],
       }),
     );
@@ -172,25 +175,20 @@ describe.each(["llvm"] as const)("outbound native FFI, %s backend", (backend) =>
       profilePath,
       JSON.stringify({
         ffi_format: 5,
-        functions: [
-          {
-            name: "nativeForeignStart",
-            symbol: "sf_foreign_start",
-            params: [
-              {
-                callback: {
-                  id: "tick",
-                  params: ["f64", "cstring", { context: "tick" }],
-                  returns: "void",
-                  lifetime: "retained",
-                  invoke: "foreign",
-                },
-              },
-              { context: "tick" },
-            ],
-            returns: "void",
-          },
-        ],
+        functions: [{
+          name: "nativeForeignStart",
+          symbol: "sf_foreign_start",
+          params: [{
+            callback: {
+              id: "tick",
+              params: ["f64", "cstring", { context: "tick" }],
+              returns: "void",
+              lifetime: "retained",
+              invoke: "foreign",
+            },
+          }, { context: "tick" }],
+          returns: "void",
+        }],
         libraries: [nativeArchive()],
       }),
     );
@@ -241,36 +239,27 @@ describe.each(["llvm"] as const)("outbound native FFI, %s backend", (backend) =>
         profilePath,
         JSON.stringify({
           ffi_format: 5,
-          functions: [
-            {
-              name: "nativeForeignStart",
-              symbol: "sf_foreign_start",
-              params: [
-                {
-                  callback: {
-                    id: "tick",
-                    params: ["f64", "cstring", { context: "tick" }],
-                    returns: "void",
-                    lifetime: "retained",
-                    invoke: "foreign",
-                  },
-                },
-                { context: "tick" },
-              ],
-              returns: "void",
-            },
-            {
-              name: "nativeForeignStop",
-              symbol: "sf_foreign_stop",
-              params: [
-                { callback: { release: "nativeForeignStart:tick" } },
-                {
-                  context: "nativeForeignStart:tick",
-                },
-              ],
-              returns: "void",
-            },
-          ],
+          functions: [{
+            name: "nativeForeignStart",
+            symbol: "sf_foreign_start",
+            params: [{
+              callback: {
+                id: "tick",
+                params: ["f64", "cstring", { context: "tick" }],
+                returns: "void",
+                lifetime: "retained",
+                invoke: "foreign",
+              },
+            }, { context: "tick" }],
+            returns: "void",
+          }, {
+            name: "nativeForeignStop",
+            symbol: "sf_foreign_stop",
+            params: [{ callback: { release: "nativeForeignStart:tick" } }, {
+              context: "nativeForeignStart:tick",
+            }],
+            returns: "void",
+          }],
           libraries: [nativeArchive()],
         }),
       );
@@ -299,7 +288,9 @@ test("manifest validation is strict and source-facing", () => {
     path,
     JSON.stringify({
       ffi_format: 1,
-      functions: [{ name: "f", symbol: "not-a-C-symbol", params: [], returns: "f64" }],
+      functions: [
+        { name: "f", symbol: "not-a-C-symbol", params: [], returns: "f64" },
+      ],
     }),
   );
   const result = loadFfiProfile(path);
@@ -314,18 +305,14 @@ test("manifest parsing and cache identity use one byte snapshot", () => {
   const dir = mkdtempSync(join(tmpdir(), "scriptc-ffi-snapshot-"));
   const path = join(dir, "profile.json");
   try {
-    const first = Buffer.from(
-      JSON.stringify({
-        ffi_format: 1,
-        functions: [{ name: "first", symbol: "first", params: [], returns: "void" }],
-      }),
-    );
-    const second = Buffer.from(
-      JSON.stringify({
-        ffi_format: 1,
-        functions: [{ name: "second", symbol: "second", params: [], returns: "void" }],
-      }),
-    );
+    const first = Buffer.from(JSON.stringify({
+      ffi_format: 1,
+      functions: [{ name: "first", symbol: "first", params: [], returns: "void" }],
+    }));
+    const second = Buffer.from(JSON.stringify({
+      ffi_format: 1,
+      functions: [{ name: "second", symbol: "second", params: [], returns: "void" }],
+    }));
     writeFileSync(path, first);
     const loaded = loadFfiProfile(path);
     writeFileSync(path, second);
@@ -363,16 +350,12 @@ test.each([
     name: "a callback in format 1",
     profile: {
       ffi_format: 1,
-      functions: [
-        {
-          name: "visit",
-          symbol: "sf_visit",
-          params: [
-            { callback: { id: "visit", params: ["f64"], returns: "void", lifetime: "call" } },
-          ],
-          returns: "void",
-        },
-      ],
+      functions: [{
+        name: "visit",
+        symbol: "sf_visit",
+        params: [{ callback: { id: "visit", params: ["f64"], returns: "void", lifetime: "call" } }],
+        returns: "void",
+      }],
     },
     message: "must be one of",
   },
@@ -380,9 +363,7 @@ test.each([
     name: "an orphaned context",
     profile: {
       ffi_format: 2,
-      functions: [
-        { name: "visit", symbol: "sf_visit", params: [{ context: "visit" }], returns: "void" },
-      ],
+      functions: [{ name: "visit", symbol: "sf_visit", params: [{ context: "visit" }], returns: "void" }],
     },
     message: "has no matching callback",
   },
@@ -390,23 +371,19 @@ test.each([
     name: "a context present on only one side",
     profile: {
       ffi_format: 2,
-      functions: [
-        {
-          name: "visit",
-          symbol: "sf_visit",
-          params: [
-            {
-              callback: {
-                id: "visit",
-                params: ["f64", { context: "visit" }],
-                returns: "void",
-                lifetime: "call",
-              },
-            },
-          ],
-          returns: "void",
-        },
-      ],
+      functions: [{
+        name: "visit",
+        symbol: "sf_visit",
+        params: [{
+          callback: {
+            id: "visit",
+            params: ["f64", { context: "visit" }],
+            returns: "void",
+            lifetime: "call",
+          },
+        }],
+        returns: "void",
+      }],
     },
     message: "exactly once in both",
   },
@@ -414,18 +391,14 @@ test.each([
     name: "a retained callback lifetime",
     profile: {
       ffi_format: 2,
-      functions: [
-        {
-          name: "visit",
-          symbol: "sf_visit",
-          params: [
-            {
-              callback: { id: "visit", params: ["f64"], returns: "void", lifetime: "retained" },
-            },
-          ],
-          returns: "void",
-        },
-      ],
+      functions: [{
+        name: "visit",
+        symbol: "sf_visit",
+        params: [{
+          callback: { id: "visit", params: ["f64"], returns: "void", lifetime: "retained" },
+        }],
+        returns: "void",
+      }],
     },
     message: "value 'retained' requires ffi_format 4",
   },
@@ -433,18 +406,14 @@ test.each([
     name: "a format 3 callback class in format 2",
     profile: {
       ffi_format: 2,
-      functions: [
-        {
-          name: "visit",
-          symbol: "sf_visit",
-          params: [
-            {
-              callback: { id: "visit", params: ["cstring"], returns: "void", lifetime: "call" },
-            },
-          ],
-          returns: "void",
-        },
-      ],
+      functions: [{
+        name: "visit",
+        symbol: "sf_visit",
+        params: [{
+          callback: { id: "visit", params: ["cstring"], returns: "void", lifetime: "call" },
+        }],
+        returns: "void",
+      }],
     },
     message: "class 'cstring' requires ffi_format 3",
   },
@@ -452,18 +421,14 @@ test.each([
     name: "cstring as a callback return",
     profile: {
       ffi_format: 3,
-      functions: [
-        {
-          name: "visit",
-          symbol: "sf_visit",
-          params: [
-            {
-              callback: { id: "visit", params: [], returns: "cstring", lifetime: "call" },
-            },
-          ],
-          returns: "void",
-        },
-      ],
+      functions: [{
+        name: "visit",
+        symbol: "sf_visit",
+        params: [{
+          callback: { id: "visit", params: [], returns: "cstring", lifetime: "call" },
+        }],
+        returns: "void",
+      }],
     },
     message: "callback.returns' must be one of",
   },
@@ -479,14 +444,12 @@ test.each([
     name: "a release descriptor before format 4",
     profile: {
       ffi_format: 3,
-      functions: [
-        {
-          name: "remove",
-          symbol: "sf_remove",
-          params: [{ callback: { release: "add:tick" } }],
-          returns: "void",
-        },
-      ],
+      functions: [{
+        name: "remove",
+        symbol: "sf_remove",
+        params: [{ callback: { release: "add:tick" } }],
+        returns: "void",
+      }],
     },
     message: "callback.release' requires ffi_format 4",
   },
@@ -494,14 +457,12 @@ test.each([
     name: "a dangling retained release",
     profile: {
       ffi_format: 4,
-      functions: [
-        {
-          name: "remove",
-          symbol: "sf_remove",
-          params: [{ callback: { release: "missing:tick" } }],
-          returns: "void",
-        },
-      ],
+      functions: [{
+        name: "remove",
+        symbol: "sf_remove",
+        params: [{ callback: { release: "missing:tick" } }],
+        returns: "void",
+      }],
     },
     message: "has no matching retained callback",
   },
@@ -509,20 +470,17 @@ test.each([
     name: "a release targeting a call-scoped callback",
     profile: {
       ffi_format: 4,
-      functions: [
-        {
-          name: "add",
-          symbol: "sf_add",
-          params: [{ callback: { id: "tick", params: [], returns: "void", lifetime: "call" } }],
-          returns: "void",
-        },
-        {
-          name: "remove",
-          symbol: "sf_remove",
-          params: [{ callback: { release: "add:tick" } }],
-          returns: "void",
-        },
-      ],
+      functions: [{
+        name: "add",
+        symbol: "sf_add",
+        params: [{ callback: { id: "tick", params: [], returns: "void", lifetime: "call" } }],
+        returns: "void",
+      }, {
+        name: "remove",
+        symbol: "sf_remove",
+        params: [{ callback: { release: "add:tick" } }],
+        returns: "void",
+      }],
     },
     message: "targets a non-retained callback",
   },
@@ -530,17 +488,15 @@ test.each([
     name: "a release registered by the same call",
     profile: {
       ffi_format: 4,
-      functions: [
-        {
-          name: "swap",
-          symbol: "sf_swap",
-          params: [
-            { callback: { id: "tick", params: [], returns: "void", lifetime: "retained" } },
-            { callback: { release: "swap:tick" } },
-          ],
-          returns: "void",
-        },
-      ],
+      functions: [{
+        name: "swap",
+        symbol: "sf_swap",
+        params: [
+          { callback: { id: "tick", params: [], returns: "void", lifetime: "retained" } },
+          { callback: { release: "swap:tick" } },
+        ],
+        returns: "void",
+      }],
     },
     message: "registered by the same call",
   },
@@ -548,25 +504,20 @@ test.each([
     name: "a foreign callback before format 5",
     profile: {
       ffi_format: 4,
-      functions: [
-        {
-          name: "visit",
-          symbol: "sf_visit",
-          params: [
-            {
-              callback: {
-                id: "visit",
-                params: [{ context: "visit" }],
-                returns: "void",
-                lifetime: "retained",
-                invoke: "foreign",
-              },
-            },
-            { context: "visit" },
-          ],
-          returns: "void",
-        },
-      ],
+      functions: [{
+        name: "visit",
+        symbol: "sf_visit",
+        params: [{
+          callback: {
+            id: "visit",
+            params: [{ context: "visit" }],
+            returns: "void",
+            lifetime: "retained",
+            invoke: "foreign",
+          },
+        }, { context: "visit" }],
+        returns: "void",
+      }],
     },
     message: "value 'foreign' requires ffi_format 5",
   },
@@ -574,25 +525,20 @@ test.each([
     name: "a call-scoped foreign callback",
     profile: {
       ffi_format: 5,
-      functions: [
-        {
-          name: "visit",
-          symbol: "sf_visit",
-          params: [
-            {
-              callback: {
-                id: "visit",
-                params: [{ context: "visit" }],
-                returns: "void",
-                lifetime: "call",
-                invoke: "foreign",
-              },
-            },
-            { context: "visit" },
-          ],
-          returns: "void",
-        },
-      ],
+      functions: [{
+        name: "visit",
+        symbol: "sf_visit",
+        params: [{
+          callback: {
+            id: "visit",
+            params: [{ context: "visit" }],
+            returns: "void",
+            lifetime: "call",
+            invoke: "foreign",
+          },
+        }, { context: "visit" }],
+        returns: "void",
+      }],
     },
     message: "requires lifetime 'retained'",
   },
@@ -600,25 +546,20 @@ test.each([
     name: "a value-returning foreign callback",
     profile: {
       ffi_format: 5,
-      functions: [
-        {
-          name: "visit",
-          symbol: "sf_visit",
-          params: [
-            {
-              callback: {
-                id: "visit",
-                params: [{ context: "visit" }],
-                returns: "f64",
-                lifetime: "retained",
-                invoke: "foreign",
-              },
-            },
-            { context: "visit" },
-          ],
-          returns: "void",
-        },
-      ],
+      functions: [{
+        name: "visit",
+        symbol: "sf_visit",
+        params: [{
+          callback: {
+            id: "visit",
+            params: [{ context: "visit" }],
+            returns: "f64",
+            lifetime: "retained",
+            invoke: "foreign",
+          },
+        }, { context: "visit" }],
+        returns: "void",
+      }],
     },
     message: "requires returns 'void'",
   },
@@ -626,24 +567,20 @@ test.each([
     name: "a context-free foreign callback",
     profile: {
       ffi_format: 5,
-      functions: [
-        {
-          name: "visit",
-          symbol: "sf_visit",
-          params: [
-            {
-              callback: {
-                id: "visit",
-                params: ["f64"],
-                returns: "void",
-                lifetime: "retained",
-                invoke: "foreign",
-              },
-            },
-          ],
-          returns: "void",
-        },
-      ],
+      functions: [{
+        name: "visit",
+        symbol: "sf_visit",
+        params: [{
+          callback: {
+            id: "visit",
+            params: ["f64"],
+            returns: "void",
+            lifetime: "retained",
+            invoke: "foreign",
+          },
+        }],
+        returns: "void",
+      }],
     },
     message: "requires a context entry",
   },
@@ -651,14 +588,12 @@ test.each([
     name: "a release carrying its own signature",
     profile: {
       ffi_format: 4,
-      functions: [
-        {
-          name: "remove",
-          symbol: "sf_remove",
-          params: [{ callback: { release: "add:tick", params: [] } }],
-          returns: "void",
-        },
-      ],
+      functions: [{
+        name: "remove",
+        symbol: "sf_remove",
+        params: [{ callback: { release: "add:tick", params: [] } }],
+        returns: "void",
+      }],
     },
     message: "unknown field 'functions[0].params[0].callback.params'",
   },
@@ -712,43 +647,54 @@ test.each([
   {
     id: "unused-signature",
     name: "an unused TypeScript signature that disagrees with the manifest",
-    source: ["declare function nativeScale(value: string): number;", "console.log('ok');", ""].join(
-      "\n",
-    ),
+    source: [
+      "declare function nativeScale(value: string): number;",
+      "console.log('ok');",
+      "",
+    ].join("\n"),
     code: "SC5003",
     message: "parameter 1",
   },
   {
     id: "unused-missing",
     name: "an unused manifest binding with no source declaration",
-    source: ["console.log('ok');", ""].join("\n"),
+    source: [
+      "console.log('ok');",
+      "",
+    ].join("\n"),
     code: "SC5002",
     message: "signature-only",
   },
   {
     id: "never-parameter",
     name: "an uninhabited TypeScript parameter presented as a native ABI slot",
-    source: ["declare function nativeScale(value: never): number;", "console.log('ok');", ""].join(
-      "\n",
-    ),
+    source: [
+      "declare function nativeScale(value: never): number;",
+      "console.log('ok');",
+      "",
+    ].join("\n"),
     code: "SC5003",
     message: "parameter 1 is 'never'",
   },
   {
     id: "never-return",
     name: "a TypeScript never return that the native function cannot uphold",
-    source: ["declare function nativeScale(value: number): never;", "console.log('ok');", ""].join(
-      "\n",
-    ),
+    source: [
+      "declare function nativeScale(value: number): never;",
+      "console.log('ok');",
+      "",
+    ].join("\n"),
     code: "SC5003",
     message: "return type is 'never'",
   },
   {
     id: "narrow-return",
     name: "a narrowed TypeScript return that does not cover the native ABI domain",
-    source: ["declare function nativeScale(value: number): 0;", "console.log('ok');", ""].join(
-      "\n",
-    ),
+    source: [
+      "declare function nativeScale(value: number): 0;",
+      "console.log('ok');",
+      "",
+    ].join("\n"),
     code: "SC5003",
     message: "may supply any number",
   },
@@ -796,13 +742,7 @@ test.each([
   { id: "never", type: "never", nativeClass: "f64", domain: "number", prefix: null },
   { id: "boolean-literal", type: "true", nativeClass: "bool", domain: "boolean", prefix: null },
   { id: "string-literal", type: '"fixed"', nativeClass: "cstring", domain: "string", prefix: null },
-  {
-    id: "span-string-literal",
-    type: '"fixed"',
-    nativeClass: "string",
-    domain: "string",
-    prefix: null,
-  },
+  { id: "span-string-literal", type: '"fixed"', nativeClass: "string", domain: "string", prefix: null },
 ])(
   "rejects a narrowed $id native-to-script callback parameter",
   async ({ id, type, nativeClass, domain, prefix }) => {
@@ -823,23 +763,19 @@ test.each([
       profilePath,
       JSON.stringify({
         ffi_format: nativeClass === "cstring" || nativeClass === "string" ? 3 : 2,
-        functions: [
-          {
-            name: "nativeVisit",
-            symbol: "sf_visit",
-            params: [
-              {
-                callback: {
-                  id: "visit",
-                  params: [nativeClass],
-                  returns: "void",
-                  lifetime: "call",
-                },
-              },
-            ],
-            returns: "void",
-          },
-        ],
+        functions: [{
+          name: "nativeVisit",
+          symbol: "sf_visit",
+          params: [{
+            callback: {
+              id: "visit",
+              params: [nativeClass],
+              returns: "void",
+              lifetime: "call",
+            },
+          }],
+          returns: "void",
+        }],
       }),
     );
 
@@ -851,7 +787,9 @@ test.each([
     expect(result.ok).toBe(false);
     if (!result.ok) {
       expect(result.diagnostics[0]?.code).toBe("SC5003");
-      expect(result.diagnostics[0]?.message).toContain(`callback 'visit' parameter 1 is '${type}'`);
+      expect(result.diagnostics[0]?.message).toContain(
+        `callback 'visit' parameter 1 is '${type}'`,
+      );
       expect(result.diagnostics[0]?.message).toContain(`declare it as '${domain}'`);
     }
   },
@@ -906,7 +844,9 @@ describe.each(["llvm"] as const)("FFI binding identity, %s backend", (backend) =
         ffiProfilePath: profilePath,
       });
       if (!result.ok) {
-        throw new Error(result.diagnostics.map((d) => `${d.code}: ${d.message}`).join("\n"));
+        throw new Error(
+          result.diagnostics.map((d) => `${d.code}: ${d.message}`).join("\n"),
+        );
       }
 
       const node = spawnSync(process.execPath, [entry], { encoding: "utf8" });
@@ -969,35 +909,26 @@ describe.each(["llvm"] as const)("retained FFI at process exit, %s backend", (ba
       profilePath,
       JSON.stringify({
         ffi_format: 4,
-        functions: [
-          {
-            name: "nativeRetainedAdd",
-            symbol: "sf_retained_add",
-            params: [
-              {
-                callback: {
-                  id: "tick",
-                  params: ["f64", { context: "tick" }],
-                  returns: "void",
-                  lifetime: "retained",
-                },
-              },
-              { context: "tick" },
-            ],
-            returns: "void",
-          },
-          {
-            name: "nativeRetainedRemove",
-            symbol: "sf_retained_remove",
-            params: [
-              { callback: { release: "nativeRetainedAdd:tick" } },
-              {
-                context: "nativeRetainedAdd:tick",
-              },
-            ],
-            returns: "void",
-          },
-        ],
+        functions: [{
+          name: "nativeRetainedAdd",
+          symbol: "sf_retained_add",
+          params: [{
+            callback: {
+              id: "tick",
+              params: ["f64", { context: "tick" }],
+              returns: "void",
+              lifetime: "retained",
+            },
+          }, { context: "tick" }],
+          returns: "void",
+        }, {
+          name: "nativeRetainedRemove",
+          symbol: "sf_retained_remove",
+          params: [{ callback: { release: "nativeRetainedAdd:tick" } }, {
+            context: "nativeRetainedAdd:tick",
+          }],
+          returns: "void",
+        }],
         libraries: [nativeArchive()],
       }),
     );
@@ -1040,35 +971,26 @@ describe.each(["llvm"] as const)("retained FFI release traps, %s backend", (back
       profilePath,
       JSON.stringify({
         ffi_format: 4,
-        functions: [
-          {
-            name: "nativeRetainedAdd",
-            symbol: "sf_retained_add",
-            params: [
-              {
-                callback: {
-                  id: "tick",
-                  params: ["f64", { context: "tick" }],
-                  returns: "void",
-                  lifetime: "retained",
-                },
-              },
-              { context: "tick" },
-            ],
-            returns: "void",
-          },
-          {
-            name: "nativeRetainedRemove",
-            symbol: "sf_retained_remove",
-            params: [
-              { callback: { release: "nativeRetainedAdd:tick" } },
-              {
-                context: "nativeRetainedAdd:tick",
-              },
-            ],
-            returns: "void",
-          },
-        ],
+        functions: [{
+          name: "nativeRetainedAdd",
+          symbol: "sf_retained_add",
+          params: [{
+            callback: {
+              id: "tick",
+              params: ["f64", { context: "tick" }],
+              returns: "void",
+              lifetime: "retained",
+            },
+          }, { context: "tick" }],
+          returns: "void",
+        }, {
+          name: "nativeRetainedRemove",
+          symbol: "sf_retained_remove",
+          params: [{ callback: { release: "nativeRetainedAdd:tick" } }, {
+            context: "nativeRetainedAdd:tick",
+          }],
+          returns: "void",
+        }],
         libraries: [nativeArchive()],
       }),
     );
@@ -1108,23 +1030,19 @@ test("retained callback calls reject function adapters that would change identit
     profilePath,
     JSON.stringify({
       ffi_format: 4,
-      functions: [
-        {
-          name: "nativeRetainedRawSet",
-          symbol: "sf_retained_raw_set",
-          params: [
-            {
-              callback: {
-                id: "raw",
-                params: ["f64"],
-                returns: "void",
-                lifetime: "retained",
-              },
-            },
-          ],
-          returns: "void",
-        },
-      ],
+      functions: [{
+        name: "nativeRetainedRawSet",
+        symbol: "sf_retained_raw_set",
+        params: [{
+          callback: {
+            id: "raw",
+            params: ["f64"],
+            returns: "void",
+            lifetime: "retained",
+          },
+        }],
+        returns: "void",
+      }],
       libraries: [nativeArchive()],
     }),
   );
@@ -1165,35 +1083,26 @@ test("retained release calls reject an inline function literal", async () => {
     profilePath,
     JSON.stringify({
       ffi_format: 4,
-      functions: [
-        {
-          name: "nativeRetainedAdd",
-          symbol: "sf_retained_add",
-          params: [
-            {
-              callback: {
-                id: "tick",
-                params: ["f64", { context: "tick" }],
-                returns: "void",
-                lifetime: "retained",
-              },
-            },
-            { context: "tick" },
-          ],
-          returns: "void",
-        },
-        {
-          name: "nativeRetainedRemove",
-          symbol: "sf_retained_remove",
-          params: [
-            { callback: { release: "nativeRetainedAdd:tick" } },
-            {
-              context: "nativeRetainedAdd:tick",
-            },
-          ],
-          returns: "void",
-        },
-      ],
+      functions: [{
+        name: "nativeRetainedAdd",
+        symbol: "sf_retained_add",
+        params: [{
+          callback: {
+            id: "tick",
+            params: ["f64", { context: "tick" }],
+            returns: "void",
+            lifetime: "retained",
+          },
+        }, { context: "tick" }],
+        returns: "void",
+      }, {
+        name: "nativeRetainedRemove",
+        symbol: "sf_retained_remove",
+        params: [{ callback: { release: "nativeRetainedAdd:tick" } }, {
+          context: "nativeRetainedAdd:tick",
+        }],
+        returns: "void",
+      }],
       libraries: [nativeArchive()],
     }),
   );

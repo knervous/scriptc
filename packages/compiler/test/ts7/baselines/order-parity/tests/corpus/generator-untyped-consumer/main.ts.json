@@ -1,7 +1,0 @@
-{
- "order": [
-  "<repo>/tests/corpus/generator-untyped-consumer/consumer.js",
-  "<repo>/tests/corpus/generator-untyped-consumer/main.ts"
- ],
- "diags": []
-}

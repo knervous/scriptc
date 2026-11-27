@@ -1,6 +1,0 @@
-{
-  "entry": "workloads/catalog-tables.ts",
-  "args": [
-    "1"
-  ]
-}

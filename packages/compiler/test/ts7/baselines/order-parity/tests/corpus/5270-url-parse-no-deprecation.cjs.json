@@ -1,6 +1,0 @@
-{
- "order": [
-  "<repo>/tests/corpus/5270-url-parse-no-deprecation.cjs"
- ],
- "diags": []
-}

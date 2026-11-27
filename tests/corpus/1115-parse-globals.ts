@@ -1,3 +1,4 @@
+// @dynamic
 // The island-backed globals: parseFloat, parseInt (explicit radix), isNaN,
 // isFinite — the engine's own globals execute and the result exits to the
 // declared static type.

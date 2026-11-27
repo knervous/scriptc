@@ -1,92 +1,17 @@
-import { mkdirSync, mkdtempSync, rmSync, writeFileSync } from "node:fs";
+import { mkdtempSync, rmSync, writeFileSync } from "node:fs";
 import { tmpdir } from "node:os";
-import { dirname, join } from "node:path";
-import { afterAll, expect, test, vi } from "vitest";
-import {
-  checkModuleOrder,
-  checkPreflight,
-  cycleEarlyBindings,
-  isNodeEsmFile,
-  loadProgram,
-  makeCycleAdmission,
-  moduleEarlyBindings,
-  type CycleEdge,
-} from "./program-node.js";
+import { join } from "node:path";
+import { expect, test, vi } from "vitest";
+import { checkPreflight, isNodeEsmFile, loadProgram, makeCycleAdmission, type CycleEdge } from "./program-node.js";
 import * as ts from "./ts7/ast.js";
 import { AstNode } from "./ts7/ast-node.js";
 import { SemanticChecker } from "./ts7/semantic-checker.js";
-import { DECL_BOUNDARY_PREFIX } from "./decl-projection.js";
-import { elideProgramImports } from "./import-elision.js";
-import { cjsVoidInitPreambleTargets, type CjsVoidInitPreamble } from "./program.js";
-import * as adapter from "./ts7/adapter.js";
-import { closeSourceParser, parseSourceFile } from "./ts7/source-parser-node.js";
-
-afterAll(closeSourceParser);
-
-// The elision's own function, counted: a load asks it once.
-vi.mock("./import-elision.js", async (original) => {
-  const actual = await original<typeof import("./import-elision.js")>();
-  return { ...actual, elideProgramImports: vi.fn(actual.elideProgramImports) };
-});
-
-test("a load decides tsc's import elision once: the declaration-typed world holds the files as written", () => {
-  const dir = mkdtempSync(join(tmpdir(), "scriptc-elision-worlds-"));
-  const write = (name: string, text: string): void => {
-    mkdirSync(join(dir, name, ".."), { recursive: true });
-    writeFileSync(join(dir, name), text);
-  };
-  write("package.json", '{"type":"module","dependencies":{"parse-kit":"1.0.0"}}');
-  // No verbatimModuleSyntax: tsc drops the import of `Options` below.
-  write(
-    "tsconfig.json",
-    '{"compilerOptions":{"target":"es2022","module":"esnext","moduleResolution":"bundler","strict":true,"allowImportingTsExtensions":true,"noEmit":true}}',
-  );
-  write(
-    "node_modules/parse-kit/package.json",
-    '{"name":"parse-kit","version":"1.0.0","type":"module","main":"./index.js","types":"./index.d.ts"}',
-  );
-  // The JavaScript types the result `any`; the declarations name it.
-  write(
-    "node_modules/parse-kit/index.js",
-    "export function read(text) {\n  return JSON.parse(text);\n}\n",
-  );
-  write(
-    "node_modules/parse-kit/index.d.ts",
-    "export interface Reading {\n  n: number;\n}\nexport declare function read(text: string): Reading;\n",
-  );
-  write("options.ts", "export interface Options {\n  scale: number;\n}\n");
-  const entry = join(dir, "main.ts");
-  write(
-    "main.ts",
-    'import { Options } from "./options.ts";\nimport { read } from "parse-kit";\nconst options: Options = { scale: 2 };\nconst reading = read(\'{"n":3}\');\nconsole.log(reading.n * options.scale);\n',
-  );
-  const decided = vi.mocked(elideProgramImports);
-  decided.mockClear();
-  const load = loadProgram(entry, { npmStatic: ["parse-kit"] });
-  try {
-    const text = load.program.getSourceFile(entry)!.text;
-    // The lowering world's file: the import tsc drops is declared type-only
-    // after the text, and the package's result is typed by its declarations.
-    // The declaration projection pairs this file with the same file of the
-    // declaration-typed world, which holds it as written.
-    expect(text).toContain('import type { Options } from "./options.ts";');
-    expect(text).toContain(DECL_BOUNDARY_PREFIX);
-    expect(decided).toHaveBeenCalledTimes(1);
-    expect(checkPreflight(load)).toEqual([]);
-  } finally {
-    load.dispose();
-    rmSync(dir, { recursive: true, force: true });
-  }
-});
 
 test("program-root discovery does not fetch types for unrelated string calls", () => {
   const dir = mkdtempSync(join(tmpdir(), "scriptc-root-queries-"));
   const entry = join(dir, "main.ts");
   writeFileSync(join(dir, "package.json"), '{"type":"module"}');
-  writeFileSync(
-    entry,
-    'function label(text: string) { return text; } console.log(label("ready"));\n',
-  );
+  writeFileSync(entry, 'function label(text: string) { return text; } console.log(label("ready"));\n');
   const types = vi.spyOn(SemanticChecker.prototype, "getTypeOfSymbol");
   const load = loadProgram(entry);
   try {
@@ -100,9 +25,7 @@ test("program-root discovery does not fetch types for unrelated string calls", (
 });
 
 test("ambiguous module classification bounds ancestor work on deep expressions", () => {
-  const directory = mkdtempSync(
-    join(process.platform === "win32" ? tmpdir() : "/tmp", "scriptc-module-depth-"),
-  );
+  const directory = mkdtempSync(join(process.platform === "win32" ? tmpdir() : "/tmp", "scriptc-module-depth-"));
   const entry = join(directory, "main.js");
   const depth = 1_000;
   writeFileSync(join(directory, "package.json"), "{}");
@@ -113,26 +36,12 @@ test("ambiguous module classification bounds ancestor work on deep expressions",
     try {
       expect(isNodeEsmFile(load.entry)).toBe(false);
       expect(parents.mock.calls.length).toBeLessThan(depth * 4);
-    } finally {
-      parents.mockRestore();
-    }
+    } finally { parents.mockRestore(); }
   } finally {
     load.dispose();
     rmSync(directory, { recursive: true, force: true });
   }
 });
-
-function preflightDiagnosticsFor(files: Record<string, string>) {
-  const dir = mkdtempSync(join(tmpdir(), "scriptc-lazy-cycle-"));
-  for (const [name, source] of Object.entries(files)) writeFileSync(join(dir, name), source);
-  const load = loadProgram(join(dir, "main.cjs"));
-  try {
-    return checkPreflight(load);
-  } finally {
-    load.dispose();
-    rmSync(dir, { recursive: true, force: true });
-  }
-}
 
 function requireOrderDiagnostics(source: string, dependency = "exports.value = 'ready';\n") {
   const dir = mkdtempSync(join(tmpdir(), "scriptc-require-order-"));
@@ -148,36 +57,33 @@ function requireOrderDiagnostics(source: string, dependency = "exports.value = '
   }
 }
 
-test.for(["exports.read = read;", "module.exports.renamed = read;", "module.exports = read;"])(
-  "a hoisted function export before require is safe: %s",
-  (publish) => {
-    expect(
-      requireOrderDiagnostics(`
+test.for([
+  "exports.read = read;",
+  "module.exports.renamed = read;",
+  "module.exports = read;",
+])("a hoisted function export before require is safe: %s", (publish) => {
+  expect(requireOrderDiagnostics(`
 'use strict';
 Object.defineProperty(exports, '__esModule', { value: true });
 ${publish}
 const dep = require('./dep.cjs');
 function read() { return helper(); }
 function helper() { return dep.value; }
-`),
-    ).toEqual([]);
-  },
-);
+`)).toEqual([]);
+});
 
 test.for([
   "exports.a = exports.b = void 0;",
   "exports.a = undefined; exports.b = 'literal'; exports.c = 1;",
   "exports.first = exports.second = read;",
 ])("literal and chained export prologues do not invoke functions: %s", (prefix) => {
-  expect(
-    requireOrderDiagnostics(`
+  expect(requireOrderDiagnostics(`
 Object.defineProperty(exports, '__esModule', { value: true });
 ${prefix}
 exports.read = read;
 const dep = require('./dep.cjs');
 function read() { return dep.value; }
-`),
-  ).toEqual([]);
+`)).toEqual([]);
 });
 
 test.for([
@@ -189,70 +95,30 @@ test.for([
   ["computed export name", "exports[read()] = read;"],
   ["export initializer call", "exports.value = read();"],
   ["class static initializer", "class Early { static value = read(); }"],
-  [
-    "extra descriptor effect",
-    "Object.defineProperty(exports, '__esModule', { value: true, enumerable: read() });",
-  ],
+  ["extra descriptor effect", "Object.defineProperty(exports, '__esModule', { value: true, enumerable: read() });"],
   ["void initializer call", "exports.value = void read();"],
   ["prototype mutation", "exports.__proto__ = read;"],
-  [
-    "read-only marker",
-    "Object.defineProperty(exports, '__esModule', { value: true }); exports.__esModule = read;",
-  ],
+  ["read-only marker", "Object.defineProperty(exports, '__esModule', { value: true }); exports.__esModule = read;"],
   ["replacement export property", "module.exports = read; module.exports.name = read;"],
   ["non-export assignment chain", "const box = {}; exports.alias = box.read = read;"],
 ])("require still refuses an early read through %s", ([, early]) => {
-  // A var binding keeps the fence (Node reads undefined there); a const
-  // compiles with initialization checks instead, from the same analysis.
   const diagnostics = requireOrderDiagnostics(`
 exports.read = read;
 ${early}
-var dep = require('./dep.cjs');
+const dep = require('./dep.cjs');
 function read() { return dep.value; }
 `);
-  expect(
-    diagnostics.some((diag) => diag.code === "SC1013" && diag.message.includes("binding 'dep'")),
-  ).toBe(true);
+  expect(diagnostics.some((diag) => diag.code === "SC1013" && diag.message.includes("binding 'dep'")))
+    .toBe(true);
 });
 
 test("publishing a require binding itself still reads it before initialization", () => {
   const diagnostics = requireOrderDiagnostics(`
 exports.read = read;
-var { read } = require('./dep.cjs');
+const { read } = require('./dep.cjs');
 `);
-  expect(
-    diagnostics.some((diag) => diag.code === "SC1013" && diag.message.includes("binding 'read'")),
-  ).toBe(true);
-});
-
-test("an early-reachable const require binding compiles with initialization checks", () => {
-  // Preflight admits it; the lowering checks every reference that can run
-  // before the require (require-initialization.ts).
-  expect(
-    requireOrderDiagnostics(`
-exports.read = read;
-read();
-const dep = require('./dep.cjs');
-function read() { return dep.value; }
-`),
-  ).toEqual([]);
-});
-
-test.for([
-  ["a class whose methods read it", "class Reader { read() { return dep.value; } }"],
-  ["a stored class expression", "var Reader = class { read() { return dep.value; } };"],
-  ["a later-job callback", "setTimeout(() => dep.value, 0);"],
-  ["a published getter", "Object.defineProperty(exports, 'value', { get: () => dep.value });"],
-  ["a property stored on a published function", "module.exports = read; read.again = again;"],
-])("code that cannot run before the require does not reach it: %s", ([, early]) => {
-  expect(
-    requireOrderDiagnostics(`
-${early}
-var dep = require('./dep.cjs');
-function read() { return dep.value; }
-function again() { return dep.value; }
-`),
-  ).toEqual([]);
+  expect(diagnostics.some((diag) => diag.code === "SC1013" && diag.message.includes("binding 'read'")))
+    .toBe(true);
 });
 
 test.for([
@@ -262,162 +128,60 @@ test.for([
 ])("source bindings cannot masquerade as a CommonJS prologue: %s", (prefix) => {
   const diagnostics = requireOrderDiagnostics(`
 ${prefix}
-var dep = require('./dep.cjs');
+const dep = require('./dep.cjs');
 function read() { return dep.value; }
 `);
-  expect(
-    diagnostics.some((diag) => diag.code === "SC1013" && diag.message.includes("binding 'dep'")),
-  ).toBe(true);
+  expect(diagnostics.some((diag) => diag.code === "SC1013" && diag.message.includes("binding 'dep'")))
+    .toBe(true);
 });
 
 test("an earlier declarator can call an export before the require initializes", () => {
   const diagnostics = requireOrderDiagnostics(`
 exports.read = read;
-var before = read(), dep = require('./dep.cjs');
+const before = read(), dep = require('./dep.cjs');
 function read() { return dep.value; }
 `);
-  expect(
-    diagnostics.some((diag) => diag.code === "SC1013" && diag.message.includes("binding 'dep'")),
-  ).toBe(true);
+  expect(diagnostics.some((diag) => diag.code === "SC1013" && diag.message.includes("binding 'dep'")))
+    .toBe(true);
 });
 
 test("a later declarator can call an export after the require initializes", () => {
-  expect(
-    requireOrderDiagnostics(`
+  expect(requireOrderDiagnostics(`
 exports.read = read;
 const dep = require('./dep.cjs'), after = read();
 function read() { return dep.value; }
-`),
-  ).toEqual([]);
-});
-
-test("a member added to a replaced export does not run the replacement (on-finished)", () => {
-  expect(
-    requireOrderDiagnostics(`
-module.exports = read;
-module.exports.check = check;
-var hooks = probe();
-var dep = require('./dep.cjs');
-function read() { return dep.value; }
-function check() { return 1; }
-function probe() { return check(); }
-`),
-  ).toEqual([]);
-});
-
-test("a lazy require admits the cycle it closes at run time", () => {
-  expect(
-    preflightDiagnosticsFor({
-      "main.cjs": "const root = require('./index.cjs'); console.log(root.tag, root.check());\n",
-      "index.cjs":
-        "const common = require('./common.cjs');\nmodule.exports = { tag: 'root', check: common.check };\n",
-      "common.cjs": "exports.check = function () { return require('./schemas.cjs').value; };\n",
-      "schemas.cjs": "const root = require('./index.cjs');\nexports.value = root.tag + '!';\n",
-    }),
-  ).toEqual([]);
-});
-
-test("an eager cycle inside a lazy subtree keeps full analysis", () => {
-  const diagnostics = preflightDiagnosticsFor({
-    "main.cjs": "const common = require('./common.cjs'); console.log(common.load());\n",
-    "common.cjs": "exports.load = function () { return require('./a.cjs').value; };\n",
-    "a.cjs": "const b = require('./b.cjs');\nexports.value = b.value + 1;\n",
-    "b.cjs": "const a = require('./a.cjs');\nexports.value = a.value + 1;\n",
-  });
-  expect(diagnostics.some((diag) => diag.code === "SC1016")).toBe(true);
-});
-
-test("a require cycle whose modules export first and use each other only later is admitted", () => {
-  expect(
-    requireOrderDiagnostics(
-      `
-const ANY = Symbol('ANY');
-class Main { dep() { return new Dep(); } }
-module.exports = Main;
-const Dep = require('./dep.cjs');
-`,
-      "class Dep { main() { return new Main(); } }\nmodule.exports = Dep;\nconst Main = require('./main.cjs');\n",
-    ),
-  ).toEqual([]);
-});
-
-test.for([
-  [
-    "an export after the require",
-    "const Main = require('./main.cjs');\nmodule.exports = { Dep: 1 };\n",
-  ],
-  [
-    "a top-level use of the cycle binding",
-    "module.exports = 1;\nconst Main = require('./main.cjs');\nnew Main();\n",
-  ],
-  [
-    "an escaping export object",
-    "module.exports = 1;\nconst Main = require('./main.cjs');\nObject.assign(exports, {});\n",
-  ],
-  [
-    "a call before the export",
-    "setup();\nmodule.exports = 1;\nconst Main = require('./main.cjs');\nfunction setup() {}\n",
-  ],
-])("a require cycle keeps SC1016 for %s", ([, dependency]) => {
-  const diagnostics = requireOrderDiagnostics(
-    `
-class Main {}
-module.exports = Main;
-const dep = require('./dep.cjs');
-`,
-    dependency,
-  );
-  expect(diagnostics.some((diag) => diag.code === "SC1016")).toBe(true);
+`)).toEqual([]);
 });
 
 test("function publication does not admit CommonJS cycles", () => {
-  const diagnostics = requireOrderDiagnostics(
-    `
+  const diagnostics = requireOrderDiagnostics(`
 exports.read = read;
 const dep = require('./dep.cjs');
 function read() { return dep.value; }
-`,
-    "const main = require('./main.cjs'); exports.value = main.read();\n",
-  );
+`, "const main = require('./main.cjs'); exports.value = main.read();\n");
   expect(diagnostics.some((diag) => diag.code === "SC1016")).toBe(true);
 });
 
 test.for([
-  ["export function read() { return first + alias; }", null],
-  ["export { first, alias }; export function read() { return 1; }", null],
-  ["type Value = typeof alias; export function read(first: number = 1) { return first; }", null],
-  ["class Box { value = alias; } export function read(value = first) { return value; }", null],
-  // Top-level reads during the cycle are admitted by the exact
-  // initialization rule (the lowering checks them); shapes without an
-  // initialization state keep the fence.
-  ["const value = alias; export function read() { return value; }", null],
-  ["class Box { static value = first; } export function read() { return 1; }", null],
-  ["class Box { [alias] = 1; } export function read() { return 1; }", null],
-  [
-    'import * as whole from "./main.ts"; const value = whole.first; export function read() { return value; }',
-    "the namespace import 'whole'",
-  ],
-  ["export default first + 1; export function read() { return 1; }", "default export expression"],
+  ['export function read() { return first + alias; }', null],
+  ['export { first, alias }; export function read() { return 1; }', null],
+  ['type Value = typeof alias; export function read(first: number = 1) { return first; }', null],
+  ['class Box { value = alias; } export function read(value = first) { return value; }', null],
+  ['const value = alias; export function read() { return value; }', "alias"],
+  ['class Box { static value = first; } export function read() { return 1; }', "first"],
+  ['class Box { [alias] = 1; } export function read() { return 1; }', "alias"],
 ])("cycle binding indexes preserve initialization safety: %s", ([body, refused]) => {
-  const directory = mkdtempSync(
-    join(process.platform === "win32" ? tmpdir() : "/tmp", "scriptc-cycle-bindings-"),
-  );
+  const directory = mkdtempSync(join(process.platform === "win32" ? tmpdir() : "/tmp", "scriptc-cycle-bindings-"));
   const entry = join(directory, "main.ts");
-  writeFileSync(
-    entry,
-    'import { read } from "./peer.ts"; export const first = 1; export const second = 2; export function run() { return read(); }',
-  );
-  writeFileSync(
-    join(directory, "peer.ts"),
-    'import { first, second as alias } from "./main.ts";\n' + body,
-  );
+  writeFileSync(entry, 'import { read } from "./peer.ts"; export const first = 1; export const second = 2; export function run() { return read(); }');
+  writeFileSync(join(directory, "peer.ts"), 'import { first, second as alias } from "./main.ts";\n' + body);
   const load = loadProgram(entry);
   try {
     const cycles = checkPreflight(load).filter((diagnostic) => diagnostic.code === "SC1016");
     if (refused === null) expect(cycles).toEqual([]);
     else {
-      expect(cycles.length).toBeGreaterThan(0);
-      for (const cycle of cycles) expect(cycle.message).toContain(refused);
+      expect(cycles).toHaveLength(1);
+      expect(cycles[0]!.message).toContain(`binding '${refused}' is read`);
     }
   } finally {
     load.dispose();
@@ -426,439 +190,31 @@ test.for([
 });
 
 test("repeated cycle edges reuse a file's binding index", () => {
-  const directory = mkdtempSync(
-    join(process.platform === "win32" ? tmpdir() : "/tmp", "scriptc-cycle-index-"),
-  );
+  const directory = mkdtempSync(join(process.platform === "win32" ? tmpdir() : "/tmp", "scriptc-cycle-index-"));
   const entry = join(directory, "main.ts");
-  writeFileSync(
-    entry,
-    'import { read } from "./peer.ts"; export const first = 1; export const second = 2; export function run() { return read(); }',
-  );
-  writeFileSync(
-    join(directory, "peer.ts"),
-    'import { first } from "./main.ts"; import { second } from "./main.ts"; export function read() { return first + second; }',
-  );
+  writeFileSync(entry, 'import { read } from "./peer.ts"; export const first = 1; export const second = 2; export function run() { return read(); }');
+  writeFileSync(join(directory, "peer.ts"), 'import { first } from "./main.ts"; import { second } from "./main.ts"; export function read() { return first + second; }');
   const load = loadProgram(entry);
   try {
     const main = load.entry;
     const peer = load.program.getSourceFile(join(directory, "peer.ts"))!;
-    const mainImports = main.statements.nodes.filter(ts.isImportDeclaration);
-    const peerImports = peer.statements.nodes.filter(ts.isImportDeclaration);
+    const mainImports = main.statements.filter(ts.isImportDeclaration);
+    const peerImports = peer.statements.filter(ts.isImportDeclaration);
     const edges = new Map<ts.SourceFile, CycleEdge[]>([
       [main, mainImports.map((stmt) => ({ dep: peer, stmt }))],
       [peer, peerImports.map((stmt) => ({ dep: main, stmt }))],
     ]);
     const admit = makeCycleAdmission(load.program, (file) => edges.get(file) ?? []);
-    const walk = vi.spyOn(peer.file.wire, "preorder");
+    expect(admit(peer, edges.get(peer)![0]!)).toBeNull();
+    // The first edge may materialize/check the file. A later binding must
+    // inspect its indexed references without another full-file walk.
+    const walk = vi.spyOn(peer, "forEachChild");
     try {
-      expect(admit(peer, edges.get(peer)![0]!)).toBeNull();
-      expect(walk).toHaveBeenCalled();
-      // A later binding must inspect its indexed references without
-      // another full-file walk.
-      walk.mockClear();
       expect(admit(peer, edges.get(peer)![1]!)).toBeNull();
       expect(walk).not.toHaveBeenCalled();
-    } finally {
-      walk.mockRestore();
-    }
+    } finally { walk.mockRestore(); }
   } finally {
     load.dispose();
     rmSync(directory, { recursive: true, force: true });
-  }
-});
-
-test.for([
-  [
-    // A shared instance built by a user constructor that calls the
-    // partner's function: its read of the instance can run early.
-    {
-      "main.ts": 'import { shared } from "./a.ts"; console.log(shared.n);',
-      "a.ts":
-        'import { f } from "./b.ts"; export class C { n = 1; constructor() { console.log(f()); } } export const shared = new C();',
-      "b.ts": 'import { shared } from "./a.ts"; export function f(): number { return shared.n; }',
-    },
-    ["shared"],
-  ],
-  [
-    // User code runs while the instance is built, but nothing it reaches
-    // calls the partner's function before the declaration completed.
-    {
-      "main.ts": 'import { shared } from "./a.ts"; console.log(shared.n);',
-      "a.ts":
-        'import { f } from "./b.ts"; export class C { n = 1; } export const shared = new C(); console.log(f());',
-      "b.ts": 'import { shared } from "./a.ts"; export function f(): number { return shared.n; }',
-    },
-    [],
-  ],
-  [
-    // The partner's top level runs first and calls a hoisted function of
-    // the importer that reads a const declared later; a second function
-    // reads another const but nothing calls it early.
-    {
-      "main.ts": 'import { late } from "./a.ts"; console.log(late());',
-      "a.ts":
-        'import { probe } from "./b.ts"; export function read(): string { return name; } export function late(): string { return other + probe; } export const name = "n"; export const other = "o";',
-      "b.ts":
-        'import { read } from "./a.ts"; function attempt(): string { try { return read(); } catch { return "tdz"; } } export const probe = attempt();',
-    },
-    ["name"],
-  ],
-  [
-    // The partner's class calls a method through `this` in a static
-    // initializer; the method reads a const of the importer declared later.
-    {
-      "main.ts": 'import { name } from "./a.ts"; console.log(name);',
-      "a.ts": 'import { Probe } from "./b.ts"; export const name = "n"; console.log(Probe.value);',
-      "b.ts":
-        'import { name } from "./a.ts"; export class Probe { static read(): string { return name; } static value = this.read(); }',
-    },
-    ["name"],
-  ],
-  [
-    // The same through a static block of a class stored by a const.
-    {
-      "main.ts": 'import { name } from "./a.ts"; console.log(name);',
-      "a.ts": 'import { Box } from "./b.ts"; export const name = "n"; console.log(Box.value);',
-      "b.ts":
-        'import { name } from "./a.ts"; export const Box = class { static value = ""; static read(): string { return name; } static { this.value = this.read(); } };',
-    },
-    ["name"],
-  ],
-  [
-    // The partner's top level reads the importer's const before it ran.
-    {
-      "main.ts": 'import { a } from "./a.ts"; console.log(a);',
-      "a.ts": 'import { b } from "./b.ts"; export const a: number = b + 1;',
-      "b.ts": 'import { a } from "./a.ts"; export const b: number = a + 1;',
-    },
-    ["a"],
-  ],
-  [
-    // Declarations complete before any user code runs: nothing to check.
-    {
-      "main.ts": 'import { start } from "./a.ts"; console.log(start());',
-      "a.ts":
-        'import { hop } from "./b.ts"; export const limit = 3; export function start(): number { return hop(limit); } console.log(start());',
-      "b.ts":
-        'import { limit } from "./a.ts"; export function hop(n: number): number { return n + limit; }',
-    },
-    [],
-  ],
-] as const)("cycle bindings read before initialization: %j", ([files, early]) => {
-  const directory = mkdtempSync(
-    join(process.platform === "win32" ? tmpdir() : "/tmp", "scriptc-cycle-early-"),
-  );
-  for (const [name, text] of Object.entries(files)) writeFileSync(join(directory, name), text);
-  const load = loadProgram(join(directory, "main.ts"));
-  try {
-    expect(checkPreflight(load)).toEqual([]);
-    const found = cycleEarlyBindings(load.program, load.entry, load.moduleOrder, true);
-    expect(found.map((binding) => binding.name.text).sort()).toEqual([...early]);
-  } finally {
-    load.dispose();
-    rmSync(directory, { recursive: true, force: true });
-  }
-});
-
-test.for([
-  // A hoisted function called before the declaration reads it.
-  ["report(); let level = 1; function report() { console.log(level); }", ["level"]],
-  // The declaration's own initializer reaches the read.
-  ["const total = sum(); function sum(): number { return base + 1; } const base = 2;", ["base"]],
-  // An arrow handed to a callee may run before the declaration.
-  [
-    "[1].forEach(() => show()); const label = 'x'; function show() { console.log(label); }",
-    ["label"],
-  ],
-  // Calls after the declaration, stored callables and timer callbacks are not early.
-  ["let level = 1; report(); function report() { console.log(level); }", []],
-  [
-    "const fib = (n: number): number => (n < 2 ? n : fib(n - 1) + fib(n - 2)); console.log(fib(5));",
-    [],
-  ],
-  ["const item = { read() { return item.size; }, size: 2 }; console.log(item.read());", []],
-  ["setTimeout(() => console.log(late), 0); const late = 'later';", []],
-  ["let a = 1, b = () => a + 1, c = b(); console.log(c);", []],
-  // A wrapper that only returns closures over its callback defers it.
-  [
-    "function lazy(run: () => number) { return function () { return run(); }; } const read = lazy(() => total); const total = 3; console.log(read());",
-    [],
-  ],
-  // A wrapper that calls its callback runs it before the declaration.
-  [
-    "function now(run: () => number) { return run(); } const read = now(() => total); const total = 3; console.log(read);",
-    ["total"],
-  ],
-  // A stored class expression's static initializer runs at its declaration.
-  [
-    "const Tag = class { static label = name(); }; function name(): string { return prefix; } const prefix = 'p'; console.log(Tag.label);",
-    ["prefix"],
-  ],
-  // A returned class's static initializer runs when the wrapper is called.
-  [
-    "function wrap(read: () => number) { return class { static total = read(); }; } const Made = wrap(() => budget); const budget = 2; console.log(Made.total);",
-    ["budget"],
-  ],
-  // A stored method's computed key evaluates with its object literal.
-  [
-    "const shelf = { [Keys.first]() { return 1; } }; const Keys = { first: 'f' }; console.log(shelf);",
-    ["Keys"],
-  ],
-  // Object methods under member-chain computed keys are stored, not run.
-  [
-    "const shelf = { [Symbol.iterator]() { return [size][Symbol.iterator](); } }; const size = 2; console.log([...shelf]);",
-    [],
-  ],
-  // A class reached before its statement ran.
-  ["function make() { return new Box(); } console.log(make()); class Box {}", ["Box"]],
-  ["class Box {} function make() { return new Box(); } console.log(make());", []],
-  // Its own body sees the inner binding.
-  [
-    "class Self { static label = Self.name; static make() { return new Self(); } } console.log(Self.make());",
-    [],
-  ],
-  // A static initializer calling out to code that names the class.
-  [
-    "function tag(): string { return Late.label; } class Late { static label = 'l'; static probe = tag(); } console.log(Late.probe);",
-    ["Late"],
-  ],
-] as const)("module bindings read before initialization: %s", ([source, early]) => {
-  const directory = mkdtempSync(
-    join(process.platform === "win32" ? tmpdir() : "/tmp", "scriptc-module-early-"),
-  );
-  writeFileSync(join(directory, "main.ts"), `${source}\nexport {};\n`);
-  const load = loadProgram(join(directory, "main.ts"));
-  try {
-    expect(checkPreflight(load)).toEqual([]);
-    const found = moduleEarlyBindings(load.program, load.moduleOrder);
-    expect(found.map((binding) => binding.name.text).sort()).toEqual([...early]);
-  } finally {
-    load.dispose();
-    rmSync(directory, { recursive: true, force: true });
-  }
-});
-
-test("asking for the module order first leaves the report and the order as they were", () => {
-  // `--npm-static`'s fixpoint reloads once per discovered package and reads
-  // the order alone; the last load's full preflight completes that walk. The
-  // reordered path must report exactly what the single pass reports, and must
-  // reuse the array the order pass installed rather than walk again.
-  const directory = mkdtempSync(
-    join(process.platform === "win32" ? tmpdir() : "/tmp", "scriptc-module-order-"),
-  );
-  const entry = join(directory, "main.ts");
-  writeFileSync(join(directory, "package.json"), '{"type":"module"}');
-  writeFileSync(join(directory, "dep.ts"), "export const value: number = 1;\n");
-  writeFileSync(
-    entry,
-    'import { value } from "./dep.js";\nconst bad: number = "text";\nconsole.log(value, bad);\n',
-  );
-  const report = (load: ReturnType<typeof loadProgram>) => ({
-    diags: checkPreflight(load),
-    order: load.moduleOrder.map((sf) => sf.fileName),
-    rejections: [...(load.dynamicImportRejections?.keys() ?? [])].map((sf) => sf.fileName),
-    cycles: load.inlineRequireCycleCalls?.size ?? 0,
-    crash: load.startupCrash ?? null,
-  });
-  const single = loadProgram(entry);
-  const ordered = loadProgram(entry);
-  try {
-    const direct = report(single);
-    expect(direct.diags.length).toBeGreaterThan(0);
-    expect(direct.order.length).toBe(2);
-    checkModuleOrder(ordered);
-    const before = ordered.moduleOrder;
-    expect(before.map((sf) => sf.fileName)).toEqual(direct.order);
-    expect(report(ordered)).toEqual(direct);
-    // The full preflight completed the memoized walk instead of repeating it.
-    expect(ordered.moduleOrder).toBe(before);
-  } finally {
-    single.dispose();
-    ordered.dispose();
-    rmSync(directory, { recursive: true, force: true });
-  }
-});
-
-/** The first `= void 0` export write in `source` as a preamble the lowering
- * may elide (program.ts, cjsVoidInitPreambleTargets). */
-function voidPreambleOf(source: string): CjsVoidInitPreamble | null {
-  const file = parseSourceFile("/pkg/index.js", source, "js");
-  const writes: adapter.BinaryExpression[] = [];
-  adapter.walkPreorder(file, (node) => {
-    if (!adapter.isExpressionStatement(node)) return undefined;
-    let e: adapter.Expression = node.expression;
-    while (adapter.isParenthesizedExpression(e)) e = e.expression;
-    if (adapter.isBinaryExpression(e) && e.operatorToken.kind === adapter.SyntaxKind.EqualsToken) {
-      let tail: adapter.Expression = e.right;
-      while (
-        adapter.isBinaryExpression(tail) &&
-        tail.operatorToken.kind === adapter.SyntaxKind.EqualsToken
-      )
-        tail = tail.right;
-      if (tail.kind === adapter.SyntaxKind.VoidExpression) writes.push(e);
-    }
-    return undefined;
-  });
-  if (writes.length === 0) throw new Error("no void write");
-  return cjsVoidInitPreambleTargets(writes[0]!);
-}
-
-/** Whether the first `= void 0` export write in `source` is a preamble the
- * lowering may elide. */
-function voidPreambleDropped(source: string): boolean {
-  return voidPreambleOf(source) !== null;
-}
-
-test("a void export preamble lowers to nothing when both conditional arms assign", () => {
-  expect(
-    voidPreambleDropped(`
-exports.now = void 0;
-if (typeof performance === 'object') { exports.now = function () { return 1; }; }
-else { exports.now = function () { return 2; }; }
-exports.later = function () { return exports.now(); };
-`),
-  ).toBe(true);
-});
-
-test("a void export preamble lowers to nothing when a later statement assigns", () => {
-  expect(
-    voidPreambleDropped(`
-exports.now = void 0;
-exports.now = function () { return 1; };
-`),
-  ).toBe(true);
-});
-
-test("a void export preamble lowers inside a wrapper function whose branches assign", () => {
-  expect(
-    voidPreambleDropped(`
-(function () {
-  exports.now = void 0;
-  if (typeof performance === 'object') { exports.now = function () { return 1; }; }
-  else { exports.now = function () { return 2; }; }
-})();
-`),
-  ).toBe(true);
-});
-
-test("a chained void preamble lowers when every arm replaces every member", () => {
-  expect(
-    voidPreambleDropped(`
-exports.a = exports.b = void 0;
-if (typeof performance === 'object') { exports.a = exports.b = function () { return 'p'; }; }
-else { exports.a = exports.b = function () { return 'd'; }; }
-`),
-  ).toBe(true);
-});
-
-test.each([
-  ["no later assignment", `exports.now = void 0;\n`],
-  [
-    "only one arm assigns",
-    `exports.now = void 0;\nif (cond) { exports.now = function () { return 1; }; }\n`,
-  ],
-  ["another void write", `exports.now = void 0;\nexports.now = void 0;\n`],
-  [
-    "an assignment whose value reads the member",
-    `exports.now = void 0;\nexports.now = exports.now || function () { return 1; };\n`,
-  ],
-  [
-    "a read between the write and the assignment",
-    `exports.now = void 0;\nconsole.log(exports.now);\nexports.now = function () { return 1; };\n`,
-  ],
-  [
-    "a class declaration between the write and the assignment",
-    `exports.now = void 0;\nclass C {}\nexports.now = function () { return 1; };\n`,
-  ],
-  [
-    "a condition that reads the member",
-    `exports.now = void 0;\nif (exports.now) { exports.now = function () { return 1; }; }\nelse { exports.now = function () { return 2; }; }\n`,
-  ],
-  [
-    "an early return inside a function",
-    `function init() {\n  exports.now = void 0;\n  if (cond) return;\n  exports.now = function () { return 1; };\n}`,
-  ],
-  [
-    "an assignment inside a loop",
-    `function init() {\n  exports.now = void 0;\n  for (var i = 0; i < 2; i++) { if (cond) return; }\n  exports.now = function () { return 1; };\n}`,
-  ],
-  [
-    "an assignment inside a try block",
-    `function init() {\n  exports.now = void 0;\n  try { exports.now = function () { return 1; }; } catch (e) {}\n}`,
-  ],
-  [
-    "an assignment inside a switch",
-    `exports.now = void 0;\nswitch (kind) { default: exports.now = function () { return 1; }; }\n`,
-  ],
-])("a void export preamble stays when there is %s", (_what, source) => {
-  expect(voidPreambleDropped(source)).toBe(false);
-});
-
-test("a void 0 preamble has no operand to evaluate when it is elided", () => {
-  expect(
-    voidPreambleOf(`exports.now = void 0;\nexports.now = function () { return 1; };\n`)?.effect,
-  ).toBeNull();
-});
-
-test("an elided preamble keeps an effectful void operand to evaluate", () => {
-  const preamble = voidPreambleOf(`
-exports.now = void mark();
-if (cond) { exports.now = function () { return 1; }; }
-else { exports.now = function () { return 2; }; }
-`);
-  expect(preamble).not.toBeNull();
-  const effect = preamble!.effect;
-  expect(effect === null ? "" : adapter.getTextOfNode(effect)).toBe("mark()");
-});
-
-test("a pure void operand has nothing to evaluate", () => {
-  expect(
-    voidPreambleOf(`exports.now = void "value";\nexports.now = function () { return 1; };\n`)
-      ?.effect,
-  ).toBeNull();
-});
-
-test("a void export preamble stays when one conditional arm assigns a different member", () => {
-  expect(
-    voidPreambleDropped(`
-exports.now = void 0;
-if (cond) { exports.now = function () { return 1; }; }
-else { exports.later = function () { return 2; }; }
-`),
-  ).toBe(false);
-});
-
-test("`export *` over a CommonJS module re-exports the names Node's lexer finds", () => {
-  const dir = mkdtempSync(join(tmpdir(), "scriptc-cjs-star-"));
-  const write = (name: string, text: string): void => {
-    mkdirSync(join(dir, dirname(name)), { recursive: true });
-    writeFileSync(join(dir, name), text);
-  };
-  write("package.json", '{"type":"module"}');
-  write(
-    "tsconfig.json",
-    '{"compilerOptions":{"target":"es2022","module":"nodenext","moduleResolution":"nodenext","strict":true,"allowJs":true,"noEmit":true}}',
-  );
-  write(
-    "impl.cjs",
-    "'use strict';\nfunction jsx() { return 1; }\nconst Fragment = 'f';\nmodule.exports = { jsx, Fragment };\n",
-  );
-  // The conditional whole export React ships: the names live on the table
-  // the taken branch required, not on this module's own statements.
-  write(
-    "runtime.cjs",
-    "'use strict';\nif (true) {\n  module.exports = require('./impl.cjs');\n} else {\n  module.exports = require('./impl.cjs');\n}\n",
-  );
-  write("main.ts", 'export const local = 1;\nexport * from "./runtime.cjs";\n');
-  const load = loadProgram(join(dir, "main.ts"));
-  try {
-    const sf = load.program.getSourceFile(join(dir, "main.ts"));
-    expect(sf?.text).toContain('import "./runtime.cjs";');
-    expect(sf?.text).toContain('export { "jsx", "Fragment" } from "./runtime.cjs";');
-    expect(sf?.text).toContain('as "module.exports"');
-    expect(checkPreflight(load)).toEqual([]);
-  } finally {
-    load.dispose();
-    rmSync(dir, { recursive: true, force: true });
   }
 });

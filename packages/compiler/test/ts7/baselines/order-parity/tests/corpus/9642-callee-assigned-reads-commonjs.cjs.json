@@ -1,6 +1,0 @@
-{
- "order": [
-  "<repo>/tests/corpus/9642-callee-assigned-reads-commonjs.cjs"
- ],
- "diags": []
-}

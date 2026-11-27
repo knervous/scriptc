@@ -1,6 +1,0 @@
-{
- "order": [
-  "<repo>/tests/corpus/1836-var-loop-capture.ts"
- ],
- "diags": []
-}

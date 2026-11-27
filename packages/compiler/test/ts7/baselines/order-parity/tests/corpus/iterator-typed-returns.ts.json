@@ -1,6 +1,0 @@
-{
- "order": [
-  "<repo>/tests/corpus/iterator-typed-returns.ts"
- ],
- "diags": []
-}

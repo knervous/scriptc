@@ -1,3 +1,4 @@
+// @dynamic
 async function discoveredFirstButNeverRun() {
   return import("./a.ts");
 }

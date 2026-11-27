@@ -6,11 +6,8 @@ import { GeistMono } from "geist/font/mono";
 import { GeistPixelSquare } from "geist/font/pixel";
 import { DocsProvider } from "@/components/geistdocs/provider";
 import { config } from "@/lib/geistdocs/config";
-import { versionedOgImage } from "@/lib/og-version";
-import { siteName, siteUrl, tagline, description, ogHomeTitle } from "@/lib/site";
+import { siteName, siteUrl, tagline, description } from "@/lib/site";
 import "./globals.css";
-
-const ogImage = versionedOgImage("/og", ogHomeTitle);
 
 export const metadata: Metadata = {
   metadataBase: new URL(siteUrl),
@@ -24,14 +21,9 @@ export const metadata: Metadata = {
     siteName,
     title: `${siteName} | ${tagline}`,
     description,
-    images: [{ url: ogImage, width: 1200, height: 630, alt: siteName }],
+    images: [{ url: "/og", width: 1200, height: 630, alt: siteName }],
   },
-  twitter: {
-    card: "summary_large_image",
-    title: `${siteName} | ${tagline}`,
-    description,
-    images: [{ url: ogImage, width: 1200, height: 630, alt: siteName }],
-  },
+  twitter: { card: "summary_large_image", title: `${siteName} | ${tagline}`, description, images: ["/og"] },
 };
 
 export default function RootLayout({ children }: { children: React.ReactNode }) {

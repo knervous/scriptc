@@ -1,3 +1,4 @@
+// This file was modified from scriptc (Apache-2.0); see MODIFICATIONS.md.
 import { createHash } from "node:crypto";
 import { createRequire } from "node:module";
 import { readdir, readFile, realpath, stat } from "node:fs/promises";
@@ -86,6 +87,8 @@ export const EXECUTABLE_RUNTIME_SOURCES = [
   "scr_cipher_info.c",
   "scr_ieee754.c",
   "scr_glibc_math.c",
+  // dyn.needsOpen / dyn.opened: untyped destructuring and new Map/Set(untyped) reach them in static programs too.
+  "scr_dyn_native_open.c",
 ] as const;
 
 export function runtimeSrcDir(): string {

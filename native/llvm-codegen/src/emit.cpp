@@ -1,3 +1,4 @@
+// This file was modified from scriptc (Apache-2.0); see MODIFICATIONS.md.
 #include "emit.h"
 
 #include "cache.h"
@@ -14,6 +15,7 @@
 #include "llvm/ADT/StringExtras.h"
 #include "llvm/ADT/StringMap.h"
 #include "llvm/ADT/StringRef.h"
+#include "llvm/Config/llvm-config.h"
 #include "llvm/ADT/StringSet.h"
 #include "llvm/Analysis/ProfileSummaryInfo.h"
 #include "llvm/Analysis/RuntimeLibcallInfo.h"
@@ -107,6 +109,8 @@ std::optional<EmitOptions> parseEmitOptions(int Argc, char **Argv) {
       Options.DiagnosticFormat = Value.str();
     else if (Arg == "--source-path")
       Options.SourcePath = Value.str();
+    else if (Arg == "--cpu")
+      Options.Cpu = Value.str();
     else if (Arg == "--import-bitcode")
       Options.ImportBitcode.push_back(Value.str());
     else if (Arg == "--cache-dir")
@@ -140,10 +144,14 @@ static OptimizationLevel optimizationLevel(StringRef Level) {
     return OptimizationLevel::O1;
   if (Level == "3")
     return OptimizationLevel::O3;
+#if LLVM_VERSION_MAJOR < 23
   if (Level == "s")
     return OptimizationLevel::Os;
   if (Level == "z")
     return OptimizationLevel::Oz;
+#endif
+  // LLVM 23 removed the Os/Oz pipeline levels; size goals are carried by
+  // function attributes, so an experiment helper runs the O2 pipeline here.
   return OptimizationLevel::O2;
 }
 
@@ -2000,7 +2008,8 @@ int emit(const EmitOptions &Options) {
 
   std::string LookupError;
   std::unique_ptr<TargetMachine> Machine =
-      createTargetMachine(Options.Target, Options.OptLevel, LookupError);
+      createTargetMachine(Options.Target, Options.OptLevel, LookupError,
+                          /*RequireAllowed=*/true, Options.Cpu);
   if (!Machine)
     return reportError("target_machine_failed", LookupError,
                        Options.DiagnosticFormat);

@@ -1,4 +1,5 @@
 #!/usr/bin/env node
+// This file was modified from scriptc (Apache-2.0); see MODIFICATIONS.md.
 /* The subprocess host for `scriptc run` on wasm32-wasi. Keeping the WASI
  * instance outside the CLI process preserves native run's exit isolation:
  * process.exit(), traps, and signals cannot take the compiler process down.
@@ -32,5 +33,8 @@ const wasi = new WASI({
   preopens: wasiPreopens(cwd, hostTmp),
   returnOnExit: true,
 });
-const instantiated = await WebAssembly.instantiate(await readFile(binary), wasi.getImportObject());
+const instantiated = await WebAssembly.instantiate(
+  await readFile(binary),
+  wasi.getImportObject(),
+);
 process.exitCode = wasi.start(instantiated.instance);

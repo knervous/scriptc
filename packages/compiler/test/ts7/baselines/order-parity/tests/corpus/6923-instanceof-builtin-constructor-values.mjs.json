@@ -1,6 +1,0 @@
-{
- "order": [
-  "<repo>/tests/corpus/6923-instanceof-builtin-constructor-values.mjs"
- ],
- "diags": []
-}

@@ -1,6 +1,0 @@
-{
- "order": [
-  "<repo>/tests/fixtures/npm/cases/var-export-redeclared/main.ts"
- ],
- "diags": []
-}

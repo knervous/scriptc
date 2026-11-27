@@ -1,13 +1,17 @@
-spi-off/main.ts:27:3 - error SC1090: initializer-less fields not assigned at the constructor's top level when strictPropertyInitialization is off (nothing guarantees 'm' is assigned before a read — enable the option, assign it unconditionally at the top of the constructor, or include undefined in its type) is not supported yet
+spi-off/main.ts:20:3 - error SC0001: Property 'v' has no initializer and is not definitely assigned in the constructor.
+
+  19 | class Bad {
+  20 |   v: number; // TS2564: assigned only in a method
+     |   ^
+  21 |   m(): void {
+
+spi-off/main.ts:27:3 - error SC0001: Property 'm' has no initializer and is not definitely assigned in the constructor.
 
   26 | class Worse {
-  27 |   m: Map<string, number>; // fenced: no deferral union for map fields
+  27 |   m: Map<string, number>; // TS2564: assigned only in a method
      |   ^
   28 |   fill(): void {
 
-spi-off/main.ts:35:1 - error SC1090: constructing through a class value whose class has no lowering (the class declaration itself was rejected — see its own diagnostic) is not supported yet
+spi-off/tsconfig.json:1:1 - error SC0002: this project's tsconfig disables strict, which scriptc requires (the strict family's members default to it, and the lowering relies on them)
 
-  34 | new Bad();
-  35 | new Worse();
-     | ^~~~~~~~~~~
-  36 | 
+  hint: set "strict": true in the project tsconfig (members it should not turn on, such as noImplicitAny, can stay off individually)

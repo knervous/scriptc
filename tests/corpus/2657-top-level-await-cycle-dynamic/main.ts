@@ -1,3 +1,4 @@
+// @dynamic
 import "./b.ts";
 
 console.log("a:start");

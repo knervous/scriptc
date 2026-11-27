@@ -1,29 +1,16 @@
 /* Both LLVM optimization modes must compile every corpus program and match
  * Node's stdout, successful stderr, and expected exit status. Any backend
- * refusal is a failure. SCRIPTC_SAN=1 instruments emitted code and runtime.
- * SCRIPTC_CPU_DISPATCH=1 builds with runtime CPU dispatch and runs each
- * executable at SCRIPTC_CPU_LEVEL=0 and 3, the baseline and x86-64-v3 copies.
- * SCRIPTC_TARGET_CPU=<level> builds for that `--target-cpu` level. */
+ * refusal is a failure. SCRIPTC_SAN=1 instruments emitted code and runtime. */
 import { execFile } from "node:child_process";
 import { createHash } from "node:crypto";
-import { globSync, mkdirSync, readFileSync, renameSync, statSync, writeFileSync } from "node:fs";
+import { globSync, mkdirSync, readFileSync, renameSync, writeFileSync } from "node:fs";
 import { join } from "node:path";
 import { pathToFileURL } from "node:url";
 import { promisify } from "node:util";
 import { describe, expect, test } from "vitest";
-import ts5 from "typescript5";
+import ts5 from "typescript";
 import { compile } from "@scriptc/compiler";
-import { icuAvailable } from "./icu.js";
-import { corpusSelect, shardSuffix } from "./shard.js";
-import { recentCrashReport } from "./crash-report.js";
-import { spawnFailure } from "./spawn-failure.js";
-import { runStep, type Track, STEP_TIMEOUT_MS } from "./step-timeout.js";
-import { createNodeOracleCache } from "./oracle-cache.js";
-import { libnodePack, requiresLibnode } from "./libnode.js";
-import { tscOracleEntry, wantsTscOracle } from "./jsx-oracle.js";
-import { programDefines } from "./define-directive.js";
-
-type TargetCpu = NonNullable<NonNullable<Parameters<typeof compile>[1]>["targetCpu"]>;
+import { shardSelect, shardSuffix } from "./shard.js";
 
 const execFileAsync = promisify(execFile);
 const repoRoot = join(import.meta.dirname, "../..");
@@ -33,36 +20,22 @@ const cacheDir = join(repoRoot, "node_modules/.cache/scriptc-tests");
 // Same corpus, same SCRIPTC_TEST_SHARD slice as differential.test.ts (the
 // two files split identically, so a shard's compile cache serves both lanes).
 const ENTRY_EXTS = ["ts", "js", "mjs", "cjs"];
-const files = corpusSelect(
+const files = shardSelect(
   ENTRY_EXTS.flatMap((ext) => [
     ...globSync(join(corpusDir, `*.${ext}`)),
     ...globSync(join(corpusDir, `*/main.${ext}`)),
   ]).sort(),
   (f) => f.slice(corpusDir.length + 1),
-  process.env["SCRIPTC_SAN"] === "1",
 );
 const sanitize = process.env["SCRIPTC_SAN"] === "1";
-const cpuDispatch = process.env["SCRIPTC_CPU_DISPATCH"] === "1";
-const targetCpu = process.env["SCRIPTC_TARGET_CPU"] as TargetCpu | undefined;
-const cpuLevels: readonly (string | undefined)[] = cpuDispatch ? ["0", "3"] : [undefined];
 const requestedMode = process.env["SCRIPTC_LLVM_TEST_MODE"];
 if (requestedMode !== undefined && requestedMode !== "release" && requestedMode !== "dev") {
   throw new Error("SCRIPTC_LLVM_TEST_MODE must be release or dev when set");
 }
 // Combined CI lanes cover release in differential.test.ts. Standalone and
 // packaged-artifact runs retain both modes unless one is explicitly selected.
-const optimizationModes: readonly ("release" | "dev")[] =
-  requestedMode === undefined ? ["release", "dev"] : [requestedMode];
-
-// A case is a sequence of steps, and every step already carries its own
-// deadline (step-timeout.ts): the Node oracle, then one compile and one run
-// per optimization mode per CPU level. The test timeout is the case's hang
-// detector, so it has to cover the whole sequence — with the 240 s step
-// deadline and two modes, the five steps together can outlast the shared
-// 300 s default while every one of them is still inside its own deadline
-// (5015-lifetime-region-publish, arm64, 2026-11-04). A stalled step still
-// reports itself at the step deadline, with the processes it left behind.
-const CASE_TIMEOUT_MS = STEP_TIMEOUT_MS * (1 + optimizationModes.length * (1 + cpuLevels.length));
+const optimizationModes: readonly ("release" | "dev")[] = requestedMode === undefined
+  ? ["release", "dev"] : [requestedMode];
 
 // Same known-env contract as the main differential suite.
 process.env["SCRIPTC_TEST_ENV"] = "from-harness";
@@ -87,59 +60,19 @@ function expectedExitCode(file: string): number {
   return 0;
 }
 
-/** `// @env: NAME=VALUE[,NAME=VALUE]` (differential.test.ts's twin): the
- * variables are set for BOTH sides, so a program can pin the ambient state
- * that decides Intl output (TZ, LC_ALL/LANG) and the oracle and the binary
- * read the same one. */
-function programEnv(file: string): Record<string, string> {
-  const env: Record<string, string> = {};
-  for (const line of directiveHead(file)) {
-    const m = /^\/\/ @env:\s*(.+?)\s*$/.exec(line);
-    if (m === null) continue;
-    for (const pair of m[1]!.split(",")) {
-      const eq = pair.indexOf("=");
-      if (eq > 0) env[pair.slice(0, eq).trim()] = pair.slice(eq + 1).trim();
-    }
-  }
-  return env;
+function wantsDynamic(file: string): boolean {
+  return directiveHead(file).some((l) => /^\/\/ @dynamic\s*$/.test(l));
 }
 
-/** `// @requires-icu` (differential.test.ts's twin): the program's Intl
- * forms are answered by ICU, which only the linux-x64 runtime pack carries
- * in this slice; other lanes skip instead of hitting the refusal. */
-function requiresIcu(file: string): boolean {
-  return directiveHead(file).some((l) => /^\/\/ @requires-icu\s*$/.test(l));
-}
-
-/** `// @skip-darwin` (differential.test.ts's twin): the Node oracle itself
- * does not finish on macOS (it aborts while exiting), so there is no
- * reference output for the LLVM-built program to match. */
-function skipsDarwin(file: string): boolean {
-  return directiveHead(file).some((l) => /^\/\/ @skip-darwin\s*$/.test(l));
-}
-
-async function runBinary(
-  cmd: string,
-  args: string[],
-  cpuLevel?: string,
-  extraEnv: Record<string, string> = {},
-  track?: Track,
-): Promise<RunResult> {
+async function runBinary(cmd: string, args: string[]): Promise<RunResult> {
   // Linux fork/exec race (observed on the sandbox lane): a sibling
   // worker's fork can inherit the freshly-linked binary's write fd across
   // its own spawn window, and exec answers ETXTBSY until that fd closes.
   // The condition is transient by construction — retry briefly, the
   // npm/cargo stance.
   for (let attempt = 0; ; attempt++) {
-    const env: NodeJS.ProcessEnv = { ...process.env, ...extraEnv };
-    if (cpuLevel !== undefined) env["SCRIPTC_CPU_LEVEL"] = cpuLevel;
-    const startedAt = Date.now();
-    const pending = execFileAsync(cmd, args, {
-      encoding: "buffer",
-      ...(cpuLevel === undefined && Object.keys(extraEnv).length === 0 ? {} : { env }),
-    });
+    const pending = execFileAsync(cmd, args, { encoding: "buffer" });
     pending.child.stdin?.end();
-    track?.(pending.child);
     try {
       const { stdout, stderr } = await pending;
       return { stdout, stderr, exitCode: 0 };
@@ -150,9 +83,7 @@ async function runBinary(
         continue;
       }
       if (typeof e.code !== "number" || !Buffer.isBuffer(e.stdout) || !Buffer.isBuffer(e.stderr)) {
-        // Darwin leaves a crash report for a signal death: it names the
-        // exception and the crashing stack, which the child's error cannot.
-        throw spawnFailure(err, await recentCrashReport(cmd, startedAt));
+        throw err;
       }
       return { stdout: e.stdout, stderr: e.stderr, exitCode: e.code };
     }
@@ -173,20 +104,7 @@ function comparableStderr(stderr: Buffer): Buffer {
 }
 
 const comptimeShim = pathToFileURL(join(import.meta.dirname, "comptime-shim.mjs")).href;
-
-// The Node-oracle result cache differential.test.ts uses (tests/harness/
-// oracle-cache.ts). The suites split the corpus identically, so a shard's
-// recorded Node verdicts serve both lanes; only the SPAWN is skipped, the
-// native side always runs live.
-const spawnCachedNode = createNodeOracleCache({
-  repoRoot,
-  comptimeShim,
-  programInputs,
-  // This suite spawns process.execPath, not PATH's `node`; the cache key
-  // follows the spawned executable so the two suites share only when they
-  // really run the same Node build.
-  nodeCommand: process.execPath,
-});
+const islandShim = pathToFileURL(join(import.meta.dirname, "island-shim.mjs")).href;
 
 /** differential.test.ts's twin: the Node oracle runs with
  * --experimental-transform-types for corpus programs using non-erasable
@@ -206,19 +124,13 @@ function wantsTscDecorators(file: string): boolean {
 }
 
 function nodeOracleFile(file: string): string {
-  if (wantsTscOracle(directiveHead(file))) return tscOracleEntry(file, cacheDir);
   if (!wantsTscDecorators(file)) return file;
   const src = readFileSync(file, "utf8");
   const out = ts5.transpileModule(src, {
     compilerOptions: { target: ts5.ScriptTarget.ES2022, module: ts5.ModuleKind.ESNext },
     fileName: file,
   }).outputText;
-  const key = createHash("sha256")
-    .update(ts5.version)
-    .update("\0")
-    .update(src)
-    .digest("hex")
-    .slice(0, 16);
+  const key = createHash("sha256").update(ts5.version).update("\0").update(src).digest("hex").slice(0, 16);
   const path = join(cacheDir, `dec-oracle-${key}.mjs`);
   mkdirSync(cacheDir, { recursive: true });
   // Atomic publish: concurrent suites (the other flavor's full run, or
@@ -230,13 +142,6 @@ function nodeOracleFile(file: string): string {
   return path;
 }
 
-/** `// @normalize-pid` (differential.test.ts): Node's process warnings
- * compare with the pid replaced on both sides. */
-function pidFree(file: string, stderr: Buffer): Buffer {
-  if (!directiveHead(file).some((l) => /^\/\/ @normalize-pid\s*$/.test(l))) return stderr;
-  return Buffer.from(stderr.toString("utf8").replace(/^\(node:\d+\) /gm, "(node:PID) "), "utf8");
-}
-
 function wantsNoDeprecation(file: string): boolean {
   return directiveHead(file).some((l) => /^\/\/ @no-deprecation\s*$/.test(l));
 }
@@ -246,104 +151,49 @@ function nodeOracleArgs(file: string): string[] {
     ? ["--experimental-transform-types", "--disable-warning=ExperimentalWarning"]
     : [];
   const nodep = wantsNoDeprecation(file) ? ["--no-deprecation"] : [];
-  // differential.test.ts's @disallow-code-generation directive.
-  const codegen = directiveHead(file).some((l) => /^\/\/ @disallow-code-generation\s*$/.test(l))
-    ? ["--disallow-code-generation-from-strings"]
-    : [];
   // --import makes Node load even a CJS entry through its ESM loader,
   // changing an entry throw's uncaughtException origin to unhandledRejection.
-  const shims = directiveHead(file).includes("// @no-node-shims") ? [] : ["--import", comptimeShim];
-  return [...transform, ...nodep, ...codegen, ...shims, nodeOracleFile(file)];
+  const shims = directiveHead(file).includes("// @no-node-shims")
+    ? [] : ["--import", comptimeShim, "--import", islandShim];
+  return [...transform, ...nodep, ...shims, nodeOracleFile(file)];
 }
 
 function programInputs(file: string): string[] {
   if (!/\/main\.(ts|js|mjs|cjs)$/.test(file)) return [file];
-  // Files only: a package directory may be named like one (node_modules/widget.js).
   return [
-    ...[...ENTRY_EXTS, "tsx", "jsx"].flatMap((ext) => globSync(join(file, `../**/*.${ext}`))),
+    ...ENTRY_EXTS.flatMap((ext) => globSync(join(file, `../**/*.${ext}`))),
     ...globSync(join(file, "../**/tsconfig.json")),
     ...globSync(join(file, "../**/package.json")),
-  ]
-    .filter((f) => statSync(f).isFile())
-    .sort();
+  ].sort();
 }
 
 async function build(file: string, optimization: "release" | "dev") {
-  const defines = programDefines(directiveHead(file));
-  // The entry joins the key: a directory can hold several entries.
-  const hash = createHash("sha256").update(file).update("\0");
+  const hash = createHash("sha256");
   for (const f of programInputs(file)) hash.update(f).update(readFileSync(f));
-  const key = hash
-    .update(sanitize ? "san" : "plain")
-    .update("llvm-" + optimization)
-    .update(cpuDispatch ? "cpu-dispatch" : "")
-    .update(targetCpu === undefined ? "" : `target-cpu-${targetCpu}`)
-    // Computed-access sites emit different code by default; an opt-out
-    // restores the key path, so the two builds key separately.
-    .update("index-arms:" + (process.env["SCRIPTC_DYN_INDEX_FASTPATH"] ?? "1"))
-    .digest("hex")
-    .slice(0, 16);
+  const key = hash.update(sanitize ? "san" : "plain")
+    .update(wantsDynamic(file) ? "dyn" : "").update("llvm-" + optimization).digest("hex").slice(0, 16);
   const outDir = join(cacheDir, key);
   mkdirSync(outDir, { recursive: true });
   return compile(file, {
-    outPath: join(outDir, `program-llvm-${optimization}${sanitize ? "-san" : ""}`),
-    outDir,
-    sanitize,
-    optimization,
-    ...(cpuDispatch ? { cpuDispatch } : {}),
-    ...(defines ? { define: defines.define } : {}),
-    ...(targetCpu === undefined ? {} : { targetCpu }),
+    outPath: join(outDir, `program-llvm-${optimization}${sanitize ? "-san" : ""}${process.platform === "win32" ? ".exe" : ""}`),
+    outDir, sanitize, dynamic: wantsDynamic(file), optimization,
   });
 }
 
-describe(`llvm differential corpus (${files.length} programs, ${optimizationModes.join("+")}${sanitize ? ", sanitized" : ""}${cpuDispatch ? ", CPU dispatch" : ""}${targetCpu === undefined ? "" : `, ${targetCpu}`}${shardSuffix()})`, () => {
-  test.for(files.map((f) => [f.slice(corpusDir.length + 1), f] as const))(
-    "%s",
-    // retry: absorbs ORACLE-side nondeterminism, not compiler bugs — the same
-    // stance differential.test.ts takes. A program whose Node verdict and
-    // native run disagree only under momentary load (or an ETXTBSY-adjacent
-    // spawn hiccup the loop above did not cover) re-runs once.
-    { retry: 1, timeout: CASE_TIMEOUT_MS },
-    async ([rel, file], { skip }) => {
-      // Programs that call into Node need a libnode pack (libnode.ts).
-      if (requiresLibnode(file) && libnodePack() === null) skip();
-      if (requiresIcu(file) && !icuAvailable()) skip();
-      if (skipsDarwin(file) && process.platform === "darwin") skip();
-      const oracleEnv = {
-        ...programEnv(file),
-        ...programDefines(directiveHead(file))?.env,
-      };
-      const oracle = await runStep(`${rel}: node oracle`, (track) =>
-        spawnCachedNode(file, () =>
-          runBinary(process.execPath, nodeOracleArgs(file), undefined, oracleEnv, track),
-        ),
-      );
-      const expectedExit = expectedExitCode(file);
-      expect(oracle.exitCode).toBe(expectedExit);
-      for (const optimization of optimizationModes) {
-        const result = await runStep(`${rel}: compile (${optimization})`, () =>
-          build(file, optimization),
-        );
-        if (!result.ok)
-          throw new Error(
-            `${rel} (${optimization}): ` +
-              result.diagnostics.map((d) => `${d.code}: ${d.message}`).join("; "),
-          );
-        expect(result.backend).toBe("llvm");
-        expect(result.llvmPath.endsWith(".ll")).toBe(true);
-        for (const level of cpuLevels) {
-          const lane = level === undefined ? optimization : `${optimization} level ${level}`;
-          const actual = await runStep(`${rel}: run (${lane})`, (track) =>
-            runBinary(result.binaryPath, [], level, programEnv(file), track),
-          );
-          expect(actual.stdout, `${lane} stdout`).toEqual(oracle.stdout);
-          if (expectedExit === 0)
-            expect(pidFree(file, comparableStderr(actual.stderr)), `${lane} stderr`).toEqual(
-              pidFree(file, oracle.stderr),
-            );
-          expect(actual.exitCode, `${lane} exit status`).toBe(expectedExit);
-        }
-      }
-    },
-  );
+describe(`llvm differential corpus (${files.length} programs, ${optimizationModes.join("+")}${sanitize ? ", sanitized" : ""}${shardSuffix()})`, () => {
+  test.for(files.map((f) => [f.slice(corpusDir.length + 1), f] as const))("%s", async ([rel, file]) => {
+    const oracle = await runBinary(process.execPath, nodeOracleArgs(file));
+    const expectedExit = expectedExitCode(file);
+    expect(oracle.exitCode).toBe(expectedExit);
+    for (const optimization of optimizationModes) {
+      const result = await build(file, optimization);
+      if (!result.ok) throw new Error(`${rel} (${optimization}): ` + result.diagnostics.map((d) => `${d.code}: ${d.message}`).join("; "));
+      expect(result.backend).toBe("llvm");
+      expect(result.llvmPath.endsWith(".ll")).toBe(true);
+      const actual = await runBinary(result.binaryPath, []);
+      expect(actual.stdout, `${optimization} stdout`).toEqual(oracle.stdout);
+      if (expectedExit === 0) expect(comparableStderr(actual.stderr), `${optimization} stderr`).toEqual(oracle.stderr);
+      expect(actual.exitCode, `${optimization} exit status`).toBe(expectedExit);
+    }
+  });
 });

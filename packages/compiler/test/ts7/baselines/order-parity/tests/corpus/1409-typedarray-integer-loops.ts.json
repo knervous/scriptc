@@ -1,6 +1,0 @@
-{
- "order": [
-  "<repo>/tests/corpus/1409-typedarray-integer-loops.ts"
- ],
- "diags": []
-}

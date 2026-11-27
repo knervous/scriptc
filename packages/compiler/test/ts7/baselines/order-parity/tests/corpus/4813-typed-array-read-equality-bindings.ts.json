@@ -1,6 +1,0 @@
-{
- "order": [
-  "<repo>/tests/corpus/4813-typed-array-read-equality-bindings.ts"
- ],
- "diags": []
-}

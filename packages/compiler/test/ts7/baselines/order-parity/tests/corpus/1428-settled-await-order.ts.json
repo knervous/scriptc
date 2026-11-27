@@ -1,6 +1,0 @@
-{
- "order": [
-  "<repo>/tests/corpus/1428-settled-await-order.ts"
- ],
- "diags": []
-}

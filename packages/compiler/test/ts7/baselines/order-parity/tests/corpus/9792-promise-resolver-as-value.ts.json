@@ -1,6 +1,0 @@
-{
- "order": [
-  "<repo>/tests/corpus/9792-promise-resolver-as-value.ts"
- ],
- "diags": []
-}

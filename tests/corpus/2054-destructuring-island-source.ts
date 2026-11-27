@@ -1,3 +1,4 @@
+// @dynamic
 // Destructuring assignment from ISLAND sources: the engine runs the
 // pattern (RequireObjectCoercible on object patterns, the real iterator
 // protocol on array patterns), the extracted values assign the compiled

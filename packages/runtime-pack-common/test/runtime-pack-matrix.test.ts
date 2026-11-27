@@ -30,6 +30,105 @@ function selected(
   return matches[0];
 }
 
+test("COFF executables always link the remote queue that scr_lib.c's Atomics and timer workers post through", () => {
+  // scr_lib.c, a base unit, calls scr_remote_post, scr_instance_remote and scr_remote_hold from scr_atomics_notify,
+  // scr_at_timer_main, scr_atomics_wait_async_start and scr_at_async_settle; scr_ffi_queue.c defines them. lld-link
+  // reports them undefined in every Windows executable that does not select the unit (any program without a foreign
+  // FFI callback); the ELF and Mach-O links of the same objects do not.
+  const lib = readFileSync(join(runtimeSources, "scr_lib.c"), "utf8");
+  const queue = readFileSync(join(runtimeSources, "scr_ffi_queue.c"), "utf8");
+  for (const symbol of ["scr_remote_post", "scr_instance_remote", "scr_remote_hold"]) {
+    expect(lib).toContain(`${symbol}(`);
+    expect(queue).toMatch(new RegExp(`^void \\*?${symbol}\\(`, "m"));
+  }
+  const queueUnit = (object_format: string) =>
+    createRuntimePackMatrix({ target: { object_format }, compileFlags: [], systemLibraries: [] }).runtime_units.find(
+      (u: { source: string }) => u.source === "scr_ffi_queue.c",
+    );
+  expect(queueUnit("coff").predicate).toBe(true);
+  expect(queueUnit("elf").predicate).toBe("foreignFfi");
+  expect(queueUnit("macho").predicate).toBe("foreignFfi");
+});
+
+/** The COFF pack's weak stand-ins (scr_coff_unlinked.c) for functions `caller` calls in other units: each call is in
+ * the caller's text, each named unit defines the function (its definition replaces the stand-in whenever a program
+ * selects the unit), and the stand-in is weak and traps naming both. Only COFF packs carry the stand-in unit. */
+function expectCoffStandIns(caller: string, calls: readonly (readonly [symbol: string, owner: string])[]): void {
+  const read = (name: string): string => readFileSync(join(runtimeSources, name), "utf8");
+  const standIns = read("scr_coff_unlinked.c");
+  for (const [symbol, owner] of calls) {
+    expect(read(caller), `${caller} calls ${symbol}`).toMatch(new RegExp(String.raw`\b${symbol}\(`));
+    expect(read(owner), `${owner} defines ${symbol}`).toMatch(
+      new RegExp(String.raw`^[A-Za-z][^;=\n]*\b${symbol}\([^;{]*\)\s*\{`, "m"),
+    );
+    expect(standIns, `a weak stand-in for ${symbol}`).toMatch(
+      new RegExp(
+        String.raw`^__attribute__\(\(weak\)\) [^;{]*\b${symbol}\([^;{]*\)\s*\{\s*SCR_COFF_UNLINKED\("${symbol}", "${owner}"\);\s*\}`,
+        "m",
+      ),
+    );
+  }
+  const standInUnit = (object_format: string) =>
+    createRuntimePackMatrix({ target: { object_format }, compileFlags: [], systemLibraries: [] }).runtime_units.find(
+      (u: { source: string }) => u.source === "scr_coff_unlinked.c",
+    );
+  expect(standInUnit("coff")?.predicate).toBe(true);
+  expect(standInUnit("elf")).toBeUndefined();
+  expect(standInUnit("macho")).toBeUndefined();
+}
+
+test("COFF executables resolve scr_event_target.c's events.on and util.aborted calls without the checked-dynamic units", () => {
+  // events.on's iterator (scr_eon_*) calls its emitter's methods through scr_dyn_invoke.c and settles its promises
+  // through scr_async_dyn.c, and util.aborted answers a checked-dynamic promise; the calls that reach those paths
+  // select dynInvoke and dynAsync (compiler/src/ir/runtime-features.ts). Every other program with an EventTarget, an
+  // abort signal or fetch links scr_event_target.c without the two units, and lld-link still resolves the calls.
+  expectCoffStandIns("scr_event_target.c", [
+    ["scr_dyn_invoke", "scr_dyn_invoke.c"],
+    ["scr_dyn_new_promise", "scr_async_dyn.c"],
+    ["scr_promise_resolve_dyn", "scr_async_dyn.c"],
+  ]);
+});
+
+test("COFF executables resolve scr_stream.c's readline and Readable.from calls without those units", () => {
+  // The readline interfaces over a stream (scr_stream_rl_*) are reached by readline calls, which select
+  // scr_readline.c (events) and, for emitKeypressEvents, scr_readline_tty.c (regex too); Readable.from over an
+  // untyped iterable (scr_from_dyn_ex) by programs that select scr_stream_ops.c (dynAsync). Every other stream
+  // program links scr_stream.c without them.
+  expectCoffStandIns("scr_stream.c", [
+    ["scr_rl_open", "scr_readline.c"],
+    ["scr_rl_input_bytes", "scr_readline.c"],
+    ["scr_rl_input_str", "scr_readline.c"],
+    ["scr_rl_input_end", "scr_readline.c"],
+    ["scr_rl_input_error", "scr_readline.c"],
+    ["scr_rl_ui_open", "scr_readline.c"],
+    ["scr_rl_keypress_events", "scr_readline_tty.c"],
+    ["scr_stream_from_dyn_iter", "scr_stream_ops.c"],
+  ]);
+});
+
+test("COFF executables resolve scr_events.c's process.finalization warnings without the checked-dynamic async unit", () => {
+  // process.finalization reports its ExperimentalWarnings through scr_async_dyn.c's deferred warning queue, and the
+  // call selects dynAsync (compiler/src/ir/runtime-features.ts); every other program with process events links
+  // scr_events.c without the unit.
+  expectCoffStandIns("scr_events.c", [
+    ["scr_warning_new", "scr_async_dyn.c"],
+    ["scr_warning_emit_deferred", "scr_async_dyn.c"],
+  ]);
+});
+
+test("COFF executables resolve scr_dyn_native_symbol.c's Symbol-value calls without the symbol unit", () => {
+  // The host island links scr_dyn_native_symbol.c whole (hostIsland). Only `Symbol` read as a value
+  // (dyn.symbolConstructorValue) reaches scr_native_symbol_key, and that value's own closures call sym.new, sym.for
+  // and sym.keyFor, which select scr_symbol.c (symbol; compiler/src/ir/runtime-features.ts). Every other host-island
+  // program (a page program with timers, say) links the unit without scr_symbol.c, and lld-link still resolves the
+  // calls.
+  expectCoffStandIns("scr_dyn_native_symbol.c", [
+    ["scr_sym_well_known", "scr_symbol.c"],
+    ["scr_dyn_new_symbol", "scr_symbol.c"],
+    ["scr_sym_release", "scr_symbol.c"],
+  ]);
+});
+
 test("scr_events.c builds once per flavor, and once more for the terminal color methods", () => {
   // The stdio extensions, the process extras, the typed write slot and the
   // island listeners all live in the one build; only workers needs its own.
@@ -584,5 +683,79 @@ test("a unit has one build for every combination of the features its builds name
         [...new Set(on.flatMap(alone))].sort(),
       );
     }
+  }
+});
+
+/** The units and archives a feature set selects, evaluated as the compiler's
+ * pack selection does (effectiveRuntimeFeatures, evaluateRuntimePredicate). */
+async function selection(features: Record<string, boolean>): Promise<{ units: string[]; archives: string[] }> {
+  const core = await import("../../compiler/src/backend/runtime-pack-core.js");
+  const effective = core.effectiveRuntimeFeatures({ ...noLinkFeatures, ...features } as never, {});
+  return {
+    units: (matrix.runtime_units as { source: string; predicate: never }[])
+      .filter((unit) => core.evaluateRuntimePredicate(unit.predicate, effective))
+      .map((unit) => unit.source),
+    archives: (matrix.archives as { id: string; predicate: never }[])
+      .filter((archive) => core.evaluateRuntimePredicate(archive.predicate, effective))
+      .map((archive) => archive.id),
+  };
+}
+const noLinkFeatures = {
+  dynamic: false,
+  regex: false,
+  copying: false,
+  textDecoderLegacy: false,
+  bigintBytes: false,
+  fileHandle: false,
+  fetch: false,
+  netIsland: false,
+};
+const hostUnits = [
+  "scr_dyn_native.c",
+  "scr_dyn_native_symbol.c",
+  "scr_dyn_native_regex.c",
+  "scr_host_island.c",
+  "scr_host_lre.c",
+  "scr_host_android.c",
+];
+const engineUnits = ["scr_island.c", "scr_web.c", "scr_inspect_island.c", "scr_net_island.c", "scr_zlib_island.c"];
+
+test("the host island and the engine island never link together", async () => {
+  const everything = { dynamic: true, regex: true, dynInvoke: true, inspect: true, zlib: true, netIsland: true, fetch: true };
+  const host = await selection({ ...everything, hostIsland: true });
+  for (const unit of hostUnits) expect(host.units).toContain(unit);
+  for (const unit of engineUnits) expect(host.units).not.toContain(unit);
+  expect(host.archives).not.toContain("quickjs");
+  // The engine archive carries libregexp; without it the vendored archive links.
+  expect(host.archives).toContain("libregexp");
+  const engine = await selection(everything);
+  for (const unit of hostUnits) expect(engine.units).not.toContain(unit);
+  for (const unit of ["scr_island.c", "scr_web.c", "scr_inspect_island.c", "scr_net_island.c", "scr_zlib_island.c"])
+    expect(engine.units).toContain(unit);
+  expect(engine.archives).toContain("quickjs");
+  expect(engine.archives).not.toContain("libregexp");
+});
+
+test("a program without the host island selects what it did before the host island existed", async () => {
+  // engineIsland stands for `dynamic` in every row that named it.
+  for (const features of [
+    {},
+    { regex: true },
+    { dynamic: true, regex: true },
+    { dynamic: true, regex: true, inspect: true, zlib: true },
+    { dynamic: true, regex: true, fetch: true },
+  ]) {
+    const now = await selection(features);
+    for (const unit of hostUnits) expect(now.units).not.toContain(unit);
+    const dynamic = (features as { dynamic?: boolean }).dynamic === true;
+    expect(now.units.includes("scr_island.c")).toBe(dynamic);
+    expect(now.archives.includes("quickjs")).toBe(dynamic);
+    expect(now.archives.includes("libregexp")).toBe(!dynamic && (features as { regex?: boolean }).regex === true);
+  }
+});
+
+test("the host island units build only their SCR_DYNAMIC object", () => {
+  for (const unit of hostUnits) {
+    expect(variantsFor(unit), unit).toEqual([{ id: "dynamic", when: { dynamic: true }, defines: ["SCR_DYNAMIC"] }]);
   }
 });

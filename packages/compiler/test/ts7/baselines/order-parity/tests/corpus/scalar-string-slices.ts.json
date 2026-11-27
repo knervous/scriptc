@@ -1,6 +1,0 @@
-{
- "order": [
-  "<repo>/tests/corpus/scalar-string-slices.ts"
- ],
- "diags": []
-}

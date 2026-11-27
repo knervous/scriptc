@@ -1,6 +1,0 @@
-{
- "order": [
-  "<repo>/tests/corpus/8107-shared-typed-array-set-workers.ts"
- ],
- "diags": []
-}

@@ -1,6 +1,0 @@
-{
- "order": [
-  "<repo>/tests/corpus/promise-catch-optional-chain.ts"
- ],
- "diags": []
-}

@@ -1,6 +1,0 @@
-{
- "order": [
-  "<repo>/tests/corpus/8783-child-max-buffer-refused-arguments.ts"
- ],
- "diags": []
-}

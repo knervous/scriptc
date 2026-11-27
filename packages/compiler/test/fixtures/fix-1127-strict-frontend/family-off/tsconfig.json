@@ -1,0 +1,4 @@
+{
+  // Turns two members of the strict family off: both are required, so the build fails naming each.
+  "compilerOptions": { "strict": true, "strictFunctionTypes": false, "useUnknownInCatchVariables": false }
+}

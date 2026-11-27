@@ -1,6 +1,0 @@
-{
- "order": [
-  "<repo>/tests/corpus/4730-touint32-large-magnitudes.ts"
- ],
- "diags": []
-}

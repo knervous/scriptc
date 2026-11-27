@@ -1,6 +1,0 @@
-{
- "order": [
-  "<repo>/tests/corpus/5817-constructor-function-instanceof.cjs"
- ],
- "diags": []
-}

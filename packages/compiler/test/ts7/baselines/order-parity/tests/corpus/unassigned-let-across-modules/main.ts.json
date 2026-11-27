@@ -1,7 +1,0 @@
-{
- "order": [
-  "<repo>/tests/corpus/unassigned-let-across-modules/state.ts",
-  "<repo>/tests/corpus/unassigned-let-across-modules/main.ts"
- ],
- "diags": []
-}

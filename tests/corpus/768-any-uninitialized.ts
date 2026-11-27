@@ -1,3 +1,4 @@
+// @dynamic
 // Uninitialized 'any' bindings hold the ENGINE's undefined, JS-exact —
 // tsc's definite-assignment analysis never guards `any` reads, so every
 // spelling below is readable immediately and must behave like Node's

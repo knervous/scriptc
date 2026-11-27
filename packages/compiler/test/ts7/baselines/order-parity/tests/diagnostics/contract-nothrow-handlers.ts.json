@@ -1,6 +1,0 @@
-{
- "order": [
-  "<repo>/tests/diagnostics/contract-nothrow-handlers.ts"
- ],
- "diags": []
-}

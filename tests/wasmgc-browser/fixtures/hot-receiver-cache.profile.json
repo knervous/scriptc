@@ -1,0 +1,748 @@
+{
+ "schema": "scriptc-pgo-site-profile/1",
+ "key": "hand-made by make-fixture-profile.mjs: every o.<field> access monomorphic on {a,b,c}",
+ "pathsRelativeTo": "this file",
+ "files": {
+  "hot-receiver-cache-helper.js": {
+   "sha256": "1af319e6f9bf40368b42f3c261cec56cf9d45e3f80e5937bb986772f7e0732dd"
+  }
+ },
+ "sites": [
+  {
+   "kind": "load",
+   "property": "a",
+   "file": "hot-receiver-cache-helper.js",
+   "span": {
+    "start": 373,
+    "end": 376
+   },
+   "state": "monomorphic",
+   "receivers": [
+    {
+     "kind": "plain-object",
+     "fields": [
+      "a",
+      "b",
+      "c"
+     ],
+     "own": {
+      "index": 0
+     }
+    }
+   ]
+  },
+  {
+   "kind": "load",
+   "property": "b",
+   "file": "hot-receiver-cache-helper.js",
+   "span": {
+    "start": 379,
+    "end": 382
+   },
+   "state": "monomorphic",
+   "receivers": [
+    {
+     "kind": "plain-object",
+     "fields": [
+      "a",
+      "b",
+      "c"
+     ],
+     "own": {
+      "index": 1
+     }
+    }
+   ]
+  },
+  {
+   "kind": "load",
+   "property": "c",
+   "file": "hot-receiver-cache-helper.js",
+   "span": {
+    "start": 385,
+    "end": 388
+   },
+   "state": "monomorphic",
+   "receivers": [
+    {
+     "kind": "plain-object",
+     "fields": [
+      "a",
+      "b",
+      "c"
+     ],
+     "own": {
+      "index": 2
+     }
+    }
+   ]
+  },
+  {
+   "kind": "load",
+   "property": "a",
+   "file": "hot-receiver-cache-helper.js",
+   "span": {
+    "start": 430,
+    "end": 433
+   },
+   "state": "monomorphic",
+   "receivers": [
+    {
+     "kind": "plain-object",
+     "fields": [
+      "a",
+      "b",
+      "c"
+     ],
+     "own": {
+      "index": 0
+     }
+    }
+   ]
+  },
+  {
+   "kind": "store",
+   "property": "b",
+   "file": "hot-receiver-cache-helper.js",
+   "span": {
+    "start": 435,
+    "end": 438
+   },
+   "state": "monomorphic",
+   "receivers": [
+    {
+     "kind": "plain-object",
+     "fields": [
+      "a",
+      "b",
+      "c"
+     ],
+     "own": {
+      "index": 1
+     }
+    }
+   ]
+  },
+  {
+   "kind": "load",
+   "property": "b",
+   "file": "hot-receiver-cache-helper.js",
+   "span": {
+    "start": 456,
+    "end": 459
+   },
+   "state": "monomorphic",
+   "receivers": [
+    {
+     "kind": "plain-object",
+     "fields": [
+      "a",
+      "b",
+      "c"
+     ],
+     "own": {
+      "index": 1
+     }
+    }
+   ]
+  },
+  {
+   "kind": "load",
+   "property": "c",
+   "file": "hot-receiver-cache-helper.js",
+   "span": {
+    "start": 462,
+    "end": 465
+   },
+   "state": "monomorphic",
+   "receivers": [
+    {
+     "kind": "plain-object",
+     "fields": [
+      "a",
+      "b",
+      "c"
+     ],
+     "own": {
+      "index": 2
+     }
+    }
+   ]
+  },
+  {
+   "kind": "load",
+   "property": "a",
+   "file": "hot-receiver-cache-helper.js",
+   "span": {
+    "start": 588,
+    "end": 591
+   },
+   "state": "monomorphic",
+   "receivers": [
+    {
+     "kind": "plain-object",
+     "fields": [
+      "a",
+      "b",
+      "c"
+     ],
+     "own": {
+      "index": 0
+     }
+    }
+   ]
+  },
+  {
+   "kind": "load",
+   "property": "b",
+   "file": "hot-receiver-cache-helper.js",
+   "span": {
+    "start": 610,
+    "end": 613
+   },
+   "state": "monomorphic",
+   "receivers": [
+    {
+     "kind": "plain-object",
+     "fields": [
+      "a",
+      "b",
+      "c"
+     ],
+     "own": {
+      "index": 1
+     }
+    }
+   ]
+  },
+  {
+   "kind": "load",
+   "property": "c",
+   "file": "hot-receiver-cache-helper.js",
+   "span": {
+    "start": 616,
+    "end": 619
+   },
+   "state": "monomorphic",
+   "receivers": [
+    {
+     "kind": "plain-object",
+     "fields": [
+      "a",
+      "b",
+      "c"
+     ],
+     "own": {
+      "index": 2
+     }
+    }
+   ]
+  },
+  {
+   "kind": "load",
+   "property": "a",
+   "file": "hot-receiver-cache-helper.js",
+   "span": {
+    "start": 708,
+    "end": 711
+   },
+   "state": "monomorphic",
+   "receivers": [
+    {
+     "kind": "plain-object",
+     "fields": [
+      "a",
+      "b",
+      "c"
+     ],
+     "own": {
+      "index": 0
+     }
+    }
+   ]
+  },
+  {
+   "kind": "load",
+   "property": "b",
+   "file": "hot-receiver-cache-helper.js",
+   "span": {
+    "start": 741,
+    "end": 744
+   },
+   "state": "monomorphic",
+   "receivers": [
+    {
+     "kind": "plain-object",
+     "fields": [
+      "a",
+      "b",
+      "c"
+     ],
+     "own": {
+      "index": 1
+     }
+    }
+   ]
+  },
+  {
+   "kind": "load",
+   "property": "c",
+   "file": "hot-receiver-cache-helper.js",
+   "span": {
+    "start": 747,
+    "end": 750
+   },
+   "state": "monomorphic",
+   "receivers": [
+    {
+     "kind": "plain-object",
+     "fields": [
+      "a",
+      "b",
+      "c"
+     ],
+     "own": {
+      "index": 2
+     }
+    }
+   ]
+  },
+  {
+   "kind": "load",
+   "property": "a",
+   "file": "hot-receiver-cache-helper.js",
+   "span": {
+    "start": 855,
+    "end": 858
+   },
+   "state": "monomorphic",
+   "receivers": [
+    {
+     "kind": "plain-object",
+     "fields": [
+      "a",
+      "b",
+      "c"
+     ],
+     "own": {
+      "index": 0
+     }
+    }
+   ]
+  },
+  {
+   "kind": "load",
+   "property": "b",
+   "file": "hot-receiver-cache-helper.js",
+   "span": {
+    "start": 878,
+    "end": 881
+   },
+   "state": "monomorphic",
+   "receivers": [
+    {
+     "kind": "plain-object",
+     "fields": [
+      "a",
+      "b",
+      "c"
+     ],
+     "own": {
+      "index": 1
+     }
+    }
+   ]
+  },
+  {
+   "kind": "load",
+   "property": "a",
+   "file": "hot-receiver-cache-helper.js",
+   "span": {
+    "start": 980,
+    "end": 983
+   },
+   "state": "monomorphic",
+   "receivers": [
+    {
+     "kind": "plain-object",
+     "fields": [
+      "a",
+      "b",
+      "c"
+     ],
+     "own": {
+      "index": 0
+     }
+    }
+   ]
+  },
+  {
+   "kind": "load",
+   "property": "b",
+   "file": "hot-receiver-cache-helper.js",
+   "span": {
+    "start": 1042,
+    "end": 1045
+   },
+   "state": "monomorphic",
+   "receivers": [
+    {
+     "kind": "plain-object",
+     "fields": [
+      "a",
+      "b",
+      "c"
+     ],
+     "own": {
+      "index": 1
+     }
+    }
+   ]
+  },
+  {
+   "kind": "load",
+   "property": "c",
+   "file": "hot-receiver-cache-helper.js",
+   "span": {
+    "start": 1048,
+    "end": 1051
+   },
+   "state": "monomorphic",
+   "receivers": [
+    {
+     "kind": "plain-object",
+     "fields": [
+      "a",
+      "b",
+      "c"
+     ],
+     "own": {
+      "index": 2
+     }
+    }
+   ]
+  },
+  {
+   "kind": "load",
+   "property": "a",
+   "file": "hot-receiver-cache-helper.js",
+   "span": {
+    "start": 1149,
+    "end": 1152
+   },
+   "state": "monomorphic",
+   "receivers": [
+    {
+     "kind": "plain-object",
+     "fields": [
+      "a",
+      "b",
+      "c"
+     ],
+     "own": {
+      "index": 0
+     }
+    }
+   ]
+  },
+  {
+   "kind": "load",
+   "property": "a",
+   "file": "hot-receiver-cache-helper.js",
+   "span": {
+    "start": 1161,
+    "end": 1164
+   },
+   "state": "monomorphic",
+   "receivers": [
+    {
+     "kind": "plain-object",
+     "fields": [
+      "a",
+      "b",
+      "c"
+     ],
+     "own": {
+      "index": 0
+     }
+    }
+   ]
+  },
+  {
+   "kind": "load",
+   "property": "b",
+   "file": "hot-receiver-cache-helper.js",
+   "span": {
+    "start": 1183,
+    "end": 1186
+   },
+   "state": "monomorphic",
+   "receivers": [
+    {
+     "kind": "plain-object",
+     "fields": [
+      "a",
+      "b",
+      "c"
+     ],
+     "own": {
+      "index": 1
+     }
+    }
+   ]
+  },
+  {
+   "kind": "load",
+   "property": "a",
+   "file": "hot-receiver-cache-helper.js",
+   "span": {
+    "start": 1195,
+    "end": 1198
+   },
+   "state": "monomorphic",
+   "receivers": [
+    {
+     "kind": "plain-object",
+     "fields": [
+      "a",
+      "b",
+      "c"
+     ],
+     "own": {
+      "index": 0
+     }
+    }
+   ]
+  },
+  {
+   "kind": "load",
+   "property": "c",
+   "file": "hot-receiver-cache-helper.js",
+   "span": {
+    "start": 1207,
+    "end": 1210
+   },
+   "state": "monomorphic",
+   "receivers": [
+    {
+     "kind": "plain-object",
+     "fields": [
+      "a",
+      "b",
+      "c"
+     ],
+     "own": {
+      "index": 2
+     }
+    }
+   ]
+  },
+  {
+   "kind": "load",
+   "property": "a",
+   "file": "hot-receiver-cache-helper.js",
+   "span": {
+    "start": 1336,
+    "end": 1339
+   },
+   "state": "monomorphic",
+   "receivers": [
+    {
+     "kind": "plain-object",
+     "fields": [
+      "a",
+      "b",
+      "c"
+     ],
+     "own": {
+      "index": 0
+     }
+    }
+   ]
+  },
+  {
+   "kind": "load",
+   "property": "b",
+   "file": "hot-receiver-cache-helper.js",
+   "span": {
+    "start": 1378,
+    "end": 1381
+   },
+   "state": "monomorphic",
+   "receivers": [
+    {
+     "kind": "plain-object",
+     "fields": [
+      "a",
+      "b",
+      "c"
+     ],
+     "own": {
+      "index": 1
+     }
+    }
+   ]
+  },
+  {
+   "kind": "load",
+   "property": "c",
+   "file": "hot-receiver-cache-helper.js",
+   "span": {
+    "start": 1384,
+    "end": 1387
+   },
+   "state": "monomorphic",
+   "receivers": [
+    {
+     "kind": "plain-object",
+     "fields": [
+      "a",
+      "b",
+      "c"
+     ],
+     "own": {
+      "index": 2
+     }
+    }
+   ]
+  },
+  {
+   "kind": "load",
+   "property": "a",
+   "file": "hot-receiver-cache-helper.js",
+   "span": {
+    "start": 1447,
+    "end": 1450
+   },
+   "state": "monomorphic",
+   "receivers": [
+    {
+     "kind": "plain-object",
+     "fields": [
+      "a",
+      "b",
+      "c"
+     ],
+     "own": {
+      "index": 0
+     }
+    }
+   ]
+  },
+  {
+   "kind": "load",
+   "property": "b",
+   "file": "hot-receiver-cache-helper.js",
+   "span": {
+    "start": 1481,
+    "end": 1484
+   },
+   "state": "monomorphic",
+   "receivers": [
+    {
+     "kind": "plain-object",
+     "fields": [
+      "a",
+      "b",
+      "c"
+     ],
+     "own": {
+      "index": 1
+     }
+    }
+   ]
+  },
+  {
+   "kind": "load",
+   "property": "c",
+   "file": "hot-receiver-cache-helper.js",
+   "span": {
+    "start": 1487,
+    "end": 1490
+   },
+   "state": "monomorphic",
+   "receivers": [
+    {
+     "kind": "plain-object",
+     "fields": [
+      "a",
+      "b",
+      "c"
+     ],
+     "own": {
+      "index": 2
+     }
+    }
+   ]
+  },
+  {
+   "kind": "load",
+   "property": "a",
+   "file": "hot-receiver-cache-helper.js",
+   "span": {
+    "start": 1633,
+    "end": 1636
+   },
+   "state": "monomorphic",
+   "receivers": [
+    {
+     "kind": "plain-object",
+     "fields": [
+      "a",
+      "b",
+      "c"
+     ],
+     "own": {
+      "index": 0
+     }
+    }
+   ]
+  },
+  {
+   "kind": "load",
+   "property": "b",
+   "file": "hot-receiver-cache-helper.js",
+   "span": {
+    "start": 1662,
+    "end": 1665
+   },
+   "state": "monomorphic",
+   "receivers": [
+    {
+     "kind": "plain-object",
+     "fields": [
+      "a",
+      "b",
+      "c"
+     ],
+     "own": {
+      "index": 1
+     }
+    }
+   ]
+  },
+  {
+   "kind": "store",
+   "property": "b",
+   "file": "hot-receiver-cache-helper.js",
+   "span": {
+    "start": 1771,
+    "end": 1774
+   },
+   "state": "monomorphic",
+   "receivers": [
+    {
+     "kind": "plain-object",
+     "fields": [
+      "a",
+      "b",
+      "c"
+     ],
+     "own": {
+      "index": 1
+     }
+    }
+   ]
+  }
+ ]
+}

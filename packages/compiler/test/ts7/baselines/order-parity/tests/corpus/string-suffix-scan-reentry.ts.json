@@ -1,6 +1,0 @@
-{
- "order": [
-  "<repo>/tests/corpus/string-suffix-scan-reentry.ts"
- ],
- "diags": []
-}

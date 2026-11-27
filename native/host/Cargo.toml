@@ -1,0 +1,46 @@
+# The generic native host: the host island ABI (packages/runtime/src/scr_host_island.h) answered in Rust, with a
+# document, a window, timers, fetch and the rest of a page's platform, and no JavaScript engine.
+#
+# - scriptc-host-core: the host itself (one crate for now; its services are modules behind features).
+# - scriptc-host: the facade an embedder depends on: the `Layer` trait, `export_host!`, and the `default-entry`
+#   feature (the host with no layer, the default link).
+[workspace]
+resolver = "2"
+members = ["crates/scriptc-host-core", "crates/scriptc-host", "crates/blitz-ui", "crates/matoya-sys", "crates/audio-engine", "crates/audio-decode", "crates/gpu-stream-format", "crates/gpu-stream-wgpu"]
+# What a bare `cargo build` / `cargo test` here builds: the host. The other crates build as its dependencies, per
+# target (matoya-sys only for Android: libmatoya has no build for the other targets yet).
+default-members = ["crates/scriptc-host-core", "crates/scriptc-host"]
+# The vendored forks keep their own manifests (stylo, vello, ...) and blitz its own workspace.
+exclude = ["vendor"]
+
+[workspace.package]
+version = "0.1.0"
+edition = "2024"
+
+[profile.release]
+debug = 1
+
+[profile.release.package."*"]
+debug = "line-tables-only"
+
+# Every dependency is named in the crates' own manifests (cargo resolves `workspace = true` against the root of the
+# build that uses them, so an embedder's build could not inherit from here). The paths outside this workspace are
+# all in one table: scriptc-host-core/Cargo.toml, between its two marked lines.
+
+# The vendored forks this workspace builds with when it is built on its own (an embedder's workspace repeats them in
+# its own [patch], cargo reads only the root's).
+[patch."https://github.com/DioxusLabs/blitz"]
+blitz-paint = { path = "vendor/blitz/packages/blitz-paint" }
+blitz-dom = { path = "vendor/blitz/packages/blitz-dom" }
+blitz-html = { path = "vendor/blitz/packages/blitz-html" }
+blitz-net = { path = "vendor/blitz/packages/blitz-net" }
+blitz-traits = { path = "vendor/blitz/packages/blitz-traits" }
+debug_timer = { path = "vendor/blitz/packages/debug_timer" }
+stylo_taffy = { path = "vendor/blitz/packages/stylo_taffy" }
+
+[patch.crates-io]
+anyrender_svg = { path = "vendor/anyrender_svg" }
+anyrender_vello_cpu = { path = "vendor/anyrender_vello_cpu" }
+stylo = { path = "vendor/stylo" }
+vello = { path = "vendor/vello" }
+vello_shaders = { path = "vendor/vello_shaders" }

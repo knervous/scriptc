@@ -1,6 +1,0 @@
-{
- "order": [
-  "<repo>/tests/corpus/constructor-rebinding-return-operand-construction.ts"
- ],
- "diags": []
-}

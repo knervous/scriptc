@@ -1,3 +1,4 @@
+// This file was modified from scriptc (Apache-2.0); see MODIFICATIONS.md.
 /* Region groups: call sites whose result is a fresh object graph the
  * caller only borrows and then drops, so everything the call allocates
  * can live in an arena that is dropped at once (arenas.ts).
@@ -281,6 +282,12 @@ export const SOURCE_KINDS: Record<IrExpr["kind"], "allocation" | "some" | "none"
   recordKeyGet: "none",
   dynFrom: "none",
   dynCall: "none",
+  // The fork's island operations: engine values, followed by no group.
+  dynFromJsval: "none",
+  jsBridgePromise: "none",
+  jsExit: "none",
+  jsMarshal: "none",
+  jsOp: "none",
   dynInvoke: "none",
   dynArrLit: "none",
   dynObjLit: "none",

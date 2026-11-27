@@ -1,6 +1,6 @@
-import { ogHomeTitle, siteName } from "@/lib/site";
-import { renderLabsOg } from "./labs-og";
+import { getPageTitle, renderOgImage } from "./og-image";
 
 export async function GET() {
-  return renderLabsOg({ product: siteName, title: ogHomeTitle });
+  const title = getPageTitle("")!;
+  return renderOgImage(title);
 }

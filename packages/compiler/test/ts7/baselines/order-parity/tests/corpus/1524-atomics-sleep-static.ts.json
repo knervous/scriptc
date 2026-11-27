@@ -1,6 +1,0 @@
-{
- "order": [
-  "<repo>/tests/corpus/1524-atomics-sleep-static.ts"
- ],
- "diags": []
-}

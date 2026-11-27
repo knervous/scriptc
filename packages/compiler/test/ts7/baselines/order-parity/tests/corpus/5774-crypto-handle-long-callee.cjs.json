@@ -1,6 +1,0 @@
-{
- "order": [
-  "<repo>/tests/corpus/5774-crypto-handle-long-callee.cjs"
- ],
- "diags": []
-}

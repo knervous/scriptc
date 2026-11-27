@@ -1,1 +1,0 @@
-{ "name": "island-private-methods", "private": true, "type": "module", "scriptc": { "packages": { "private-pkg": "node" } } }

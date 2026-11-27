@@ -1,6 +1,0 @@
-{
- "order": [
-  "<repo>/tests/corpus/net-socket-timeout-before-connect.ts"
- ],
- "diags": []
-}

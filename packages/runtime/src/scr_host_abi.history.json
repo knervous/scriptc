@@ -1,0 +1,124 @@
+{
+  "comment": "The host island ABI (scr_host_island.h), one entry per SCR_HOST_ABI version. Hand-maintained, append-only: a new version copies the previous entry and appends to it. packages/runtime/test/host-abi.test.ts checks the header against the last entry and every entry against the one before. The layout is the LP64/LLP64 one every supported target shares (64-bit pointers, 8-byte double alignment); the host crate's layout test prints the same table.",
+  "versions": [
+    {
+      "abi": 1,
+      "ops": [
+        "abi",
+        "global_get",
+        "get_prop",
+        "set_prop",
+        "call",
+        "call_method",
+        "construct",
+        "instance_of",
+        "is_callable",
+        "retain",
+        "release",
+        "io_pending",
+        "io_poll"
+      ],
+      "runtime": ["scr_host_closure_call", "scr_host_closure_retain", "scr_host_closure_release"]
+    },
+    {
+      "abi": 2,
+      "ops": [
+        "abi",
+        "global_get",
+        "get_prop",
+        "set_prop",
+        "call",
+        "call_method",
+        "construct",
+        "instance_of",
+        "is_callable",
+        "retain",
+        "release",
+        "io_pending",
+        "io_poll",
+        "new_object",
+        "new_array",
+        "is_array",
+        "own_keys",
+        "has_own",
+        "define_getter",
+        "get_iterator",
+        "new_bytes",
+        "bytes_view",
+        "new_error",
+        "new_promise",
+        "settle_promise",
+        "promise_subscribe",
+        "module_call",
+        "type_probe",
+        "inspect"
+      ],
+      "runtime": [
+        "scr_host_closure_call",
+        "scr_host_closure_retain",
+        "scr_host_closure_release",
+        "scr_host_take_exception",
+        "scr_host_object_disposed"
+      ]
+    },
+    {
+      "abi": 3,
+      "ops": [
+        "abi",
+        "global_get",
+        "get_prop",
+        "set_prop",
+        "call",
+        "call_method",
+        "construct",
+        "instance_of",
+        "is_callable",
+        "retain",
+        "release",
+        "io_pending",
+        "io_poll",
+        "new_object",
+        "new_array",
+        "is_array",
+        "own_keys",
+        "has_own",
+        "define_getter",
+        "get_iterator",
+        "new_bytes",
+        "bytes_view",
+        "new_error",
+        "new_promise",
+        "settle_promise",
+        "promise_subscribe",
+        "module_call",
+        "type_probe",
+        "inspect",
+        "new_bytes_owned"
+      ],
+      "runtime": [
+        "scr_host_closure_call",
+        "scr_host_closure_retain",
+        "scr_host_closure_release",
+        "scr_host_take_exception",
+        "scr_host_object_disposed",
+        "scr_host_bytes_release"
+      ],
+      "layout": {
+        "ScrHostVal": { "size": 40, "fields": { "kind": 0, "flag": 4, "number": 8, "str": 16, "len": 24, "ref": 32 } },
+        "ScrHostOps": { "size": 240 },
+        "constants": {
+          "SCR_HV_UNDEFINED": 0,
+          "SCR_HV_NULL": 1,
+          "SCR_HV_BOOL": 2,
+          "SCR_HV_NUMBER": 3,
+          "SCR_HV_STRING": 4,
+          "SCR_HV_OBJECT": 5,
+          "SCR_HV_CLOSURE": 6,
+          "SCR_HV_PROGRAM": 7,
+          "SCR_HOST_OK": 0,
+          "SCR_HOST_THREW": 1
+        }
+      }
+    }
+  ]
+}

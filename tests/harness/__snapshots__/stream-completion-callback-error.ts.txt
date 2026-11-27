@@ -1,6 +1,0 @@
-stream-completion-callback-error.ts:12:10 - error SC1090: end completion callbacks whose parameter is not 'Error | null' (got 'string | undefined') is not supported yet
-
-  11 | });
-  12 | sink.end((note?: string) => console.log("ended", note));
-     |          ^~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~
-  13 | 

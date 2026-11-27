@@ -1,3 +1,4 @@
+// This file was modified from scriptc (Apache-2.0); see MODIFICATIONS.md.
 import { DATE_T, DYN, F64, STRING, VOID } from "../ir.js";
 import { defineLibFnSignatures } from "./shared.js";
 
@@ -90,4 +91,8 @@ export const dateSignatures = defineLibFnSignatures({
    * read with the offset before the transition, overlaps answer the
    * earlier instant), then TimeClip. Never throws. */
   "date.newLocal": { argTypes: [F64, F64, F64, F64, F64, F64, F64], result: DATE_T },
+"date.newParts": { argTypes: [F64, F64], result: DATE_T },
+"date.newDate": { argTypes: [DATE_T], result: DATE_T },
+"date.hostNum": { argTypes: [STRING], result: F64 },
+"date.hostStr": { argTypes: [STRING], result: STRING },
 });

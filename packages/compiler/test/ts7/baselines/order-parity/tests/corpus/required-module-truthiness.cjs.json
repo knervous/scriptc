@@ -1,6 +1,0 @@
-{
- "order": [
-  "<repo>/tests/corpus/required-module-truthiness.cjs"
- ],
- "diags": []
-}

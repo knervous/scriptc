@@ -1,0 +1,117 @@
+[package]
+name = "scriptc-host-core"
+description = "The native host for scriptc's LLVM-native programs: the host island ABI answered in Rust, no JS engine"
+version = "0.1.0"
+edition = "2024"
+license = "Apache-2.0"
+publish = false
+build = "build.rs"
+
+[lib]
+crate-type = ["rlib"]
+
+[features]
+default = ["webrtc", "window", "audio", "net", "gpu"]
+# The native window (window_*.rs: Win32, AppKit, libmatoya) with its GPU compositor and painter (blitz-ui), and
+# what needs one: fullscreen, pointer lock, the clipboard, the single-instance handoff. Without it the host runs a
+# page windowless, as on Linux: the document, its timers and frames, nothing presented.
+window = ["gpu", "dep:blitz-ui", "dep:matoya-sys", "blitz-dom/accessibility", "blitz-dom/custom-widget"]
+# The GPU stream executor (gpu-stream-wgpu, on wgpu): the scene a program's stream presents and its views, the
+# window's device handed to a render thread (relay.rs), and the Layer hooks that take wgpu types. The window needs
+# it; a windowless host without it links no wgpu at all.
+gpu = ["dep:gpu-stream-wgpu"]
+# The network (net.rs: reqwest on rustls, the HTTP cache and the cookie jar, on a tokio runtime): fetch and the
+# page's files from a server or the layer's asset base. Without it a request to an http(s) URL fails as it does
+# offline; the page's own files and data: and blob: URLs still load.
+net = ["dep:reqwest", "dep:reqwest-middleware", "dep:http-cache-reqwest"]
+# Web Audio (audio.rs on audio-engine and audio-decode; Windows for now). Without it `AudioContext` and `Audio` are
+# not defined, as on the platforms that have no audio yet.
+audio = ["dep:audio-engine", "dep:audio-decode"]
+# RTCPeerConnection and RTCDataChannel (rtc.rs) on webrtc-rs (Windows and Android; elsewhere it builds nothing).
+webrtc = ["net", "dep:webrtc", "dep:rtc", "dep:bytes", "dep:async-trait"]
+rtc = ["webrtc"]
+# A release build's process protections (harden.rs: the DLL search limited, no remote or low-integrity images).
+release-hardening = []
+
+# ---- The workspace's other crates (by path) ----
+[dependencies.gpu-stream-wgpu]
+path = "../gpu-stream-wgpu"
+optional = true
+
+[target.'cfg(any(target_os = "macos", target_os = "android", windows))'.dependencies.blitz-ui]
+path = "../blitz-ui"
+optional = true
+default-features = false
+features = ["gpu-vello"]
+
+# libmatoya's Activity and window: the window's alone, so a windowless Android build compiles no libmatoya (and needs
+# no glslangValidator). Such an archive has no JNI entry points, so no Activity can load it.
+[target.'cfg(target_os = "android")'.dependencies.matoya-sys]
+path = "../matoya-sys"
+optional = true
+
+[target.'cfg(windows)'.dependencies.audio-engine]
+path = "../audio-engine"
+optional = true
+
+[target.'cfg(windows)'.dependencies.audio-decode]
+path = "../audio-decode"
+optional = true
+# ---- end of the workspace's other crates ----
+
+[dependencies]
+# The document: Blitz at the pinned revision (an embedder's [patch] may point it at a fork: the workspace's does).
+# Its features but two in every set: svg, woff, system-fonts and text-transform-icu change layout and text, so a page
+# lays out alike under every set. accessibility (the AccessKit tree, an OS window's) and custom-widget (which needs it;
+# the host registers no widget) follow the window.
+blitz-dom = { git = "https://github.com/DioxusLabs/blitz", rev = "e72650a6e67941852fddf025295cfee30c39ea32", default-features = false, features = ["svg", "woff", "system-fonts", "file-input", "text-transform-icu"] }
+blitz-html = { git = "https://github.com/DioxusLabs/blitz", rev = "e72650a6e67941852fddf025295cfee30c39ea32" }
+blitz-traits = { git = "https://github.com/DioxusLabs/blitz", rev = "e72650a6e67941852fddf025295cfee30c39ea32" }
+blitz-paint = { git = "https://github.com/DioxusLabs/blitz", rev = "e72650a6e67941852fddf025295cfee30c39ea32" }
+pollster = "0.4"
+# The window's document painted on the CPU (blitz-paint, anyrender_vello_cpu), the capture written as PNG.
+anyrender = "0.14.0"
+anyrender_vello_cpu = { version = "0.18.0", features = ["multithreading"] }
+png = "0.17"
+# CompressionStream / DecompressionStream (streams.rs): deflate, deflate-raw and gzip.
+flate2 = "1.1"
+# The network layer (net.rs).
+reqwest = { version = "0.13", default-features = false, features = ["rustls", "charset", "cookies", "http2"], optional = true }
+# No default features: they turn on reqwest's default TLS (native-tls: OpenSSL on Android), beside the rustls above.
+reqwest-middleware = { version = "0.5.2", default-features = false, optional = true }
+http-cache-reqwest = { version = "=1.0.0-alpha.10", default-features = false, features = ["manager-cacache", "url-standard", "reqwest-middleware"], optional = true }
+tokio = { version = "1", features = ["rt", "rt-multi-thread", "net", "time"] }
+url = "2"
+http = "1"
+# crypto.randomUUID (web.rs).
+getrandom = "0.4"
+# decodeImage's ImageBitmap (bitmap.rs).
+image = { version = "0.25", default-features = false, features = ["png", "jpeg", "webp"] }
+
+# Android: libmatoya's Activity and window (window_android.rs); RTCPeerConnection (rtc.rs).
+[target.'cfg(target_os = "android")'.dependencies]
+webrtc = { version = "=0.21.1", default-features = false, features = ["runtime-tokio", "crypto-aws-lc-rs"], optional = true }
+rtc = { version = "=0.21.1", default-features = false, features = ["crypto-aws-lc-rs"], optional = true }
+bytes = { version = "1", optional = true }
+async-trait = { version = "0.1", optional = true }
+tokio = { version = "1", features = ["sync"] }
+
+[target.'cfg(target_os = "macos")'.dependencies]
+objc2 = "0.6.2"
+objc2-foundation = { version = "0.3.2", default-features = false, features = ["std", "NSString", "NSDate", "NSGeometry", "NSObject"] }
+
+# Windows: a Win32 window (window_windows.rs), the crash report's exception filter (abi.rs), AudioContext (audio.rs).
+[target.'cfg(windows)'.dependencies]
+# CSS `cursor: url(...)` images (window_windows.rs `custom_cursor`).
+anyrender_svg = "0.15"
+kurbo = "0.13"
+windows-sys = { version = "0.61.2", features = [
+  "Win32_Foundation", "Win32_Graphics_Dwm", "Win32_Graphics_Gdi", "Win32_Media", "Win32_System_Com", "Win32_System_Console", "Win32_System_DataExchange", "Win32_System_Diagnostics_Debug", "Win32_System_Diagnostics_ToolHelp",
+  "Win32_System_Kernel", "Win32_System_LibraryLoader", "Win32_System_Memory", "Win32_System_Power", "Win32_System_Registry", "Win32_System_RestartManager", "Win32_System_Threading", "Win32_Security_Cryptography", "Win32_Storage_FileSystem", "Win32_UI_HiDpi", "Win32_UI_Input_KeyboardAndMouse",
+  "Win32_UI_WindowsAndMessaging",
+] }
+webrtc = { version = "=0.21.1", default-features = false, features = ["runtime-tokio", "crypto-aws-lc-rs"], optional = true }
+rtc = { version = "=0.21.1", default-features = false, features = ["crypto-aws-lc-rs"], optional = true }
+bytes = { version = "1", optional = true }
+async-trait = { version = "0.1", optional = true }
+tokio = { version = "1", features = ["sync"] }

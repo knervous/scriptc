@@ -1,7 +1,0 @@
-{
- "order": [
-  "<repo>/tests/corpus/2021-generic-value-binding-modules/lib.ts",
-  "<repo>/tests/corpus/2021-generic-value-binding-modules/main.ts"
- ],
- "diags": []
-}

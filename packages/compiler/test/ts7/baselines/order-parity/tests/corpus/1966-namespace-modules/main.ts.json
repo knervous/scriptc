@@ -1,7 +1,0 @@
-{
- "order": [
-  "<repo>/tests/corpus/1966-namespace-modules/geo.ts",
-  "<repo>/tests/corpus/1966-namespace-modules/main.ts"
- ],
- "diags": []
-}

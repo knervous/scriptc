@@ -1,11 +1,11 @@
+// This file was modified from scriptc (Apache-2.0); see MODIFICATIONS.md.
 import { ProgramAnalysis } from "../program-analysis.js";
-import { isBundledLibraryFile } from "../default-library.js";
 import { InternalCompilerError } from "../../errors.js";
 /* Shared program lifecycle over the native TypeScript server API.
  *
- * The client's server API is snapshot-based: new API({cwd, fs}) ->
- * updateSnapshot({openProjects: [tsconfig]}) -> snapshot.getProject(...),
- * strictly tsconfig-driven. scriptc's no-tsconfig /
+ * 7.0.2 has no createProgram(roots, options): the model is
+ * new API({cwd, fs}) -> updateSnapshot({openProjects: [tsconfig]}) ->
+ * snapshot.getProject(...), strictly tsconfig-driven. scriptc's no-tsconfig /
  * extra-roots story (entry + ambient dts + fallback/overrides dts, forced
  * options) maps onto that through a SYNTHESIZED IN-MEMORY tsconfig: the
  * virtual-FS hooks serve one nonexistent tsconfig path whose "files" lists
@@ -22,55 +22,22 @@ import { dirname, join, resolve } from "node:path";
 import { Ts7Api } from "./api.js";
 import type { Ts7TimingInfo } from "./session-timing.js";
 import type { Ts7FileSystem } from "./rpc-filesystem.js";
-import type { Diagnostic, SourceFileMetadata } from "./semantic-types.js";
-import type { SourceFile } from "./ast-types.js";
 import type {
-  Ts7ProjectCompilerOptions,
-  Ts7SessionProject as Project,
-  Ts7SessionSnapshot as Snapshot,
-} from "./session.js";
+  CompilerOptions,
+  Diagnostic,
+} from "./semantic-types.js";
+import type { SourceFile } from "./ast-types.js";
+import type { Ts7SessionProject as Project, Ts7SessionSnapshot as Snapshot } from "./session.js";
 import { CheckerFacade } from "./checker.js";
-import {
-  jsxOptionName,
-  moduleDetectionKindName,
-  moduleKindName,
-  moduleResolutionKindName,
-  scriptTargetName,
-  ScriptTarget,
-} from "./enums.js";
+import { moduleDetectionKindName, moduleKindName, moduleResolutionKindName, scriptTargetName, ScriptTarget } from "./enums.js";
 import { tsgoPath } from "./session-path.js";
-import {
-  trackedAccessibleEntries,
-  trackedDirectoryExists,
-  trackedFileExists,
-  trackedReadFile,
-  trackedReadSource,
-  trackedWholeText,
-  trackedRealpath,
-} from "../input-tracker.js";
-import { packageShimDeclarationText } from "../package-shims.js";
-import { typePatchedText, typePatchFileExists } from "../type-patches/layer.js";
-import {
-  ambientDtsPath,
-  isFallbackDtsPath,
-  isFallbackModuleDtsPath,
-  overridesDtsPath,
-} from "../dts-paths.js";
-import {
-  inFileOrder,
-  reusedKeptLibDiagnostics,
-  reusedLibDiagnostics,
-  type SuppliedKind,
-} from "./lib-diagnostics.js";
-import { ts7Diagnostic } from "./diagnostic.js";
-import type { Ts7DiagnosticData } from "./session-schema.generated.js";
+import { trackedAccessibleEntries, trackedDirectoryExists, trackedFileExists, trackedReadFile, trackedRealpath } from "../input-tracker.js";
 
 /** The compiler options our createProgram accepts: TS7's CompilerOptions
  * shape (numeric enums for target/module/moduleResolution — the enums module
  * generates them from the pinned SDK) with the 5.9.3 "lib.es2025.d.ts" lib
- * spelling also accepted, plus the project options scriptc adopts that the
- * TS7 schema no longer declares (Ts7ProjectCompilerOptions). */
-export type Ts7CompilerOptions = Ts7ProjectCompilerOptions;
+ * spelling also accepted. */
+export type Ts7CompilerOptions = CompilerOptions;
 
 /* tsconfig JSON wants enum NAMES; the options object carries TS7's numeric
  * enum values. Generated name lookups preserve the SDK's reverse mappings
@@ -101,9 +68,6 @@ function serializeOptions(options: Ts7CompilerOptions): Record<string, unknown> 
       case "moduleDetection":
         out[key] = moduleDetectionKindName(value as number)?.toLowerCase() ?? value;
         break;
-      case "jsx":
-        out[key] = typeof value === "number" ? (jsxOptionName(value) ?? value) : value;
-        break;
       case "lib":
         // 5.9.3 spells lib entries "lib.es2025.d.ts"; tsconfig wants "es2025".
         out[key] = (value as string[]).map((lib) =>
@@ -112,9 +76,7 @@ function serializeOptions(options: Ts7CompilerOptions): Record<string, unknown> 
         break;
       default: {
         if (typeof value === "number" && key !== "maxNodeModuleJsDepth") {
-          throw new InternalCompilerError(
-            `ts7 createProgram: unhandled enum-valued compiler option '${key}'`,
-          );
+          throw new InternalCompilerError(`ts7 createProgram: unhandled enum-valued compiler option '${key}'`);
         }
         out[key] = value;
       }
@@ -136,9 +98,6 @@ export interface Ts7ApiOptions {
   cwd: string;
   fs: Ts7FileSystem;
   collectTiming: boolean;
-  /** False for a connection that should not use the shared checker server
-   * (`SCRIPTC_CHECKER_SERVER`), such as the syntax-only source parser's. */
-  shared?: boolean;
 }
 
 export type Ts7ApiFactory = (options: Ts7ApiOptions) => Ts7Api;
@@ -157,20 +116,6 @@ export type Ts7HostOptions = {
   } | null;
 };
 
-/** The synthesized config one load's programs share. A load builds its
- * program, then rebuilds it for each root-discovery pass, each rewrite
- * (JSX, declaration projection, the shape overlay) and its project world.
- * With a lineage every rebuild updates the SAME project instead of opening
- * a new one, so the server reports that project's changed files and the
- * session's AST cache carries every unchanged file forward; without one,
- * each program is a fresh project whose files are all new to the cache.
- * The owning load releases the lineage once its last program is disposed
- * (releaseLineage). */
-export interface Ts7ProjectLineage {
-  /** The synthesized config path this load's programs share. */
-  configPath?: string | undefined;
-}
-
 /** One spawned tsgo server plus the virtual-FS overlay serving synthesized
  * tsconfigs. Share a host across programs to pay the spawn once; the overlay
  * is a live map, so each createProgram call adds its config before taking
@@ -180,92 +125,49 @@ export class Ts7Host {
   private readonly virtualChanges = new Map<string, "created" | "changed">();
   private readonly closingProjects = new Set<string>();
   private readonly api: Ts7Api;
-  /** The text the server reads for a file (its readFile hook). */
-  private readonly readSource: (fileName: string) => string | null;
   private closed = false;
-  /** The file system shadow of the load that holds this host (rebind). */
-  private shadow: NonNullable<Ts7HostOptions["fsShadow"]> | null;
-  /** Whether the next snapshot drops every file the server read: set when
-   * the host passes to another load, whose files may read differently. */
-  private invalidateAll = false;
-  /** The working directory of the server connection. */
-  readonly cwd: string;
-  /** The loads this host has served: 1, and one more for each rebind. */
-  loads = 1;
-  /** The declaration-file module member each alias resolves to, keyed by the
-   * alias declaration's AST identity (see `declarationKey` in
-   * `frontend/fork-target.ts`), as a module name and symbol name, or null
-   * when the alias resolves elsewhere. Programs of one load share it: the
-   * load's option set and file shadow are one, so a declaration resolves the
-   * same way in every program the load builds. The next load can resolve
-   * differently, so `rebind` drops it. */
-  readonly aliasMembers = new Map<string, readonly [string, string] | null>();
-  /** Called instead of closing the connection when the host is reusable. */
-  private release: ((host: Ts7Host) => void) | undefined;
-  /** Whether a load holds this reusable host: from its creation or rebind
-   * until that load closes it. */
-  private held = true;
 
-  constructor(
-    createApi: Ts7ApiFactory,
-    options?: Ts7HostOptions,
-    release?: (host: Ts7Host) => void,
-  ) {
+  constructor(createApi: Ts7ApiFactory, options?: Ts7HostOptions) {
     const virtualFiles = this.virtualFiles;
-    this.shadow = options?.fsShadow ?? null;
-    this.cwd = options?.cwd ?? process.cwd();
-    this.release = release;
-    // A virtual file, a shadow's replacement, a package shim's declaration
-    // entry, a type-patched package file or the file on disk; null when shadowed out of existence or
-    // missing.
-    this.readSource = (fileName) => {
-      const virtual = virtualFiles.get(tsgoPath(fileName));
-      if (virtual !== undefined) return stripSourceBom(virtual);
-      const shadow = this.shadow;
-      if (shadow !== null) {
-        if (shadow.hideFile(fileName)) return null;
-        const replacement = shadow.readFile(fileName);
-        if (replacement !== undefined) return stripSourceBom(replacement);
-      }
-      // A package scriptc implements itself (package-shims.ts): its
-      // installed declaration entry re-exports the shim module, in every
-      // program the host creates.
-      const shim = packageShimDeclarationText(fileName);
-      if (shim !== undefined) return shim;
-      // A package file a project type patch edits (type-patches/layer.ts).
-      const patched = typePatchedText(fileName);
-      if (patched !== undefined) return stripSourceBom(patched);
-      const source = trackedReadSource(fileName);
-      return source === null ? null : stripSourceBom(source);
-    };
+    const shadow = options?.fsShadow ?? null;
     this.api = createApi({
       cwd: options?.cwd ?? process.cwd(),
       collectTiming: options?.collectTiming ?? false,
       fs: {
-        readFile: this.readSource,
+        // string => virtual (or shadowed) hit; null => shadowed out of
+        // existence; undefined => real-FS fallthrough.
+        readFile: (fileName) => {
+          const virtual = virtualFiles.get(tsgoPath(fileName));
+          if (virtual !== undefined) return stripSourceBom(virtual);
+          if (shadow !== null) {
+            if (shadow.hideFile(fileName)) return null;
+            const replacement = shadow.readFile(fileName);
+            if (replacement !== undefined) return stripSourceBom(replacement);
+          }
+          const source = trackedReadFile(fileName);
+          return source === null ? null : stripSourceBom(source);
+        },
         fileExists: (fileName) => {
           if (virtualFiles.has(tsgoPath(fileName))) return true;
-          if (this.shadow !== null && this.shadow.hideFile(fileName)) return false;
-          return trackedFileExists(fileName) || typePatchFileExists(fileName);
+          if (shadow !== null && shadow.hideFile(fileName)) return false;
+          return trackedFileExists(fileName);
         },
         directoryExists: (path) => trackedDirectoryExists(path),
         realpath: (path) =>
           virtualFiles.has(tsgoPath(path)) ? path : (trackedRealpath(path) ?? path),
-        getAccessibleEntries: (path) =>
-          trackedAccessibleEntries(path) ?? { files: [], directories: [] },
+        // Listings honor the shadow too: TypeScript discovers automatic
+        // @types type roots by listing node_modules/@types, and a hidden
+        // twin found that way would still join the program.
+        getAccessibleEntries: (path) => {
+          const entries = trackedAccessibleEntries(path) ?? { files: [], directories: [] };
+          if (shadow === null) return entries;
+          return {
+            files: entries.files.filter((name) => !shadow.hideFile(join(path, name))),
+            directories: entries.directories.filter((name) => !shadow.hideFile(join(path, name))),
+          };
+        },
       },
     });
-  }
-
-  /** The text of a registered in-memory file, or undefined. */
-  virtualFileText(path: string): string | undefined {
-    return this.virtualFiles.get(tsgoPath(path));
-  }
-
-  /** The text this host serves for a file (null when it serves none),
-   * without asking the server for its syntax tree. */
-  sourceText(fileName: string): string | null {
-    return this.readSource(fileName);
   }
 
   /** Registers an in-memory file served to tsgo by the virtual-FS hooks. */
@@ -273,11 +175,7 @@ export class Ts7Host {
     this.ensureOpen();
     const key = tsgoPath(path);
     if (this.virtualFiles.get(key) === content) return;
-    if (!this.virtualChanges.has(key))
-      this.virtualChanges.set(
-        key,
-        this.virtualFiles.has(key) || trackedFileExists(path) ? "changed" : "created",
-      );
+    if (!this.virtualChanges.has(key)) this.virtualChanges.set(key, this.virtualFiles.has(key) ? "changed" : "created");
     this.virtualFiles.set(key, content);
   }
 
@@ -295,30 +193,16 @@ export class Ts7Host {
     options: Ts7CompilerOptions,
     /** Internal: true when the program owns this host and dispose() closes it. */
     programOwnsHost = false,
-    /** The load's shared config: its rebuilds update one project instead of
-     * opening a new one. The load releases it (releaseLineage). */
-    lineage?: Ts7ProjectLineage,
   ): Ts7Program {
     this.ensureOpen();
     const roots = rootNames.map((r) => resolve(r));
     const first = roots[0];
     if (first === undefined) throw new InternalCompilerError("ts7 createProgram: no root files");
-    const configPath =
-      lineage?.configPath ?? join(dirname(first), `__scriptc-ts7-${nextConfigId++}.tsconfig.json`);
-    if (lineage !== undefined) lineage.configPath = configPath;
-    const configKey = tsgoPath(configPath);
-    const previousConfig = this.virtualFiles.get(configKey);
-    const configText = JSON.stringify({
-      compilerOptions: serializeOptions(options),
-      files: roots,
-      include: [],
-    });
-    this.virtualFiles.set(configKey, configText);
-    // A lineage reuses its config path, so a rebuilt config is a changed
-    // file the server must see. The lineage's first program registers it as
-    // new through openProjects instead.
-    if (lineage !== undefined && previousConfig !== undefined && previousConfig !== configText)
-      this.virtualChanges.set(configKey, "changed");
+    const configPath = join(dirname(first), `__scriptc-ts7-${nextConfigId++}.tsconfig.json`);
+    this.virtualFiles.set(
+      tsgoPath(configPath),
+      JSON.stringify({ compilerOptions: serializeOptions(options), files: roots, include: [] }),
+    );
     const created: string[] = [];
     const changed: string[] = [];
     const closeProjects: string[] = [...this.closingProjects];
@@ -328,11 +212,9 @@ export class Ts7Host {
     }
     try {
       const snapshot = this.api.updateSnapshot({
-        openProjects: [configPath],
-        closeProjects,
-        fileChanges: this.invalidateAll ? { invalidateAll: true } : { created, changed },
+        openProjects: [configPath], closeProjects,
+        fileChanges: { created, changed },
       });
-      this.invalidateAll = false;
       this.closingProjects.clear();
       this.virtualChanges.clear();
       const project = snapshot.getProject(configPath);
@@ -340,10 +222,9 @@ export class Ts7Host {
         snapshot.dispose();
         throw new InternalCompilerError(`ts7 createProgram: project failed to open for ${first}`);
       }
-      return new Ts7Program(project, snapshot, this, !programOwnsHost, configPath, lineage);
+      return new Ts7Program(project, snapshot, this, !programOwnsHost, configPath);
     } catch (error) {
-      // A lineage's config outlives one program: its load retires it.
-      if (lineage === undefined) this.releaseProgram(configPath);
+      this.releaseProgram(configPath);
       throw error;
     }
   }
@@ -356,15 +237,6 @@ export class Ts7Host {
     if (!this.closed) this.closingProjects.add(configPath);
   }
 
-  /** Retire a load's shared config once every program of the lineage is
-   * disposed: the next update closes the project and stops serving the
-   * config. */
-  releaseLineage(lineage: Ts7ProjectLineage): void {
-    const configPath = lineage.configPath;
-    lineage.configPath = undefined;
-    if (configPath !== undefined) this.releaseProgram(configPath);
-  }
-
   getTimingInfo(): Ts7TimingInfo {
     this.ensureOpen();
     return this.api.getTimingInfo();
@@ -374,47 +246,14 @@ export class Ts7Host {
     if (this.closed) throw new InternalCompilerError("Ts7Host is closed");
   }
 
-  /** Pass this pooled host to another load: its shadow replaces the last
-   * load's, the last load's in-memory files are gone, and the next snapshot
-   * reads every file again (the server reuses a file's syntax tree only for
-   * identical text). */
-  rebind(fsShadow: Ts7HostOptions["fsShadow"]): void {
-    this.ensureOpen();
-    this.held = true;
-    this.loads++;
-    this.shadow = fsShadow ?? null;
-    this.virtualFiles.clear();
-    this.virtualChanges.clear();
-    this.invalidateAll = true;
-    // Another load may resolve the same declaration differently: its option
-    // set, path mappings, provenance and file shadow are not this one's.
-    this.aliasMembers.clear();
-  }
-
-  /** Close the server connection, even when the host is pooled. */
-  closeConnection(): void {
-    this.release = undefined;
-    this.close();
-  }
-
   close(): void {
     if (this.closed) return;
-    const release = this.release;
-    if (release !== undefined) {
-      // A second close by the same load returns nothing twice.
-      if (!this.held) return;
-      this.held = false;
-      release(this);
-      return;
-    }
     this.closed = true;
-    try {
-      this.api.close();
-    } finally {
+    try { this.api.close(); }
+    finally {
       this.virtualFiles.clear();
       this.virtualChanges.clear();
       this.closingProjects.clear();
-      this.aliasMembers.clear();
     }
   }
 }
@@ -424,12 +263,7 @@ export class Ts7Host {
  * releases the snapshot (and the host, when this program spawned it). */
 export class Ts7Program {
   readonly analysis = new ProgramAnalysis();
-  /** See Ts7Host#aliasMembers: the answers this program shares with every
-   * other program of the same host load. */
-  readonly aliasMembers: Ts7Host["aliasMembers"];
   private sourceFilesCache: readonly SourceFile[] | null = null;
-  private implementationFilesCache: readonly SourceFile[] | null = null;
-  private sourceFileNamesCache: readonly string[] | null = null;
   private checkerFacade: CheckerFacade | null = null;
   private disposed = false;
 
@@ -440,14 +274,9 @@ export class Ts7Program {
     private readonly host: Ts7Host,
     private readonly sharedHost: boolean,
     private readonly configPath: string,
-    /** The load's shared config: a newer program of the lineage may still
-     * answer from this project, so disposing one program does not retire it. */
-    private readonly lineage?: Ts7ProjectLineage,
-  ) {
-    this.aliasMembers = host.aliasMembers;
-  }
+  ) {}
 
-  getCompilerOptions(): Ts7CompilerOptions {
+  getCompilerOptions(): CompilerOptions {
     return this.project.program.getCompilerOptions();
   }
 
@@ -455,46 +284,19 @@ export class Ts7Program {
     return this.project.program.getSourceFile(resolve(fileName));
   }
 
-  /** A file's text as the host serves it, without fetching its syntax
-   * tree (Ts7Host.sourceText). */
-  getSourceText(fileName: string): string | null {
-    // The caller inspects the text itself.
-    trackedWholeText(fileName);
-    return this.host.sourceText(fileName);
-  }
-
   getSourceFileNames(): readonly string[] {
-    this.snapshot.ensureActive();
-    return (this.sourceFileNamesCache ??= this.project.program.getSourceFileNames());
-  }
-
-  /** Runtime discovery needs implementation trees, while tsgo still checks
-   * the whole program. Skip conventional declaration names before asking
-   * for their ASTs; unusual declaration extensions retain the checked path.
-   * Declaration lookup and getSourceFiles() remain available on demand. */
-  getImplementationSourceFiles(): readonly SourceFile[] {
-    this.snapshot.ensureActive();
-    if (this.implementationFilesCache === null) {
-      const files: SourceFile[] = [];
-      for (const name of this.getSourceFileNames()) {
-        if (name.endsWith(".d.ts") || name.endsWith(".d.mts") || name.endsWith(".d.cts")) continue;
-        const file = this.getSourceFile(name);
-        if (file !== undefined && !file.isDeclarationFile) files.push(file);
-      }
-      this.implementationFilesCache = files;
-    }
-    return this.implementationFilesCache;
+    return this.project.program.getSourceFileNames();
   }
 
   /** Materializes every file of the program (5.9.3's getSourceFiles shape).
-   * The program serves files one by one; the result is cached, so the full-program
+   * 7.0.2 serves files one by one; the result is cached, so the full-program
    * sweeps (preflight's user-file scan) pay the transfer once. */
   getSourceFiles(): readonly SourceFile[] {
     this.snapshot.ensureActive();
     if (this.sourceFilesCache === null) {
       const program = this.project.program;
       const files: SourceFile[] = [];
-      for (const name of this.getSourceFileNames()) {
+      for (const name of program.getSourceFileNames()) {
         const file = program.getSourceFile(name);
         if (file !== undefined) files.push(file);
       }
@@ -505,10 +307,7 @@ export class Ts7Program {
 
   getTypeChecker(): CheckerFacade {
     this.snapshot.ensureActive();
-    if (this.checkerFacade === null)
-      this.checkerFacade = new CheckerFacade(this.project.checker, {
-        project: this.project.checker.project,
-      });
+    if (this.checkerFacade === null) this.checkerFacade = new CheckerFacade(this.project.checker, { project: this.project.checker.project });
     return this.checkerFacade;
   }
 
@@ -516,20 +315,8 @@ export class Ts7Program {
     return this.project.program.getSyntacticDiagnostics(sourceFile?.fileName);
   }
 
-  getBindDiagnostics(sourceFile?: SourceFile): readonly Diagnostic[] {
-    return this.project.program.getBindDiagnostics(sourceFile?.fileName);
-  }
-
   getSemanticDiagnostics(sourceFile?: SourceFile): readonly Diagnostic[] {
     return this.project.program.getSemanticDiagnostics(sourceFile?.fileName);
-  }
-
-  getSuggestionDiagnostics(sourceFile?: SourceFile): readonly Diagnostic[] {
-    return this.project.program.getSuggestionDiagnostics(sourceFile?.fileName);
-  }
-
-  getDeclarationDiagnostics(sourceFile?: SourceFile): readonly Diagnostic[] {
-    return this.project.program.getDeclarationDiagnostics(sourceFile?.fileName);
   }
 
   getGlobalDiagnostics(): readonly Diagnostic[] {
@@ -542,48 +329,6 @@ export class Ts7Program {
 
   getConfigFileParsingDiagnostics(): readonly Diagnostic[] {
     return this.project.program.getConfigFileParsingDiagnostics();
-  }
-
-  getSourceFileMetadata(fileName: string): SourceFileMetadata | undefined {
-    return this.project.program.getSourceFileMetadata(resolve(fileName));
-  }
-
-  /** The semantic and global diagnostics with the stored diagnostics of the
-   * declaration files scriptc supplies (lib-diagnostics.ts), or null. */
-  reusedLibDiagnostics(): { semantic: Ts7DiagnosticData[]; global: Ts7DiagnosticData[] } | null {
-    return this.libDiagnostics(null);
-  }
-
-  /** reusedLibDiagnostics for the `kept` files only: null without a stored
-   * answer. */
-  reusedKeptLibDiagnostics(
-    kept: ReadonlySet<string>,
-  ): { semantic: Ts7DiagnosticData[]; global: Ts7DiagnosticData[] } | null {
-    return this.libDiagnostics(kept);
-  }
-
-  private libDiagnostics(
-    kept: ReadonlySet<string> | null,
-  ): { semantic: Ts7DiagnosticData[]; global: Ts7DiagnosticData[] } | null {
-    this.snapshot.ensureActive();
-    const program = this.project.program;
-    const declarations = new Set([ambientDtsPath(), overridesDtsPath()]);
-    const names = this.getSourceFileNames();
-    const supplied = (name: string): boolean =>
-      declarations.has(tsgoPath(name)) ||
-      isFallbackDtsPath(name) ||
-      isBundledLibraryFile(this, name);
-    const sourceFile = (name: string): SourceFile | undefined => this.getSourceFile(name);
-    // By path: a supplied file that is not one of scriptc's is a default library.
-    const kind = (name: string): SuppliedKind =>
-      isFallbackModuleDtsPath(name)
-        ? "module"
-        : declarations.has(tsgoPath(name)) || isFallbackDtsPath(name)
-          ? "declarations"
-          : "library";
-    return kept === null
-      ? reusedLibDiagnostics(program, names, supplied, sourceFile, kind)
-      : reusedKeptLibDiagnostics(program, names, supplied, sourceFile, kept);
   }
 
   isSourceFileDefaultLibrary(file: SourceFile): boolean {
@@ -601,80 +346,25 @@ export class Ts7Program {
     this.checkerFacade?.dispose();
     this.checkerFacade = null;
     this.sourceFilesCache = null;
-    this.implementationFilesCache = null;
-    this.sourceFileNamesCache = null;
-    try {
-      this.snapshot.dispose();
-    } finally {
-      // A program of a lineage leaves the shared project open: the next
-      // rebuild updates it, and an older snapshot of the same load may still
-      // answer from it. The load's disposeAll retires it.
-      if (this.lineage === undefined) this.host.releaseProgram(this.configPath);
+    try { this.snapshot.dispose(); }
+    finally {
+      this.host.releaseProgram(this.configPath);
       if (!this.sharedHost) this.host.close();
     }
   }
 }
 
-/** 5.9.3's getPreEmitDiagnostics, composed from 7.1's split surface (the
+/** 5.9.3's getPreEmitDiagnostics, composed from 7.0.2's split surface (the
  * package dropped the aggregate). Order mirrors 5.9.3: config, options/
- * program, global, syntactic, semantic.
- *
- * With `keep`, a caller that discards every diagnostic of the other files
- * asks for semantic diagnostics of the kept files only: the server checks
- * only those (getDiagnosticsOfCheckedFiles), or only those not answered by
- * stored diagnostics of the supplied declaration files, and their
- * diagnostics come in the full check's order. A global diagnostic can come
- * from checking any file, so when that partial check reports one, the full
- * check answers. */
-export function getPreEmitDiagnostics(
-  program: Ts7Program,
-  keep?: (fileName: string) => boolean,
-): readonly Diagnostic[] {
-  const config = program.getConfigFileParsingDiagnostics();
-  const options = program.getProgramDiagnostics();
-  if (keep !== undefined) {
-    const kept = program.getSourceFileNames().filter((name) => keep(name));
-    if (kept.length < program.getSourceFileNames().length) {
-      const partial =
-        program.reusedKeptLibDiagnostics(new Set(kept)) ?? keptFileDiagnostics(program, kept);
-      if (partial !== null && partial.global.length === 0)
-        return [
-          ...config,
-          ...options,
-          ...program.getSyntacticDiagnostics(),
-          ...partial.semantic.map(ts7Diagnostic),
-        ];
-    }
-  }
-  const reused = program.reusedLibDiagnostics();
-  if (reused !== null)
-    return [
-      ...config,
-      ...options,
-      ...reused.global.map(ts7Diagnostic),
-      ...program.getSyntacticDiagnostics(),
-      ...reused.semantic.map(ts7Diagnostic),
-    ];
+ * program, global, syntactic, semantic. */
+export function getPreEmitDiagnostics(program: Ts7Program): readonly Diagnostic[] {
   return [
-    ...config,
-    ...options,
+    ...program.getConfigFileParsingDiagnostics(),
+    ...program.getProgramDiagnostics(),
     ...program.getGlobalDiagnostics(),
     ...program.getSyntacticDiagnostics(),
     ...program.getSemanticDiagnostics(),
   ];
-}
-
-/** The semantic diagnostics of the kept files, in the full check's order,
- * and the global diagnostics of checking them; null when the server cannot
- * check only some files. */
-function keptFileDiagnostics(
-  program: Ts7Program,
-  kept: readonly string[],
-): { semantic: Ts7DiagnosticData[]; global: Ts7DiagnosticData[] } | null {
-  const checked = program.project.program.checkedFileDiagnosticData(kept);
-  if (checked === null) return null;
-  const byFile = new Map(kept.map((name, index) => [name, checked.files[index] ?? []]));
-  return { semantic: inFileOrder(byFile), global: checked.global };
 }
 
 /** ts.findConfigFile: nearest configName walking up from searchPath. */

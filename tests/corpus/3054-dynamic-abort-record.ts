@@ -1,3 +1,4 @@
+// @dynamic
 // A signal in an options record must not turn an injected static dependency into an island value.
 interface Source { read(): number }
 interface Options { source: Source; signal?: AbortSignal; controller?: AbortController }

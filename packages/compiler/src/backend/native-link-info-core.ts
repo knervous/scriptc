@@ -1,3 +1,4 @@
+// This file was modified from scriptc (Apache-2.0); see MODIFICATIONS.md.
 import type { NativeOptimization } from "./optimization.js";
 import { join } from "node:path";
 import type { FfiProfile } from "../ffi/ffi-manifest.js";
@@ -16,6 +17,13 @@ import type { NativeTargetSpec } from "./targets.js";
 
 export interface NativeLinkFeatures {
   workers?: boolean;
+  dynamic: boolean;
+  /** The host island (scr_host_island.h) answers the program's page
+   * operations and typed host modules in place of the engine island: its
+   * units link, the engine island's do not, and the link takes a host
+   * archive that defines scr_host_ops(). Implies `dynamic`. Absent when off,
+   * so every other program keeps its link identity. */
+  hostIsland?: boolean;
   /** The young-in nursery (backend/young-nursery.ts): the SCR_YIN
    * variant of the collector unit. Absent when off. */
   youngNursery?: boolean;
@@ -31,6 +39,7 @@ export interface NativeLinkFeatures {
   fsWebStream?: boolean;
   fetch: boolean;
   eventTarget?: boolean;
+  netIsland: boolean;
   /** The WebAssembly API (scr_wasm.c). Absent when unused, so programs
    * without it keep their link identity. */
   wasm?: boolean;
@@ -126,7 +135,7 @@ export interface NativeLinkFeatures {
   dynInvoke: boolean;
   dc: boolean;
   dynAsync: boolean;
-  /** Dynamic-tier jsval operations: the scr_js_* units. Absent (not false)
+  /** Dynamic-tier jsword operations: the scr_js_* units. Absent (not false)
    * for programs without them, so their link features stay unchanged. */
   dynTier?: boolean;
   /** Checked-dynamic stream slots: the scr_stream_dyn.c unit. Absent (not
@@ -371,12 +380,14 @@ type EveryRequiredLinkFeatureOff = { readonly [Name in RequiredLinkFeatureName]:
  * its line here, and removed by deleting both. An optional key has no line
  * anywhere but the interface. */
 const NO_LINK_FEATURES: EveryRequiredLinkFeatureOff = {
+  dynamic: false,
   regex: false,
   copying: false,
   textDecoderLegacy: false,
   bigintBytes: false,
   fileHandle: false,
   fetch: false,
+  netIsland: false,
   zlib: false,
   assert: false,
   inspect: false,
@@ -513,6 +524,22 @@ export const LINK_FEATURE_REQUIREMENTS: readonly LinkFeatureRequirement[] = [
   // scr_stream_dyn.c tests values and calls JavaScript stream members through
   // the dyn-invoke unit (the checked-dynamic stream slots).
   { feature: "streamDyn", requires: ["dynInvoke"] },
+  // scr_dyn_invoke.c's untyped String methods call scr_regex.c's case
+  // conversion (scr_str_to_lower/upper); the unit links for each of these.
+  { feature: "dynInvoke", requires: ["regex"] },
+  { feature: "fetch", requires: ["regex"] },
+  { feature: "nodeIsland", requires: ["regex"] },
+  // The QuickJS island's host paths (scr_island.c) call
+  // scr_path_win32_relative, which rides the regex unit.
+  { feature: "dynamic", requires: ["regex"] },
+  // The host island is a dynamic link (the SCR_DYNAMIC builds of the shared
+  // units) whose scr_dyn_invoke.c answers the native dyn model's method calls.
+  // The host posts work back to the program's loop from its own threads
+  // (timers, fetch, workers) through the remote queue (scr_ffi_queue.c:
+  // scr_remote_post, scr_remote_set_wake, scr_instance_remote). The native
+  // dyn model's console.log of a dyn value renders it through the inspect
+  // unit (scr_insp_dyn_s), which the feature scan does not see from there.
+  { feature: "hostIsland", requires: ["dynamic", "dynInvoke", "foreignFfi", "inspect"] },
   // A Console built with inspectOptions or colorMode formats through the
   // inspect unit's console entries, and colorMode 'auto' reads the
   // environment's color depth (scr_tty_colors.c).

@@ -1,12 +1,13 @@
 // The out-of-scope builtin fences: modules a compiled binary is not going
-// to serve say WHY — runtime code evaluation (vm), the inspector protocol,
-// the deprecated domain module, and Node's underscore-prefixed
-// implementation internals — while genuinely pending surface (repl here)
-// keeps the plain not-yet wording.
-import { runInNewContext } from "node:vm";
+// to serve say WHY — V8 introspection, the inspector protocol, the bundled
+// SQLite engine, the deprecated domain module, and Node's underscore-
+// prefixed implementation internals — while genuinely pending surface
+// (stream/web here) keeps the plain not-yet wording.
+import { getHeapStatistics } from "node:v8";
 import { create } from "domain";
+import { DatabaseSync } from "node:sqlite";
 import { HTTPParser } from "_http_common";
 import { open } from "node:inspector";
-import { start } from "node:repl";
+import { ReadableStream } from "node:stream/web";
 
-console.log(runInNewContext, create, HTTPParser, open, start);
+console.log(getHeapStatistics, create, DatabaseSync, HTTPParser, open, ReadableStream);

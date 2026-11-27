@@ -1,6 +1,0 @@
-{
- "order": [
-  "<repo>/tests/corpus/5992-worker-thread-name-lifetime.mjs"
- ],
- "diags": []
-}

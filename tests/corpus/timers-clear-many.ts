@@ -45,17 +45,7 @@ const sibling = setTimeout(() => {
 }, 30);
 setTimeout(() => clearTimeout(sibling), 10);
 
-// The report waits for intervalA's third tick instead of trusting that three
-// 2 ms ticks fit before a fixed 60 ms. A process that is not scheduled for
-// some tens of milliseconds counts 1 or 2 by then: stopped for 200 ms at a
-// random moment, Node did in 8 of 300 runs and the native build in 19 of 150.
-// Every other value here is decided by the order in which timers expire, not
-// by how late they run.
-const report = (): void => {
-  if (ticksA < 3) {
-    setTimeout(report, 5);
-    return;
-  }
+setTimeout(() => {
   // Timers sharing a delay fire in registration order.
   let ordered = true;
   const lastByDelay = new Map<number, number>();
@@ -69,5 +59,4 @@ const report = (): void => {
   console.log(fired.length, wrong, ordered, ticksA, ticksB > 0, refreshedAt >= 0, siblingRan);
   const first = handles[0];
   if (first !== undefined) clearTimeout(first); // already fired: no-op
-};
-setTimeout(report, 60);
+}, 60);

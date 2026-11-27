@@ -1,6 +1,0 @@
-{
- "order": [
-  "<repo>/tests/corpus/9766-async-generator-held-promise-js.mjs"
- ],
- "diags": []
-}

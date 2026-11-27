@@ -1,6 +1,0 @@
-{
- "order": [
-  "<repo>/tests/corpus/9403-tuple-union-reads-see-writes.ts"
- ],
- "diags": []
-}

@@ -1,3 +1,4 @@
+// This file was modified from scriptc (Apache-2.0); see MODIFICATIONS.md.
 import * as ts from "../ts7/adapter.js";
 import type { Lowerer } from "./lowerer.js";
 
@@ -10,74 +11,34 @@ export function rejectStaticThis(
   message: (keyword: "this" | "super") => string,
   includeRoot = false,
   allowThis = false,
-  allowSuper = false,
 ): void {
   const visit = (node: ts.Node): void => {
     if (
-      ts.isFunctionExpression(node) ||
-      ts.isFunctionDeclaration(node) ||
-      ts.isMethodDeclaration(node) ||
-      ts.isConstructorDeclaration(node) ||
-      ts.isGetAccessor(node) ||
-      ts.isSetAccessor(node) ||
-      ts.isClassDeclaration(node) ||
-      ts.isClassExpression(node)
+      ts.isFunctionExpression(node) || ts.isFunctionDeclaration(node) ||
+      ts.isMethodDeclaration(node) || ts.isConstructorDeclaration(node) ||
+      ts.isGetAccessor(node) || ts.isSetAccessor(node) ||
+      ts.isClassDeclaration(node) || ts.isClassExpression(node)
     ) {
       return;
     }
-    if (
-      (node.kind === ts.SyntaxKind.ThisKeyword && !allowThis) ||
-      (node.kind === ts.SyntaxKind.SuperKeyword && !allowSuper)
-    ) {
+    if ((node.kind === ts.SyntaxKind.ThisKeyword && !allowThis) || node.kind === ts.SyntaxKind.SuperKeyword) {
       const keyword = node.kind === ts.SyntaxKind.ThisKeyword ? "this" : "super";
       lowerer.unsupported("SC1090", node, message(keyword));
     }
-    ts.forEachChild(node, visit);
+    node.forEachChild(visit);
   };
   if (includeRoot) visit(root);
-  else ts.forEachChild(root, visit);
+  else root.forEachChild(visit);
 }
 
 export function hasStaticThis(root: ts.Node): boolean {
   let found = false;
   const visit = (node: ts.Node): void => {
     if (node.kind === ts.SyntaxKind.ThisKeyword) found = true;
-    if (
-      (ts.isFunctionLike(node) && !ts.isArrowFunction(node)) ||
-      ts.isClassDeclaration(node) ||
-      ts.isClassExpression(node)
-    )
-      return;
-    ts.forEachChild(node, visit);
+    if ((ts.isFunctionLike(node) && !ts.isArrowFunction(node)) || ts.isClassDeclaration(node) || ts.isClassExpression(node)) return;
+    node.forEachChild(visit);
   };
-  ts.forEachChild(root, visit);
-  return found;
-}
-
-/** Whether a member's body depends on the class it is read or called
- * through: it reads `this`, or, in a static method or accessor, a `super`
- * member, which runs with the same receiver. Such a member lowers once per
- * receiver class. */
-export function usesStaticReceiver(root: ts.Node): boolean {
-  const staticMember =
-    (ts.isMethodDeclaration(root) || ts.isAccessor(root)) &&
-    ts.getModifiers(root)?.some((m) => m.kind === ts.SyntaxKind.StaticKeyword) === true;
-  let found = false;
-  const visit = (node: ts.Node): void => {
-    if (
-      node.kind === ts.SyntaxKind.ThisKeyword ||
-      (staticMember && node.kind === ts.SyntaxKind.SuperKeyword)
-    )
-      found = true;
-    if (
-      (ts.isFunctionLike(node) && !ts.isArrowFunction(node)) ||
-      ts.isClassDeclaration(node) ||
-      ts.isClassExpression(node)
-    )
-      return;
-    ts.forEachChild(node, visit);
-  };
-  ts.forEachChild(root, visit);
+  root.forEachChild(visit);
   return found;
 }
 
@@ -88,8 +49,8 @@ export function hasLexicalPrivateReference(root: ts.Node): boolean {
   const visit = (node: ts.Node): void => {
     if (ts.isClassDeclaration(node) || ts.isClassExpression(node)) return;
     if (ts.isPrivateIdentifier(node)) found = true;
-    ts.forEachChild(node, visit);
+    node.forEachChild(visit);
   };
-  ts.forEachChild(root, visit);
+  root.forEachChild(visit);
   return found;
 }

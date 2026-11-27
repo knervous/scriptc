@@ -1,6 +1,0 @@
-{
- "order": [
-  "<repo>/tests/corpus/accessor-override-narrowed-return.ts"
- ],
- "diags": []
-}

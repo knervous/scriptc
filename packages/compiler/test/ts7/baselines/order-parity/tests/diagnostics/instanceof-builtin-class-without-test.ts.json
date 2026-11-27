@@ -1,6 +1,0 @@
-{
- "order": [
-  "<repo>/tests/diagnostics/instanceof-builtin-class-without-test.ts"
- ],
- "diags": []
-}

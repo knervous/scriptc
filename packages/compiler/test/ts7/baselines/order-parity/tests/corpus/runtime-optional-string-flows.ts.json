@@ -1,6 +1,0 @@
-{
- "order": [
-  "<repo>/tests/corpus/runtime-optional-string-flows.ts"
- ],
- "diags": []
-}

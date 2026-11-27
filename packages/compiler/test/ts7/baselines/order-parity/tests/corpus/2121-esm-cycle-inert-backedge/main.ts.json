@@ -1,7 +1,0 @@
-{
- "order": [
-  "<repo>/tests/corpus/2121-esm-cycle-inert-backedge/peer.ts",
-  "<repo>/tests/corpus/2121-esm-cycle-inert-backedge/main.ts"
- ],
- "diags": []
-}

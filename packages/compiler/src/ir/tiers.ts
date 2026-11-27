@@ -1,3 +1,4 @@
+// This file was modified from scriptc (Apache-2.0); see MODIFICATIONS.md.
 /* Execution tiers (two-tier design, stage S2: report-only).
  *
  * Every IR function belongs to one of two tiers:
@@ -24,10 +25,10 @@
  * - calls of non-`dyn.*` builtins whose signatures take or return `dyn`
  *   (typed APIs implemented through dyn, leak L6 of the design). They stay
  *   boundaries until stage S1 gives them typed signatures.
- * - the jsval conversions (stage S3): `js.fromF64`, `js.fromBool`,
- *   `js.fromStr` and `js.fromBigInt` (static to jsval), `js.toF64` (jsval to number), and
+ * - the jsword conversions (stage S3): `js.fromF64`, `js.fromBool`,
+ *   `js.fromStr` and `js.fromBigInt` (static to jsword), `js.toF64` (jsword to number), and
  *   `js.fromDyn`/`js.toDyn`, which move a value between the two dynamic
- *   representations. Every other `js.*` builtin (the jsval operators) is a
+ *   representations. Every other `js.*` builtin (the jsword operators) is a
  *   dynamic operation.
  *
  * Classification of existing code. The `dyn` vocabulary is today's

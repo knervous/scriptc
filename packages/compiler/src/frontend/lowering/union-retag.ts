@@ -1,22 +1,7 @@
+// This file was modified from scriptc (Apache-2.0); see MODIFICATIONS.md.
 import { InternalCompilerError } from "../../errors.js";
-import {
-  BOOL,
-  F64,
-  STRING,
-  isUnitType,
-  shapeHasAccessorSlots,
-  typeEquals,
-  typeKey,
-} from "../../ir/ir.js";
-import type {
-  IrExpr,
-  IrFunction,
-  IrRecordShape,
-  IrStmt,
-  IrType,
-  IrUnionDef,
-  SrcLoc,
-} from "../../ir/ir.js";
+import { BOOL, F64, STRING, isUnitType, shapeHasAccessorSlots, typeEquals, typeKey } from "../../ir/ir.js";
+import type { IrExpr, IrFunction, IrRecordShape, IrStmt, IrType, IrUnionDef, SrcLoc } from "../../ir/ir.js";
 import type { WidthLift } from "./width-lift.js";
 import { discriminantField, discriminantOwners } from "../union-discriminants.js";
 
@@ -28,26 +13,13 @@ export interface UnionRetagRoute {
   values: Literal[];
 }
 
-/** A destination arm reached by checking the stored class: the source arm
- * holds the destination arm's class as a strict subclass, so the payload is
- * tested with `instanceof` and viewed through the checked downcast. */
-export interface UnionClassRoute {
-  tag: number;
-  arm: IrType & { kind: "object" };
-}
-
 export type UnionRetagArm =
   | { kind: "trap" }
   | { kind: "direct"; route: UnionRetagRoute }
   | { kind: "discriminant"; field: string; fieldType: IrType; routes: UnionRetagRoute[] }
-  | { kind: "classRoute"; routes: readonly UnionClassRoute[] }
-  /** The arm's payload enters the destination union by the plan it has on
-   * its own (`lift` is the width plan of the arm's type into the union). */
-  | { kind: "own"; lift: WidthLift };
-
-/** A source arm's routes by the values of one discriminant field, planned
- * for one conversion from the checker types of its site. */
-export type UnionSiteRoute = UnionRetagArm & { kind: "discriminant" };
+  /** A class arm whose instances may be any of several destination subclasses (an arm keeps the ancestor only, so a
+   * union of `SceneNodeObject` carries meshes and lights alike): each destination by its runtime class, else the trap. */
+  | { kind: "classes"; routes: { tag: number; className: string }[] };
 
 export interface RecordUnionWrapPlan {
   field: string;
@@ -64,8 +36,7 @@ export function planRecordUnionWrap(
   shapeOf: (id: string) => IrRecordShape | undefined,
 ): RecordUnionWrapPlan | null {
   const discriminant = to.discriminant;
-  if (!discriminant || source.tuple || source.indexValue || shapeHasAccessorSlots(source))
-    return null;
+  if (!discriminant || source.tuple || source.indexValue || shapeHasAccessorSlots(source)) return null;
   const fieldType = discriminantField(source, discriminant.field);
   if (!fieldType) return null;
   const routes: UnionRetagRoute[] = [];
@@ -73,200 +44,94 @@ export function planRecordUnionWrap(
     const arm = to.arms[tag]!;
     if (arm.kind !== "record") continue;
     const target = shapeOf(arm.shapeId);
-    if (
-      !target ||
-      target.tuple ||
-      target.indexValue ||
-      target.fields.length !== source.fields.length
-    )
-      continue;
+    if (!target || target.tuple || target.indexValue || target.fields.length !== source.fields.length) continue;
     let same = true;
     for (let i = 0; i < source.fields.length; i++) {
-      const a = source.fields[i]!,
-        b = target.fields[i]!;
-      if (a.name !== b.name || !typeEquals(a.type, b.type)) {
-        same = false;
-        break;
-      }
+      const a = source.fields[i]!, b = target.fields[i]!;
+      if (a.name !== b.name || !typeEquals(a.type, b.type)) { same = false; break; }
     }
     if (!same) continue;
     const entry = discriminant.cases.find((candidate) => candidate.tag === tag);
     if (!entry) return null;
-    routes.push({
-      tag,
-      lift: { how: arm.shapeId === source.id ? "copy" : "width" },
-      values: entry.values,
-    });
+    routes.push({ tag, lift: { how: arm.shapeId === source.id ? "copy" : "width" }, values: entry.values });
   }
   if (routes.length < 2 || discriminantOwners(to, shapeOf) === null) return null;
   return { field: discriminant.field, fieldType, routes };
-}
-
-/** A record whose layout converts into more than one arm of a
- * discriminated union. The IR keeps the discriminant field as a plain
- * string, so its layout alone cannot say which variant it is; the value of
- * the discriminant does, as in JavaScript. Every record arm the record
- * converts into (by copy or width) becomes a route selected by that arm's
- * discriminant values. A value no route names throws the catchable
- * TypeError. */
-export function planRecordUnionLift(
-  source: IrRecordShape,
-  to: IrUnionDef,
-  shapeOf: (id: string) => IrRecordShape | undefined,
-  widthLift: (src: IrType, dst: IrType) => WidthLift | null,
-): RecordUnionWrapPlan | null {
-  const discriminant = to.discriminant;
-  if (!discriminant || source.tuple || source.indexValue || shapeHasAccessorSlots(source))
-    return null;
-  const fieldType = discriminantField(source, discriminant.field);
-  if (!fieldType || discriminantOwners(to, shapeOf) === null) return null;
-  const sourceType: IrType = { kind: "record", shapeId: source.id };
-  const routes: UnionRetagRoute[] = [];
-  for (const entry of discriminant.cases) {
-    const arm = to.arms[entry.tag];
-    if (!arm || arm.kind !== "record") continue;
-    const lift = arm.shapeId === source.id ? { how: "copy" as const } : widthLift(sourceType, arm);
-    if (lift === null) continue;
-    routes.push({ tag: entry.tag, lift, values: entry.values });
-  }
-  return routes.length > 0 ? { field: discriminant.field, fieldType, routes } : null;
 }
 
 /** Pure conversion planning. A source storage tag need not denote just
  * one semantic variant: refinements can coalesce recursive record layouts.
  * When both unions name the same discriminant, its values select target
  * tags, and every selected payload conversion must independently validate.
- * `strandUnrouted` plans the CHECKED conversion for a source the destination
- * cannot hold whole: an arm no rule above places becomes a trap, which
- * throws at the conversion, instead of refusing the plan; the rules still
- * decide every arm they place. Planning never interns a helper or caches a
- * recursive assumption. */
+ * Planning never interns a helper or caches a recursive assumption. */
 export function planUnionRetag(
   from: IrUnionDef,
   to: IrUnionDef,
   shapeOf: (id: string) => IrRecordShape | undefined,
   widthLift: (src: IrType, dst: IrType) => WidthLift | null,
   trappable?: ReadonlySet<number>,
-  classRoutes?: ReadonlyMap<number, readonly UnionClassRoute[]>,
-  checkedLift?: (src: IrType, dst: IrType) => WidthLift | null,
-  siteRoutes?: ReadonlyMap<number, UnionSiteRoute>,
-  strandUnrouted = false,
+  subclassArms?: (src: IrType) => { tag: number; className: string }[],
 ): UnionRetagArm[] | null {
   const result: UnionRetagArm[] = [];
   const target: IrType = { kind: "union", unionId: to.id };
   const discriminant = from.discriminant;
-  const useDiscriminant =
-    discriminant !== undefined && discriminant.field === to.discriminant?.field;
+  const useDiscriminant = discriminant !== undefined && discriminant.field === to.discriminant?.field;
   const owners = useDiscriminant ? discriminantOwners(to, shapeOf) : null;
-  if (useDiscriminant && (owners === null || discriminantOwners(from, shapeOf) === null))
-    return null;
-  // The CHECKED conversion (strandUnrouted) strands an arm the destination
-  // cannot hold, but only one it holds NO way: an arm several destination
-  // arms accept is ambiguous rather than unrepresentable, and keeps the
-  // fence every ambiguous conversion has.
-  const destinationAccepts = (source: IrType): boolean =>
-    to.arms.some((arm) => !isUnitType(arm) && widthLift(source, arm) !== null);
+  if (useDiscriminant && (owners === null || discriminantOwners(from, shapeOf) === null)) return null;
   // Large unions otherwise compare every source arm with every destination.
   // Keys narrow the search; exact ABI equality still resolves collisions.
   // Keep small conversions allocation-light and rebuild for each registry view.
   const indexed = from.arms.length >= 4 && to.arms.length >= 8;
   const identities = new Map<string, number[]>();
-  if (indexed)
-    to.arms.forEach((arm, tag) => {
-      const key = typeKey(arm);
-      const tags = identities.get(key);
-      if (tags) tags.push(tag);
-      else identities.set(key, [tag]);
-    });
+  if (indexed) to.arms.forEach((arm, tag) => {
+    const key = typeKey(arm);
+    const tags = identities.get(key);
+    if (tags) tags.push(tag);
+    else identities.set(key, [tag]);
+  });
   for (let tag = 0; tag < from.arms.length; tag++) {
     const source = from.arms[tag]!;
     const identity = indexed
-      ? (identities
-          .get(typeKey(source))
-          ?.find((candidate) => typeEquals(to.arms[candidate]!, source)) ?? -1)
+      ? identities.get(typeKey(source))?.find((candidate) => typeEquals(to.arms[candidate]!, source)) ?? -1
       : to.arms.findIndex((arm) => typeEquals(arm, source));
     if (isUnitType(source)) {
-      result.push(
-        identity < 0
-          ? { kind: "trap" }
-          : {
-              kind: "direct",
-              route: { tag: identity, lift: { how: "copy" }, values: [] },
-            },
-      );
+      result.push(identity < 0 ? { kind: "trap" } : {
+        kind: "direct", route: { tag: identity, lift: { how: "copy" }, values: [] },
+      });
       continue;
     }
-    // A site narrowed to a subclass of this arm's class: the arm's payload
-    // carries the subclass value, and the class test selects its destination
-    // arm. The stored layout is the arm's, so the payload is narrowed before
-    // it is checked, not the destination's.
-    if (identity < 0 && classRoutes !== undefined) {
-      const routes = classRoutes.get(tag);
-      if (routes !== undefined && routes.length > 0) {
-        if (source.kind !== "object") return null;
-        for (const route of routes) {
-          const destination = to.arms[route.tag];
-          if (destination === undefined || !typeEquals(destination, route.arm)) return null;
-        }
-        result.push({ kind: "classRoute", routes });
-        continue;
-      }
+    // A class arm the destination has only subclasses of: the checker may prove the arm itself absent (an `in` test
+    // that its declared type fails), but its instances can be those subclasses; the runtime class picks the arm.
+    const subclasses = identity < 0 && source.kind === "object" ? subclassArms?.(source) ?? [] : [];
+    if (subclasses.length > (trappable?.has(tag) ? 0 : 1)) {
+      result.push({ kind: "classes", routes: subclasses });
+      continue;
     }
     // A checker-proven absent arm retains any exact representation, as
     // before. Otherwise the narrowing path needs no structural conversion.
     if (identity < 0 && trappable?.has(tag)) {
-      // An arm the assertion's own types exclude traps, unless the checked
-      // lane places it (an array arm claimed as the destination's tuple).
-      const checked =
-        checkedLift === undefined || source.kind !== "array"
-          ? null
-          : uniqueCheckedArm(to, source, checkedLift);
-      result.push(
-        checked === null || checked.lift.how !== "arrTuple"
-          ? { kind: "trap" }
-          : { kind: "direct", route: checked },
-      );
+      result.push({ kind: "trap" });
       continue;
     }
     if (useDiscriminant && discriminant && owners && source.kind === "record") {
       const entry = discriminant.cases.find((candidate) => candidate.tag === tag);
       const fieldType = discriminantField(shapeOf(source.shapeId), discriminant.field);
-      if (!entry || !fieldType) {
-        if (!strandUnrouted || destinationAccepts(source)) return null;
-        result.push({ kind: "trap" });
-        continue;
-      }
+      if (!entry || !fieldType) return null;
       const routes: UnionRetagRoute[] = [];
-      let stranded = false;
       for (const value of entry.values) {
         // Narrowing can remove semantic cases without changing a storage
         // arm. Retain that exact representation for omitted literals, while
         // explicit owners still select their own payload layouts.
-        const destination =
-          owners.get(JSON.stringify(value)) ?? (identity >= 0 ? identity : undefined);
-        if (destination === undefined) {
-          if (!strandUnrouted || destinationAccepts(source)) return null;
-          stranded = true;
-          break;
-        }
+        const destination = owners.get(JSON.stringify(value)) ?? (identity >= 0 ? identity : undefined);
+        if (destination === undefined) return null;
         const existing = routes.find((route) => route.tag === destination);
         if (existing) {
           if (!existing.values.includes(value)) existing.values.push(value);
           continue;
         }
         const lift = widthLift(source, to.arms[destination]!);
-        if (lift === null) {
-          if (!strandUnrouted || destinationAccepts(source)) return null;
-          stranded = true;
-          break;
-        }
+        if (lift === null) return null;
         routes.push({ tag: destination, lift, values: [value] });
-      }
-      // A value the destination does not name strands the whole arm: one
-      // trap covers every value the arm can hold.
-      if (stranded) {
-        result.push({ kind: "trap" });
-        continue;
       }
       if (routes.length === 1) result.push({ kind: "direct", route: routes[0]! });
       else result.push({ kind: "discriminant", field: discriminant.field, fieldType, routes });
@@ -279,46 +144,7 @@ export function planUnionRetag(
     // Unannotated unions retain the unique-width-arm rule. A discriminant
     // present on just one side cannot establish correspondence.
     const lift = widthLift(source, target);
-    // A record that fits several arms of a discriminated destination has no
-    // unique arm, and alone it enters by the value of that discriminant
-    // (planRecordUnionLift). It does the same as an arm of a union that
-    // keeps no discriminant, or another one: a union with one arm that lacks
-    // the member, a record beside `undefined`. A value no route names throws
-    // the catchable TypeError there.
-    if (lift?.how === "discriminantRoute") {
-      result.push({ kind: "own", lift });
-      continue;
-    }
-    if (!lift || lift.how !== "liftWrap") {
-      // The CHECKED widening, for a conversion that would otherwise refuse
-      // (a narrowed `{ role: string }` arm into the wider record arm its
-      // predicate claimed): exactly one destination arm may accept it, and
-      // reaching that arm validates the payload before the value enters the
-      // union. It answers only when no destination arm accepts the source by
-      // ordinary width. A source that reaches an arm that way is not refused
-      // for want of a destination: the ordinary plan declined because several
-      // arms fit or another selection rule did, and resolving that with a
-      // route that throws would reject a value the arm it fits would hold.
-      const ordinaryArm = to.arms.some(
-        (arm) => !isUnitType(arm) && widthLift(source, arm) !== null,
-      );
-      const checked =
-        checkedLift === undefined || ordinaryArm ? null : uniqueCheckedArm(to, source, checkedLift);
-      if (checked === null) {
-        // The conversion's own routes (site-discriminant.ts), asked only
-        // for an arm no rule above places.
-        const routed = siteRoutes?.get(tag);
-        if (routed === undefined) {
-          if (!strandUnrouted || ordinaryArm) return null;
-          result.push({ kind: "trap" });
-          continue;
-        }
-        result.push(routed);
-        continue;
-      }
-      result.push({ kind: "direct", route: checked });
-      continue;
-    }
+    if (!lift || lift.how !== "liftWrap") return null;
     const inner = widthLift(source, lift.arm);
     if (!inner) return null;
     result.push({ kind: "direct", route: { tag: lift.tag, lift: inner, values: [] } });
@@ -326,34 +152,13 @@ export function planUnionRetag(
   return result;
 }
 
-/** The one destination arm the source can enter by the checked widening, or
- * null when none or more than one can. Ambiguity is refused, like the
- * unique-width-arm rule it stands beside: the value's layout alone cannot
- * say which variant it is. */
-function uniqueCheckedArm(
-  to: IrUnionDef,
-  source: IrType,
-  checkedLift: (src: IrType, dst: IrType) => WidthLift | null,
-): UnionRetagRoute | null {
-  let found: UnionRetagRoute | null = null;
-  for (let tag = 0; tag < to.arms.length; tag++) {
-    const lift = checkedLift(source, to.arms[tag]!);
-    if (lift === null) continue;
-    if (found !== null) return null;
-    found = { tag, lift, values: [] };
-  }
-  return found;
-}
-
 function typeError(message: string, loc: SrcLoc): IrStmt {
   return {
     kind: "throw",
     value: {
-      kind: "libCall",
-      fn: "error.new",
+      kind: "libCall", fn: "error.new",
       args: [{ kind: "strLit", value: message, type: STRING, loc }],
-      type: { kind: "object", className: "%TypeError" },
-      loc,
+      type: { kind: "object", className: "%TypeError" }, loc,
     },
     loc,
   };
@@ -362,18 +167,13 @@ function typeError(message: string, loc: SrcLoc): IrStmt {
 function literalTest(field: IrExpr, literal: Literal, loc: SrcLoc): IrExpr {
   if (typeof literal === "string") {
     return {
-      kind: "strEq",
-      negated: false,
-      left: field,
-      right: { kind: "strLit", value: literal, type: STRING, loc },
-      type: BOOL,
-      loc,
+      kind: "strEq", negated: false, left: field,
+      right: { kind: "strLit", value: literal, type: STRING, loc }, type: BOOL, loc,
     };
   }
-  const right: IrExpr =
-    typeof literal === "number"
-      ? { kind: "numLit", value: literal, type: F64, loc }
-      : { kind: "boolLit", value: literal, type: BOOL, loc };
+  const right: IrExpr = typeof literal === "number"
+    ? { kind: "numLit", value: literal, type: F64, loc }
+    : { kind: "boolLit", value: literal, type: BOOL, loc };
   return { kind: "bin", op: "===", left: field, right, type: BOOL, loc };
 }
 
@@ -388,96 +188,34 @@ export function buildRecordUnionWrap(
   const input: IrExpr = { kind: "varRef", localId: "v.0", type: source, loc };
   const field: IrExpr = { kind: "varRef", localId: "kind.0", type: plan.fieldType, loc };
   const result: IrType = { kind: "union", unionId: to.id };
-  const body: IrStmt[] = [
-    {
-      kind: "varDecl",
-      localId: "kind.0",
-      init: {
-        kind: "recordGet",
-        obj: input,
-        shapeId: source.shapeId,
-        field: plan.field,
-        type: plan.fieldType,
-        loc,
-      },
-      loc,
-    },
-  ];
+  const body: IrStmt[] = [{ kind: "varDecl", localId: "kind.0", init: {
+    kind: "recordGet", obj: input, shapeId: source.shapeId, field: plan.field, type: plan.fieldType, loc,
+  }, loc }];
   for (const route of plan.routes) {
     let cond: IrExpr | null = null;
     for (const literal of route.values) {
       const test = literalTest(field, literal, loc);
-      cond =
-        cond === null
-          ? test
-          : { kind: "logical", op: "||", left: cond, right: test, type: BOOL, loc };
+      cond = cond === null ? test : { kind: "logical", op: "||", left: cond, right: test, type: BOOL, loc };
     }
-    if (cond === null)
-      throw new InternalCompilerError("lowerer bug: empty record discriminator route");
-    body.push({
-      kind: "if",
-      cond,
-      then: [
-        {
-          kind: "return",
-          value: {
-            kind: "unionWrap",
-            unionId: to.id,
-            tag: route.tag,
-            value: applyLift(route.lift, input, to.arms[route.tag]!),
-            type: result,
-            loc,
-          },
-          loc,
-        },
-      ],
-      else_: null,
-      loc,
-    });
+    if (cond === null) throw new InternalCompilerError("lowerer bug: empty record discriminator route");
+    body.push({ kind: "if", cond, then: [{ kind: "return", value: {
+      kind: "unionWrap", unionId: to.id, tag: route.tag,
+      value: applyLift(route.lift, input, to.arms[route.tag]!), type: result, loc,
+    }, loc }], else_: null, loc });
   }
   body.push(typeError(`invalid '${plan.field}' discriminant in record conversion`, loc));
   return {
-    name,
-    params: [{ localId: "v.0", name: "value", type: source }],
-    returnType: result,
+    name, params: [{ localId: "v.0", name: "value", type: source }], returnType: result,
     locals: [
       { id: "v.0", name: "value", type: source, mutable: false },
       { id: "kind.0", name: "kind", type: plan.fieldType, mutable: false },
-    ],
-    body,
-    loc,
+    ], body, loc,
   };
-}
-
-/** The source tags whose plan copies the payload into the same tag of an
- * equal target arm. Such a value has the same tag, payload and arm entry
- * points in both unions, so the conversion can keep the input itself. */
-export function identityRetagTags(
-  from: IrUnionDef,
-  to: IrUnionDef,
-  plan: readonly UnionRetagArm[],
-): number[] {
-  const tags: number[] = [];
-  plan.forEach((armPlan, tag) => {
-    const arm = from.arms[tag];
-    const target = to.arms[tag];
-    if (
-      armPlan.kind === "direct" &&
-      armPlan.route.tag === tag &&
-      armPlan.route.lift.how === "copy" &&
-      arm !== undefined &&
-      target !== undefined &&
-      typeEquals(arm, target)
-    )
-      tags.push(tag);
-  });
-  return tags;
 }
 
 /** Emit the already validated routes using ordinary typed IR. Each field
  * read uses the source shape; each result uses its own destination shape.
- * Arms with the same tag and type keep the input (unionRetype); other
- * exact routes retain the original payload and width routes copy it.
+ * Identity routes retain the original payload and width routes copy it.
  * The caller interns the helper before invoking this build phase. */
 export function buildUnionRetag(
   name: string,
@@ -488,226 +226,81 @@ export function buildUnionRetag(
   applyLift: (lift: WidthLift, value: IrExpr, dst: IrType) => IrExpr,
   formatType: (type: IrType) => string,
 ): IrFunction {
-  if (plan.length !== from.arms.length)
-    throw new InternalCompilerError("lowerer bug: incomplete union retag plan");
+  if (plan.length !== from.arms.length) throw new InternalCompilerError("lowerer bug: incomplete union retag plan");
   const fromType: IrType = { kind: "union", unionId: from.id };
   const toType: IrType = { kind: "union", unionId: to.id };
   const input: IrExpr = { kind: "varRef", localId: "u.0", type: fromType, loc };
   const fn: IrFunction = {
-    name,
-    params: [{ localId: "u.0", name: "u", type: fromType }],
-    returnType: toType,
-    locals: [{ id: "u.0", name: "u", type: fromType, mutable: false }],
-    body: [],
-    loc,
+    name, params: [{ localId: "u.0", name: "u", type: fromType }], returnType: toType,
+    locals: [{ id: "u.0", name: "u", type: fromType, mutable: false }], body: [], loc,
   };
-  // Arms that keep their tag and exact type need no new box: the result
-  // is the input viewed as the target union. Test them together first.
-  const identities = identityRetagTags(from, to, plan);
-  const retype: IrExpr = {
-    kind: "unionRetype",
-    fromId: from.id,
-    unionId: to.id,
-    tags: identities,
-    value: input,
-    type: toType,
-    loc,
-  };
-  if (identities.length === from.arms.length) {
-    fn.body.push({ kind: "return", value: retype, loc });
-    return fn;
-  }
-  if (identities.length > 0) {
-    let cond: IrExpr | null = null;
-    for (const tag of identities) {
-      const test: IrExpr = {
-        kind: "unionIsTag",
-        unionId: from.id,
-        tag,
-        negated: false,
-        value: input,
-        type: BOOL,
-        loc,
-      };
-      cond =
-        cond === null
-          ? test
-          : { kind: "logical", op: "||", left: cond, right: test, type: BOOL, loc };
-    }
-    fn.body.push({
-      kind: "if",
-      cond: cond!,
-      then: [{ kind: "return", value: retype, loc }],
-      else_: null,
-      loc,
-    });
-  }
-  const shared = new Set(identities);
   for (let tag = 0; tag < from.arms.length; tag++) {
-    if (shared.has(tag)) continue;
     const arm = from.arms[tag]!;
     const armPlan = plan[tag]!;
     const statements: IrStmt[] = [];
     if (armPlan.kind === "trap") {
-      const what = isUnitType(arm)
-        ? arm.kind === "undefinedT"
-          ? "undefined"
-          : "null"
-        : `a '${formatType(arm)}' value`;
-      statements.push(
-        typeError(
-          `${what} is not representable in the target union (a value narrowed or asserted past it still held it)`,
-          loc,
-        ),
-      );
+      const what = isUnitType(arm) ? (arm.kind === "undefinedT" ? "undefined" : "null") : `a '${formatType(arm)}' value`;
+      statements.push(typeError(`${what} is not representable in the target union (a value narrowed or asserted past it still held it)`, loc));
+    } else if (armPlan.kind === "classes") {
+      const payload: IrExpr = { kind: "unionNarrow", unionId: from.id, tag, value: input, type: arm, loc };
+      for (const route of armPlan.routes) {
+        const dst = to.arms[route.tag]!;
+        statements.push({
+          kind: "if", cond: { kind: "instanceOf", value: payload, className: route.className, type: BOOL, loc },
+          then: [{ kind: "return", value: {
+            kind: "unionWrap", unionId: to.id, tag: route.tag, value: applyLift({ how: "downcast" }, payload, dst), type: toType, loc,
+          }, loc }], else_: null, loc,
+        });
+      }
+      statements.push(typeError(`a '${formatType(arm)}' value of another class is not representable in the target union (a value narrowed or asserted past it still held it)`, loc));
     } else {
       const payload: IrExpr = isUnitType(arm)
-        ? {
-            kind: "unitLit",
-            unit: arm.kind === "undefinedT" ? "undefined" : "null",
-            type: arm,
-            loc,
-          }
+        ? { kind: "unitLit", unit: arm.kind === "undefinedT" ? "undefined" : "null", type: arm, loc }
         : { kind: "unionNarrow", unionId: from.id, tag, value: input, type: arm, loc };
       if (armPlan.kind === "direct") {
         const route = armPlan.route;
         statements.push({
-          kind: "return",
-          value: {
-            kind: "unionWrap",
-            unionId: to.id,
-            tag: route.tag,
-            value: applyLift(route.lift, payload, to.arms[route.tag]!),
-            type: toType,
-            loc,
-          },
-          loc,
+          kind: "return", value: {
+            kind: "unionWrap", unionId: to.id, tag: route.tag,
+            value: applyLift(route.lift, payload, to.arms[route.tag]!), type: toType, loc,
+          }, loc,
         });
-      } else if (armPlan.kind === "own") {
-        statements.push({ kind: "return", value: applyLift(armPlan.lift, payload, toType), loc });
-      } else if (armPlan.kind === "classRoute") {
-        if (arm.kind !== "object")
-          throw new InternalCompilerError("lowerer bug: class route on non-object arm");
-        // The class test proves the payload's view: the downcast reinterprets
-        // the pointer and its vtable-range guard traps a value that is not
-        // the destination class, as it does on an asserted downcast.
-        for (const route of armPlan.routes) {
-          statements.push({
-            kind: "if",
-            cond: {
-              kind: "instanceOf",
-              value: payload,
-              className: route.arm.className,
-              type: BOOL,
-              loc,
-            },
-            then: [
-              {
-                kind: "return",
-                value: {
-                  kind: "unionWrap",
-                  unionId: to.id,
-                  tag: route.tag,
-                  value: { kind: "downcast", value: payload, type: route.arm, loc },
-                  type: toType,
-                  loc,
-                },
-                loc,
-              },
-            ],
-            else_: null,
-            loc,
-          });
-        }
-        statements.push(
-          typeError(
-            `a '${formatType(arm)}' value is not representable in the target union (a value narrowed or asserted past it still held it)`,
-            loc,
-          ),
-        );
       } else {
-        if (arm.kind !== "record")
-          throw new InternalCompilerError("lowerer bug: discriminant on non-record arm");
+        if (arm.kind !== "record") throw new InternalCompilerError("lowerer bug: discriminant on non-record arm");
         // Capture once after testing the source tag. Reusing a field read
         // would repeatedly retain the payload and would obscure ownership.
         const localId = `kind.${tag}`;
         fn.locals.push({ id: localId, name: "kind", type: armPlan.fieldType, mutable: false });
         statements.push({
-          kind: "varDecl",
-          localId,
-          init: {
-            kind: "recordGet",
-            obj: payload,
-            shapeId: arm.shapeId,
-            field: armPlan.field,
-            type: armPlan.fieldType,
-            loc,
-          },
-          loc,
+          kind: "varDecl", localId,
+          init: { kind: "recordGet", obj: payload, shapeId: arm.shapeId, field: armPlan.field, type: armPlan.fieldType, loc }, loc,
         });
         const field: IrExpr = { kind: "varRef", localId, type: armPlan.fieldType, loc };
         for (const route of armPlan.routes) {
           let cond: IrExpr | null = null;
           for (const literal of route.values) {
             const test = literalTest(field, literal, loc);
-            cond =
-              cond === null
-                ? test
-                : { kind: "logical", op: "||", left: cond, right: test, type: BOOL, loc };
+            cond = cond === null ? test : { kind: "logical", op: "||", left: cond, right: test, type: BOOL, loc };
           }
-          if (cond === null)
-            throw new InternalCompilerError("lowerer bug: empty discriminant route");
+          if (cond === null) throw new InternalCompilerError("lowerer bug: empty discriminant route");
           statements.push({
-            kind: "if",
-            cond,
-            then: [
-              {
-                kind: "return",
-                value: {
-                  kind: "unionWrap",
-                  unionId: to.id,
-                  tag: route.tag,
-                  value: applyLift(route.lift, payload, to.arms[route.tag]!),
-                  type: toType,
-                  loc,
-                },
-                loc,
-              },
-            ],
-            else_: null,
-            loc,
+            kind: "if", cond,
+            then: [{ kind: "return", value: {
+              kind: "unionWrap", unionId: to.id, tag: route.tag,
+              value: applyLift(route.lift, payload, to.arms[route.tag]!), type: toType, loc,
+            }, loc }], else_: null, loc,
           });
         }
-        statements.push(
-          typeError(`invalid '${armPlan.field}' discriminant in union conversion`, loc),
-        );
+        statements.push(typeError(`invalid '${armPlan.field}' discriminant in union conversion`, loc));
       }
     }
     fn.body.push({
-      kind: "if",
-      cond: {
-        kind: "unionIsTag",
-        unionId: from.id,
-        tag,
-        negated: false,
-        value: input,
-        type: BOOL,
-        loc,
-      },
-      then: statements,
-      else_: null,
-      loc,
+      kind: "if", cond: { kind: "unionIsTag", unionId: from.id, tag, negated: false, value: input, type: BOOL, loc },
+      then: statements, else_: null, loc,
     });
   }
   fn.body.push({
-    kind: "throw",
-    value: {
-      kind: "strLit",
-      value: "scriptc: internal error: invalid union tag",
-      type: STRING,
-      loc,
-    },
-    loc,
+    kind: "throw", value: { kind: "strLit", value: "scriptc: internal error: invalid union tag", type: STRING, loc }, loc,
   });
   return fn;
 }

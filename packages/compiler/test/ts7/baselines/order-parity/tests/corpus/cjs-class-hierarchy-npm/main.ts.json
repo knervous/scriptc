@@ -1,6 +1,0 @@
-{
- "order": [
-  "<repo>/tests/corpus/cjs-class-hierarchy-npm/main.ts"
- ],
- "diags": []
-}

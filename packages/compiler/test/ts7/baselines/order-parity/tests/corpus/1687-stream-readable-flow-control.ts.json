@@ -1,6 +1,0 @@
-{
- "order": [
-  "<repo>/tests/corpus/1687-stream-readable-flow-control.ts"
- ],
- "diags": []
-}

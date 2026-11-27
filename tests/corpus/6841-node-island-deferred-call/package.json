@@ -1,1 +1,0 @@
-{ "name": "island-deferred-call", "private": true, "type": "module", "scriptc": { "packages": { "lazy-pkg": "node", "esm-lazy": "node" } } }

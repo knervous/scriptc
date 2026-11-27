@@ -1,6 +1,0 @@
-{
- "order": [
-  "<repo>/tests/corpus/8990-asserted-optional-member-reads.ts"
- ],
- "diags": []
-}

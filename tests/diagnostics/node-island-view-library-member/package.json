@@ -1,6 +1,0 @@
-{
-  "name": "node-island-view-library-member",
-  "private": true,
-  "type": "module",
-  "scriptc": { "packages": { "link-pkg": "node" } }
-}

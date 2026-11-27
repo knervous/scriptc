@@ -1,6 +1,0 @@
-{
- "order": [
-  "<repo>/tests/corpus/5748-fs-stat-throw-if-no-entry-js.cjs"
- ],
- "diags": []
-}

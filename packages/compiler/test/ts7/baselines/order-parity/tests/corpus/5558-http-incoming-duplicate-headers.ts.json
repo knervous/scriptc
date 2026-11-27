@@ -1,6 +1,0 @@
-{
- "order": [
-  "<repo>/tests/corpus/5558-http-incoming-duplicate-headers.ts"
- ],
- "diags": []
-}

@@ -1,6 +1,0 @@
-{
- "order": [
-  "<repo>/tests/corpus/6570-require-mixed-declarations.cjs"
- ],
- "diags": []
-}

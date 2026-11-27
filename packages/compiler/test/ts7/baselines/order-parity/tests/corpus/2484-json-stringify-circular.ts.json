@@ -1,6 +1,0 @@
-{
- "order": [
-  "<repo>/tests/corpus/2484-json-stringify-circular.ts"
- ],
- "diags": []
-}

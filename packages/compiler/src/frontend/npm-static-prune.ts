@@ -1,43 +1,32 @@
+// This file was modified from scriptc (Apache-2.0); see MODIFICATIONS.md.
 /* A package may declare that all of its published files have no module
- * evaluation side effects. For opted-in static npm packages, that promise
- * lets an unused `export * as name from "./module.js"` edge disappear just
- * as it does in a bundler. Keep the decision per tsgo program: preflight,
- * the link checks, and emitted module init headers must see one graph. */
+ * evaluation side effects. That promise lets an unused re-export edge
+ * (`export * as name from "./m.js"`, or `export { a, b } from "./m.js"` when
+ * none of its names is imported) disappear with the module tree behind it,
+ * just as it does in a bundler. It applies to opted-in static npm packages
+ * and, as bundlers apply it, to any source module whose nearest package.json
+ * declares `sideEffects` (a vendored source package, for instance). Keep the
+ * decision per tsgo program: preflight, the link checks, and emitted module
+ * init headers must see one graph. */
 
 import * as ts from "./ts7/adapter.js";
 import { dirname, join, relative, resolve } from "node:path";
-import { nearestPackageType, resolveBareModule } from "./resolve.js";
+import { nearestPackageType, nearestPkgJsonPath, resolveBareModule } from "./resolve.js";
 import { npmStaticPackageOfPath } from "./npm-static.js";
-import { trackedReadFile } from "./input-tracker.js";
+import { trackedReadFileOnce } from "./input-tracker.js";
 import { npmPackageNameOf } from "./workspace-registry.js";
-import { typeOnlyNamedImport } from "./type-only-imports.js";
-import { moduleSourceCandidates } from "./module-source-candidates.js";
 
 export function isPrunedNpmReexport(program: ts.Program, stmt: ts.ExportDeclaration): boolean {
   return program.analysis.prunedNpmReexports.has(stmt);
 }
 
-type PackageJson = Record<string, unknown> | null;
-
-/** Parsed package.json files by path, kept for one plan: every purity check
- * reads the metadata of its file's package again. */
-type PackageJsonCache = Map<string, PackageJson>;
-
-function packageJson(path: string, cache: PackageJsonCache): PackageJson {
-  const cached = cache.get(path);
-  if (cached !== undefined) return cached;
-  const json = readPackageJson(path);
-  cache.set(path, json);
-  return json;
-}
-
-function readPackageJson(path: string): PackageJson {
-  const source = trackedReadFile(path);
+function packageJson(path: string): Record<string, unknown> | null {
+  const source = trackedReadFileOnce(path);
   if (source === null) return null;
   try {
     const parsed: unknown = JSON.parse(source);
     return parsed !== null && typeof parsed === "object" && !Array.isArray(parsed)
-      ? (parsed as Record<string, unknown>)
+      ? parsed as Record<string, unknown>
       : null;
   } catch {
     return null;
@@ -47,9 +36,9 @@ function readPackageJson(path: string): PackageJson {
 /** sideEffects patterns use package-relative POSIX paths. A pattern with no
  * slash matches a basename at any depth, as in bundler package metadata. */
 function sideEffectPattern(pattern: string): RegExp {
-  // Unrecognized glob syntax must retain the module rather than
+  // Unrecognized glob syntax must retain the module rather than silently
   // treating a possible side-effect match as a literal path.
-  if (/[[\]\\!@+()]/.test(pattern)) throw new Error("unsupported sideEffects glob");
+  if (/[\[\]\\!@+()]/.test(pattern)) throw new Error("unsupported sideEffects glob");
   pattern = pattern.replace(/^\.\//, "");
   if (!pattern.includes("/")) pattern = "**/" + pattern;
   let source = "^";
@@ -57,10 +46,8 @@ function sideEffectPattern(pattern: string): RegExp {
     const ch = pattern[i]!;
     if (ch === "*" && pattern[i + 1] === "*") {
       i++;
-      if (pattern[i + 1] === "/") {
-        source += "(?:.*/)?";
-        i++;
-      } else source += ".*";
+      if (pattern[i + 1] === "/") { source += "(?:.*/)?"; i++; }
+      else source += ".*";
     } else if (ch === "*") source += "[^/]*";
     else if (ch === "?") source += "[^/]";
     else if (ch === "{") source += "(?:";
@@ -74,16 +61,12 @@ function sideEffectPattern(pattern: string): RegExp {
 /** A nested format scope such as dist/esm/package.json is not the package's
  * published metadata. Stay inside the resolved package while finding its
  * named root, including pnpm's realpath and workspace-linked installs. */
-function packageRootJsonPath(
-  fromFile: string,
-  packageName: string,
-  cache: PackageJsonCache,
-): string | null {
+function packageRootJsonPath(fromFile: string, packageName: string): string | null {
   let dir = dirname(resolve(fromFile));
   let root: string | null = null;
   while (npmPackageNameOf(dir.replaceAll("\\", "/")) === packageName) {
     const path = join(dir, "package.json");
-    if (packageJson(path, cache)?.["name"] === packageName) root = path;
+    if (packageJson(path)?.["name"] === packageName) root = path;
     const parent = dirname(dir);
     if (parent === dir) break;
     dir = parent;
@@ -93,24 +76,19 @@ function packageRootJsonPath(
 
 // An external package's executable sources may not be in this program.
 // Preserve the conservative whole-dependency promise in that case.
-function pureExternalPackage(
-  path: string,
-  cache: PackageJsonCache,
-  visiting = new Set<string>(),
-): boolean {
+function pureExternalPackage(path: string, visiting = new Set<string>()): boolean {
   if (visiting.has(path)) return true;
-  const json = packageJson(path, cache);
+  const json = packageJson(path);
   const value = json?.["sideEffects"];
-  if (json === null || !(value === false || (Array.isArray(value) && value.length === 0)))
-    return false;
+  if (json === null || !(value === false || Array.isArray(value) && value.length === 0)) return false;
   visiting.add(path);
   for (const field of ["dependencies", "optionalDependencies", "peerDependencies"]) {
     const dependencies = json[field];
     if (!dependencies || typeof dependencies !== "object" || Array.isArray(dependencies)) continue;
     for (const name of Object.keys(dependencies)) {
       const resolved = resolveBareModule(path, name, "js-only");
-      const root = resolved === null ? null : packageRootJsonPath(resolved.typesFile, name, cache);
-      if (root === null || !pureExternalPackage(root, cache, visiting)) return false;
+      const root = resolved === null ? null : packageRootJsonPath(resolved.typesFile, name);
+      if (root === null || !pureExternalPackage(root, visiting)) return false;
     }
   }
   return true;
@@ -118,19 +96,32 @@ function pureExternalPackage(
 
 type Demand = Set<string> | null; // null requests the entire namespace
 
-/** One module edge of a package file, resolved once per plan. */
-interface ModuleEdge {
-  spec: string;
-  dep: ts.SourceFile | null;
+/** The package scope a file's re-exports may be pruned in: an opted-in
+ * static npm package, or the nearest package.json of a source module when it
+ * declares `sideEffects` (false, or a pattern list). Null otherwise: an
+ * ordinary project file, retained whole. Keyed by the package.json path for
+ * source packages so two packages never compare equal by accident. */
+function prunablePackageOfUncached(fileName: string): string | null {
+  const npm = npmStaticPackageOfPath(fileName);
+  if (npm !== null) return npm;
+  if (npmPackageNameOf(fileName.replaceAll("\\", "/")) !== null) return null;
+  const path = nearestPkgJsonPath(fileName);
+  const value = path === null ? undefined : packageJson(path)?.["sideEffects"];
+  return value === false || Array.isArray(value) ? `source:${path}` : null;
 }
 
-/** A file's runtime module edges: its import declarations with the names
- * they request (null: the whole module), its `export … from` declarations,
- * and its `import()` and `require()` calls with one string argument. */
-interface ModuleEdges {
-  imports: (ModuleEdge & { names: readonly string[] | null })[];
-  reexports: (ModuleEdge & { stmt: ts.ExportDeclaration })[];
-  calls: ModuleEdge[];
+/** Whether any of `files` lies in a source package that declares `sideEffects`
+ * (the planner's work is then worth doing without --npm-static). */
+export function hasPrunableSourcePackage(files: readonly ts.SourceFile[]): boolean {
+  return files.some((sf) => prunablePackageOfUncached(sf.fileName)?.startsWith("source:") === true);
+}
+
+/** The package.json whose `sideEffects` governs a file, for either kind of scope. */
+function governingPackageJson(fileName: string): string | null {
+  const pkg = npmPackageNameOf(fileName) ?? npmStaticPackageOfPath(fileName);
+  if (pkg !== null) return packageRootJsonPath(fileName, pkg);
+  const scope = prunablePackageOfUncached(fileName);
+  return scope !== null && scope.startsWith("source:") ? scope.slice("source:".length) : null;
 }
 
 /** Package files outside the demanded module graph are absent from the
@@ -141,18 +132,33 @@ export function planNpmStaticReexports(
   entry: ts.SourceFile,
   files: readonly ts.SourceFile[],
   extraRoots: readonly string[],
-  resolveEdge: (
-    from: ts.SourceFile,
-    spec: string,
-    resolutionKind?: "import" | "require",
-  ) => ts.SourceFile | null,
+  resolveEdgeUncached: (from: ts.SourceFile, spec: string, resolutionKind?: "import" | "require") => ts.SourceFile | null,
 ): ts.SourceFile[] {
+  // prunablePackageOf reads package.json files and resolves workspace scopes: pure for the duration of one plan, and asked
+  // several times per file (the demand loop, canPrune for every export statement, the final filter).
+  // The same goes for resolving an import edge: every statement is resolved by the demand loop, by canPrune and again by the
+  // final pruning pass.
+  const edgeMemo = new Map<ts.SourceFile, Map<string, ts.SourceFile | null>>();
+  const resolveEdgeOnce = (from: ts.SourceFile, spec: string, resolutionKind?: "import" | "require"): ts.SourceFile | null => {
+    let perFile = edgeMemo.get(from);
+    if (perFile === undefined) { perFile = new Map(); edgeMemo.set(from, perFile); }
+    const key = `${resolutionKind ?? ""}\0${spec}`;
+    let known = perFile.get(key);
+    if (known === undefined && !perFile.has(key)) { known = resolveEdgeUncached(from, spec, resolutionKind); perFile.set(key, known); }
+    return known ?? null;
+  };
+  const prunableMemo = new Map<string, string | null>();
+  const prunablePackageOf = (fileName: string): string | null => {
+    let known = prunableMemo.get(fileName);
+    if (known === undefined) { known = prunablePackageOfUncached(fileName); prunableMemo.set(fileName, known); }
+    return known;
+  };
   const available = new Set(files);
   const demanded = new Map<ts.SourceFile, Demand>();
   const queue: ts.SourceFile[] = [];
   const request = (sf: ts.SourceFile | null, name: string | null): void => {
     if (sf === null || !available.has(sf)) return;
-    if (npmStaticPackageOfPath(sf.fileName) === null) name = null;
+    if (prunablePackageOf(sf.fileName) === null) name = null;
     const previous = demanded.get(sf);
     if (previous === null) return;
     if (previous === undefined) {
@@ -167,200 +173,146 @@ export function planNpmStaticReexports(
     }
   };
 
-  // The demand walk visits a file again whenever another of its names is
-  // requested, and every purity check walks the files it reaches: both read
-  // these edges instead of resolving the file's syntax each time.
-  const edgeMemo = new Map<ts.SourceFile, ModuleEdges>();
-  const edgesOf = (sf: ts.SourceFile): ModuleEdges => {
-    const cached = edgeMemo.get(sf);
-    if (cached !== undefined) return cached;
-    const edges: ModuleEdges = { imports: [], reexports: [], calls: [] };
-    for (const stmt of sf.statements.nodes) {
-      if (ts.isImportDeclaration(stmt)) {
-        if (!ts.isStringLiteral(stmt.moduleSpecifier)) continue;
-        const clause = stmt.importClause;
-        if (clause?.phaseModifier === ts.SyntaxKind.TypeKeyword) continue;
-        const spec = stmt.moduleSpecifier.text;
-        let names: string[] | null = null;
-        if (
-          clause !== undefined &&
-          (clause.namedBindings === undefined ||
-            !(
-              ts.isNamespaceImport(clause.namedBindings) ||
-              (ts.isNamedImports(clause.namedBindings) &&
-                clause.namedBindings.elements.nodes.length === 0)
-            )) &&
-          // `import { type A }` still loads the module, like `import {}`.
-          !typeOnlyNamedImport(stmt)
-        ) {
-          names = [];
-          if (clause.name !== undefined) names.push("default");
-          if (clause.namedBindings && ts.isNamedImports(clause.namedBindings)) {
-            for (const element of clause.namedBindings.elements.nodes) {
-              if (!element.isTypeOnly) names.push((element.propertyName ?? element.name).text);
-            }
-          }
-        }
-        edges.imports.push({ spec, dep: resolveEdge(sf, spec), names });
-      } else if (ts.isExportDeclaration(stmt)) {
-        // `export { type A } from` still loads the module under Node's
-        // type stripping; only `export type … from` erases.
-        if (
-          stmt.isTypeOnly ||
-          stmt.moduleSpecifier === undefined ||
-          !ts.isStringLiteral(stmt.moduleSpecifier)
-        )
-          continue;
-        const spec = stmt.moduleSpecifier.text;
-        edges.reexports.push({ spec, dep: resolveEdge(sf, spec), stmt });
-      }
-    }
-    for (const node of moduleSourceCandidates(program, sf).calls) {
-      if (node.arguments.nodes.length !== 1) continue;
-      const arg = node.arguments.nodes[0];
-      if (arg === undefined || !ts.isStringLiteralLike(arg)) continue;
-      const kind =
-        node.expression.kind === ts.SyntaxKind.ImportKeyword
-          ? "import"
-          : ts.isIdentifier(node.expression) && node.expression.text === "require"
-            ? "require"
-            : null;
-      if (kind !== null) edges.calls.push({ spec: arg.text, dep: resolveEdge(sf, arg.text, kind) });
-    }
-    edgeMemo.set(sf, edges);
-    return edges;
-  };
-
   for (const sf of files) {
-    if (npmStaticPackageOfPath(sf.fileName) === null) request(sf, null);
+    if (prunablePackageOf(sf.fileName) === null) request(sf, null);
   }
   request(entry, null);
   for (const path of extraRoots) request(program.getSourceFile(path) ?? null, null);
 
   const pureMemo = new Map<ts.SourceFile, boolean>();
-  const packageJsons: PackageJsonCache = new Map();
   const filePure = (sf: ts.SourceFile): boolean => {
-    const pkg = npmPackageNameOf(sf.fileName) ?? npmStaticPackageOfPath(sf.fileName);
-    const path = pkg === null ? null : packageRootJsonPath(sf.fileName, pkg, packageJsons);
-    const json = path === null ? null : packageJson(path, packageJsons);
+    const path = governingPackageJson(sf.fileName);
+    const json = path === null ? null : packageJson(path);
     const value = json?.["sideEffects"];
     if (value === false) return true;
-    if (
-      !Array.isArray(value) ||
-      !value.every((pattern) => typeof pattern === "string") ||
-      path === null
-    )
-      return false;
+    if (!Array.isArray(value) || !value.every((pattern) => typeof pattern === "string") || path === null) return false;
     const name = relative(dirname(path), sf.fileName).replaceAll("\\", "/");
-    try {
-      return !value.some((pattern: string) => sideEffectPattern(pattern).test(name));
-    } catch {
-      return false;
-    }
-  };
-  // An edge this program does not resolve: the conservative
-  // whole-dependency promise of the external package it names.
-  const externalPure = (sf: ts.SourceFile, spec: string): boolean => {
-    const resolved = resolveBareModule(sf.fileName, spec, "js-only");
-    const pkg = resolved === null ? null : npmPackageNameOf(resolved.typesFile);
-    const root =
-      pkg === null || resolved === null
-        ? null
-        : packageRootJsonPath(resolved.typesFile, pkg, packageJsons);
-    return root !== null && pureExternalPackage(root, packageJsons);
+    try { return !value.some((pattern: string) => sideEffectPattern(pattern).test(name)); }
+    catch { return false; }
   };
   // Check the actual imported closure: metadata for one file never vouches
   // for its side-effectful descendants, even across a package or a cycle.
-  // A file is pure when every file it reaches is. The walk finds the
-  // strongly connected components of the module graph (Tarjan): a finished
-  // component is pure as a whole. On the first impure file the walk stops,
-  // and every file still on its stack reaches that file, so each is impure.
-  const order = new Map<ts.SourceFile, number>();
-  const stack: ts.SourceFile[] = [];
-  /** The lowest order the file's walk reaches (Infinity for a finished
-   * component), or -1 once it reaches an impure file. */
-  const visit = (sf: ts.SourceFile): number => {
-    const known = pureMemo.get(sf);
-    if (known !== undefined) return known ? Infinity : -1;
-    const seen = order.get(sf);
-    if (seen !== undefined) return seen;
-    if (!filePure(sf)) {
-      pureMemo.set(sf, false);
-      return -1;
-    }
-    const own = order.size;
-    order.set(sf, own);
-    stack.push(sf);
-    let low = own;
-    const edges = edgesOf(sf);
-    for (const list of [edges.imports, edges.reexports, edges.calls]) {
-      for (const edge of list) {
-        const reached =
-          edge.dep !== null ? visit(edge.dep) : externalPure(sf, edge.spec) ? low : -1;
-        if (reached < 0) return -1;
-        if (reached < low) low = reached;
-      }
-    }
-    if (low === own) {
-      for (;;) {
-        const member = stack.pop()!;
-        order.delete(member);
-        pureMemo.set(member, true);
-        if (member === sf) break;
-      }
-    }
-    return low;
-  };
   const pureModuleTree = (root: ts.SourceFile): boolean => {
-    if (visit(root) >= 0) return true;
-    for (const sf of stack) pureMemo.set(sf, false);
-    stack.length = 0;
-    order.clear();
-    return false;
+    const cached = pureMemo.get(root);
+    if (cached !== undefined) return cached;
+    const visited = new Set<ts.SourceFile>();
+    const visit = (sf: ts.SourceFile): boolean => {
+      if (visited.has(sf)) return true;
+      if (pureMemo.get(sf) === false || !filePure(sf)) return false;
+      visited.add(sf);
+      const edges: { spec: string; kind?: "import" | "require" }[] = [];
+      for (const stmt of sf.statements) {
+        if (ts.isImportDeclaration(stmt) && stmt.importClause?.phaseModifier !== ts.SyntaxKind.TypeKeyword && ts.isStringLiteral(stmt.moduleSpecifier)) edges.push({ spec: stmt.moduleSpecifier.text });
+        else if (ts.isExportDeclaration(stmt) && !stmt.isTypeOnly && stmt.moduleSpecifier && ts.isStringLiteral(stmt.moduleSpecifier)) edges.push({ spec: stmt.moduleSpecifier.text });
+      }
+      ts.walkPreorder(sf, (node) => {
+        if (!ts.isCallExpression(node) || node.arguments.length !== 1) return;
+        const arg = node.arguments[0];
+        if (!arg || !ts.isStringLiteralLike(arg)) return;
+        if (node.expression.kind === ts.SyntaxKind.ImportKeyword) edges.push({ spec: arg.text, kind: "import" });
+        else if (ts.isIdentifier(node.expression) && node.expression.text === "require") edges.push({ spec: arg.text, kind: "require" });
+      });
+      return edges.every((edge) => {
+        const dep = resolveEdgeOnce(sf, edge.spec, edge.kind);
+        if (dep !== null) return visit(dep);
+        const resolved = resolveBareModule(sf.fileName, edge.spec, "js-only");
+        const pkg = resolved === null ? null : npmPackageNameOf(resolved.typesFile);
+        const root = pkg === null || resolved === null ? null : packageRootJsonPath(resolved.typesFile, pkg);
+        return root !== null && pureExternalPackage(root);
+      });
+    };
+    const pure = visit(root);
+    if (pure) for (const sf of visited) pureMemo.set(sf, true);
+    else pureMemo.set(root, false);
+    return pure;
   };
-  const canPrune = (
-    sf: ts.SourceFile,
-    stmt: ts.ExportDeclaration,
-    dep: ts.SourceFile | null,
-  ): boolean => {
-    if (dep === null || stmt.exportClause === undefined || !ts.isNamespaceExport(stmt.exportClause))
-      return false;
-    const pkg = npmStaticPackageOfPath(sf.fileName);
-    if (pkg === null || npmStaticPackageOfPath(dep.fileName) !== pkg) return false;
+  /** The names a re-export statement makes, or null for `export * from`
+   * (whose names are the target's, unknown here). Type-only elements are
+   * erased and make none. */
+  const reexportedNames = (stmt: ts.ExportDeclaration): string[] | null => {
+    const clause = stmt.exportClause;
+    if (clause === undefined) return null;
+    if (ts.isNamespaceExport(clause)) return [clause.name.text];
+    return clause.elements.filter((element) => !element.isTypeOnly).map((element) => element.name.text);
+  };
+  const canPrune = (sf: ts.SourceFile, stmt: ts.ExportDeclaration, dep: ts.SourceFile | null): boolean => {
+    if (dep === null) return false;
+    const exported = reexportedNames(stmt);
+    if (exported === null || exported.length === 0) return false;
+    const pkg = prunablePackageOf(sf.fileName);
+    if (pkg === null || prunablePackageOf(dep.fileName) !== pkg) return false;
     if (nearestPackageType(sf.fileName) !== "module") return false;
-    if (!pureModuleTree(dep)) return false;
     const names = demanded.get(sf);
-    return names !== undefined && names !== null && !names.has(stmt.exportClause.name.text);
+    if (names === undefined || names === null || exported.some((name) => names.has(name))) return false;
+    return pureModuleTree(dep);
   };
 
-  // A file is queued again only when its demand grows. Its imports and
-  // calls request the same modules every time; only a namespace re-export
-  // the new demand names stops being prunable.
-  const walked = new Set<ts.SourceFile>();
   while (queue.length > 0) {
     const sf = queue.shift()!;
-    const edges = edgesOf(sf);
-    const first = !walked.has(sf);
-    walked.add(sf);
-    if (first) {
-      for (const edge of edges.imports) {
-        if (edge.names === null) request(edge.dep, null);
-        else for (const name of edge.names) request(edge.dep, name);
+    for (const stmt of sf.statements) {
+      if (ts.isImportDeclaration(stmt)) {
+        if (!ts.isStringLiteral(stmt.moduleSpecifier)) continue;
+        const clause = stmt.importClause;
+        if (clause?.phaseModifier === ts.SyntaxKind.TypeKeyword) continue;
+        const dep = resolveEdgeOnce(sf, stmt.moduleSpecifier.text);
+        if (
+          clause === undefined ||
+          (clause.namedBindings !== undefined && (
+            ts.isNamespaceImport(clause.namedBindings) ||
+            ts.isNamedImports(clause.namedBindings) && clause.namedBindings.elements.length === 0
+          ))
+        ) {
+          request(dep, null);
+        } else {
+          if (clause.name !== undefined) request(dep, "default");
+          if (clause.namedBindings && ts.isNamedImports(clause.namedBindings)) {
+            for (const element of clause.namedBindings.elements) {
+              if (!element.isTypeOnly) request(dep, (element.propertyName ?? element.name).text);
+            }
+          }
+        }
+      } else if (ts.isExportDeclaration(stmt)) {
+        if (
+          stmt.isTypeOnly ||
+          (stmt.exportClause !== undefined && ts.isNamedExports(stmt.exportClause) &&
+            stmt.exportClause.elements.length > 0 && stmt.exportClause.elements.every((element) => element.isTypeOnly)) ||
+          stmt.moduleSpecifier === undefined || !ts.isStringLiteral(stmt.moduleSpecifier)
+        ) continue;
+        const dep = resolveEdgeOnce(sf, stmt.moduleSpecifier.text);
+        if (canPrune(sf, stmt, dep)) continue;
+        // A named re-export forwards only the names asked of this module (all
+        // of them while the module is demanded whole).
+        const names = demanded.get(sf);
+        const clause = stmt.exportClause;
+        if (clause !== undefined && ts.isNamedExports(clause) && names !== null && names !== undefined) {
+          for (const element of clause.elements) {
+            if (!element.isTypeOnly && names.has(element.name.text)) request(dep, (element.propertyName ?? element.name).text);
+          }
+        } else {
+          request(dep, null);
+        }
       }
     }
-    for (const edge of edges.reexports) {
-      if (canPrune(sf, edge.stmt, edge.dep)) continue;
-      request(edge.dep, null);
-    }
-    if (first) for (const edge of edges.calls) request(edge.dep, null);
+    ts.walkPreorder(sf, (node) => {
+      if (!ts.isCallExpression(node) || node.arguments.length !== 1) return undefined;
+      const arg = node.arguments[0];
+      if (arg === undefined || !ts.isStringLiteralLike(arg)) return undefined;
+      if (node.expression.kind === ts.SyntaxKind.ImportKeyword ||
+          ts.isIdentifier(node.expression) && node.expression.text === "require") {
+        request(resolveEdgeOnce(sf, arg.text, node.expression.kind === ts.SyntaxKind.ImportKeyword ? "import" : "require"), null);
+      }
+      return undefined;
+    });
   }
 
   const pruned = new Set<ts.ExportDeclaration>();
   for (const sf of demanded.keys()) {
-    for (const edge of edgesOf(sf).reexports)
-      if (canPrune(sf, edge.stmt, edge.dep)) pruned.add(edge.stmt);
+    for (const stmt of sf.statements) {
+      if (!ts.isExportDeclaration(stmt) || stmt.moduleSpecifier === undefined || !ts.isStringLiteral(stmt.moduleSpecifier)) continue;
+      if (canPrune(sf, stmt, resolveEdgeOnce(sf, stmt.moduleSpecifier.text))) pruned.add(stmt);
+    }
   }
   program.analysis.prunedNpmReexports.clear();
   for (const stmt of pruned) program.analysis.prunedNpmReexports.add(stmt);
-  return files.filter((sf) => npmStaticPackageOfPath(sf.fileName) === null || demanded.has(sf));
+  return files.filter((sf) => prunablePackageOf(sf.fileName) === null || demanded.has(sf));
 }

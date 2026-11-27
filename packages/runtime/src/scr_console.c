@@ -1,3 +1,4 @@
+// This file was modified from scriptc (Apache-2.0); see MODIFICATIONS.md.
 #include "scr_runtime.h"
 
 #include <math.h>
@@ -5,6 +6,9 @@
 #include <stdlib.h>
 #include <string.h>
 #include <errno.h>
+#if !defined(_WIN32)
+#include <pthread.h>
+#endif
 #if !defined(_WIN32) && !defined(__wasi__)
 #include <pthread.h>
 #include <signal.h>
@@ -79,6 +83,9 @@ extern long scr_obj_lifetime_count(void); /* scr_object.c */
 extern long scr_union_live_count(void);   /* scr_union.c */
 extern long scr_dyn_live_count(void);     /* scr_json.c */
 extern long scr_bytes_live_count(void);   /* scr_bytes.c */
+#ifdef SCR_DYNAMIC
+extern long scr_jsval_live_count(void); /* scr_island.c */
+#endif
 
 static void scr_rc_audit_at_exit(void) {
   scr_buffer_pool_reset(); /* the pool's own slab reference */
@@ -113,16 +120,22 @@ static void scr_rc_audit_at_exit(void) {
   long unions = scr_union_live_count();
   long dyns = scr_dyn_live_count();
   long bytes = scr_bytes_live_count();
+#ifdef SCR_DYNAMIC
+  long jsvals = scr_jsval_live_count();
+#else
+  long jsvals = 0;
+#endif
   if (strings != 0 || arrays != 0 || maps != 0 || boxes != 0 || closures != 0 ||
-      objects != 0 || unions != 0 || dyns != 0 || bytes != 0) {
+      objects != 0 || unions != 0 || dyns != 0 || bytes != 0 || jsvals != 0) {
     scr_stdout_settle();
     fflush(stdout);
     fprintf(stderr,
             "scriptc RC AUDIT FAILED: %ld heap string(s), %ld array(s), "
             "%ld map(s), %ld box(es), %ld closure(s), %ld object(s), "
-            "%ld union(s), %ld dyn value(s), %ld bytes value(s) live at exit\n",
+            "%ld union(s), %ld dyn value(s), %ld bytes value(s), "
+            "%ld island value(s) live at exit\n",
             strings, arrays, maps, boxes, closures, objects, unions, dyns,
-            bytes);
+            bytes, jsvals);
     _Exit(99);
   }
 }
@@ -138,6 +151,35 @@ static void scr_flush_at_exit(void) {
 static void scr_collect_cycles_at_exit(void) {
   if (scr_exit_frees()) scr_collect_cycles();
 }
+
+#if defined(SCR_THREAD_INSTANCES) && !defined(SCR_LIB)
+/* The instance's exit list (scr_runtime.h scr_atexit): run LIFO, like
+ * atexit, and emptied, so a function registered while it runs lands in a
+ * fresh list that runs next. */
+#define SCR_INSTANCE_EXITS 64
+static SCR_TL void (*scr_instance_exits[SCR_INSTANCE_EXITS])(void);
+static SCR_TL size_t scr_instance_nexits;
+
+void scr_instance_atexit(void (*fn)(void)) {
+  for (size_t i = 0; i < scr_instance_nexits; i++) {
+    if (scr_instance_exits[i] == fn) return;
+  }
+  if (scr_instance_nexits == SCR_INSTANCE_EXITS) {
+    scr_trap("scriptc: internal error: instance exit registry overflow\n");
+  }
+  scr_instance_exits[scr_instance_nexits++] = fn;
+}
+
+static void scr_instance_exit_list_run(void) {
+  while (scr_instance_nexits > 0) {
+    void (*fn)(void) = scr_instance_exits[--scr_instance_nexits];
+    scr_instance_exits[scr_instance_nexits] = NULL;
+    fn();
+  }
+}
+
+void scr_thread_leave(void) { scr_instance_exit_list_run(); }
+#endif
 
 #ifdef _WIN32
 static UINT scr_original_console_output_cp = 0;
@@ -174,7 +216,7 @@ static void scr_enable_utf8_console_output(void) {
 
 void scr_runtime_abi_v52(void) {}
 
-void scr_init(void) {
+static void scr_init_process(void) {
 #ifdef SCR_WORKERS
   /* Generated inline exception polls read the active cell directly. */
   scr_exc_swap_cell(NULL);
@@ -201,7 +243,7 @@ void scr_init(void) {
    * before returning, so this buffer is never observable as delayed output:
    * Node hands each console.log/process.stdout.write chunk to its backing
    * stream immediately. */
-  static char outbuf[1 << 16];
+  static char outbuf[1 << 16]; /* the process's: stdout outlives every thread */
   setvbuf(stdout, outbuf, _IOFBF, sizeof outbuf);
 #if SCR_STDIO_DIRECT
   /* --stdout-buffering: a destination that is not a terminal keeps its bytes
@@ -263,14 +305,56 @@ void scr_init(void) {
    * after the 'exit' listeners and the flush, matching Node, where
    * atexit(ResetStdio) runs at libc exit after the listeners, so output a
    * listener writes still goes to the terminal in the mode the program left
-   * it in. */
+   * it in. Thread-instanced executables keep these
+   * hooks on the process (they run once, whichever thread exits), after
+   * the exiting thread's own list. */
+#if defined(SCR_THREAD_INSTANCES)
+  atexit(scr_process_stdin_restore_mode);
+  atexit(scr_flush_at_exit);
+#ifdef SCR_RC_AUDIT
+  atexit(scr_rc_audit_at_exit);
+#endif
+  /* The exiting thread's instance: its own collection and cleanup. */
+  atexit(scr_instance_exit_list_run);
+#else
   scr_atexit(scr_process_stdin_restore_mode);
   scr_atexit(scr_flush_at_exit);
 #ifdef SCR_RC_AUDIT
   scr_atexit(scr_rc_audit_at_exit);
 #endif
   scr_atexit(scr_collect_cycles_at_exit);
+#endif
 }
+
+#if defined(SCR_THREAD_INSTANCES)
+#ifdef _WIN32
+static INIT_ONCE scr_init_once = INIT_ONCE_STATIC_INIT;
+static BOOL CALLBACK scr_init_once_run(PINIT_ONCE once, PVOID param, PVOID *ctx) {
+  (void)once; (void)param; (void)ctx;
+  scr_init_process();
+  return TRUE;
+}
+#else
+static pthread_once_t scr_init_once = PTHREAD_ONCE_INIT;
+#endif
+static SCR_TL bool scr_instance_inited;
+
+/* Every program entry calls this: the process's stdio setup once, then this
+ * thread's instance (its exit list starts with its cycle collection, which
+ * runs last). */
+void scr_init(void) {
+#ifdef _WIN32
+  InitOnceExecuteOnce(&scr_init_once, scr_init_once_run, NULL, NULL);
+#else
+  (void)pthread_once(&scr_init_once, scr_init_process);
+#endif
+  if (scr_instance_inited) return;
+  scr_instance_inited = true;
+  scr_instance_atexit(scr_collect_cycles_at_exit);
+}
+#else
+void scr_init(void) { scr_init_process(); }
+#endif
 #endif /* !SCR_LIB — a library artifact never touches host stdio modes/buffering and
         * registers no atexit handlers: scr_init and its exit hooks (the
         * audit's _Exit(99) included) are executable-lane machinery; the

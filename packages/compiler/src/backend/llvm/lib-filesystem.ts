@@ -1,3 +1,4 @@
+// This file was modified from scriptc (Apache-2.0); see MODIFICATIONS.md.
 /* Focused LLVM library-call emission extracted from emitter.ts. */
 import { InternalCompilerError } from "../../errors.js";
 import { undefinedArmTag } from "../../ir/analysis.js";
@@ -84,6 +85,19 @@ export function emitWebLibCall(host: LlvmEmitterContext, e: LibCallExpr): LlValu
     const raw = B.tmp();
     B.line(`${raw} = call ptr @${sym}(ptr ${source.name}${extra})`);
     const out = host.own({ name: raw, type: e.type });
+    host.emitPendingCheck();
+    return out;
+  }
+  // The handful with non-generic shapes first.
+  if (e.fn === "island.castFail") {
+    // The deferred boundary failure: the island value was evaluated
+    // (its side effects are real), the throw is unconditional
+    // (catchable TypeError naming the target type), and the typed
+    // dummy is NULL — the pending check abandons it.
+    const args = e.args.map((a) => host.emitExpr(a));
+    host.declare(`declare void @scr_jsval_cast_fail(ptr, ptr)`);
+    B.line(`call void @scr_jsval_cast_fail(ptr ${args[0]!.name}, ptr ${args[1]!.name})`);
+    const out = host.own({ name: "null", type: e.type });
     host.emitPendingCheck();
     return out;
   }

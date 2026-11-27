@@ -1,6 +1,0 @@
-{
- "order": [
-  "<repo>/tests/corpus/fs-read-sync-bigint-position.cjs"
- ],
- "diags": []
-}

@@ -1,6 +1,0 @@
-{
- "order": [
-  "<repo>/tests/fixtures/npm/cases/esbuild-require/main.ts"
- ],
- "diags": []
-}

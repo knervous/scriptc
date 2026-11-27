@@ -1,6 +1,0 @@
-{
- "order": [
-  "<repo>/tests/corpus/frozen-array-immutable-noops.ts"
- ],
- "diags": []
-}

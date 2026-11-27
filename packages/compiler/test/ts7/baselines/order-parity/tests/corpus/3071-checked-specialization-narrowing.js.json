@@ -1,6 +1,0 @@
-{
- "order": [
-  "<repo>/tests/corpus/3071-checked-specialization-narrowing.js"
- ],
- "diags": []
-}

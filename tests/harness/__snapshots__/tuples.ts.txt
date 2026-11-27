@@ -1,3 +1,10 @@
+tuples.ts:11:18 - error SC1090: tuple indexing with a non-literal index (tuples are fixed-shape — use t[0], t[1], ...) is not supported yet
+
+  10 | let i = 0;
+  11 | console.log(pair[i]);
+     |                  ^
+  12 | pair[i] = "b";
+
 tuples.ts:12:6 - error SC1090: tuple indexing with a non-literal index (tuples are fixed-shape — use t[0], t[1], ...) is not supported yet
 
   11 | console.log(pair[i]);
@@ -5,19 +12,23 @@ tuples.ts:12:6 - error SC1090: tuple indexing with a non-literal index (tuples a
      |      ^
   13 | 
 
-tuples.ts:15:7 - error SC2001: values of type '[string, (number | undefined)?]' cannot be compiled yet (supported: number, string, boolean, arrays, Maps, Sets, RegExp, Dates, functions, classes, records, unions of those, and 'unknown')
+tuples.ts:15:7 - error SC2011: values of type '[string, (number | undefined)?]' have no static representation but run in the embedded dynamic engine, which this build does not include
 
   14 | // Optional and rest elements have no fixed arity/shape.
   15 | const opt: [string, number?] = ["x"];
      |       ^~~
   16 | const rest: [string, ...number[]] = ["y", 1, 2];
 
-tuples.ts:16:7 - error SC2001: values of type '[string, ...number[]]' cannot be compiled yet (supported: number, string, boolean, arrays, Maps, Sets, RegExp, Dates, functions, classes, records, unions of those, and 'unknown')
+  hint: build with --dynamic to run these values in the embedded engine (adds ~620KB to the binary), or restate the type inside the static surface (https://scriptc.dev/limitations describes the boundary)
+
+tuples.ts:16:7 - error SC2011: values of type '[string, ...number[]]' have no static representation but run in the embedded dynamic engine, which this build does not include
 
   15 | const opt: [string, number?] = ["x"];
   16 | const rest: [string, ...number[]] = ["y", 1, 2];
      |       ^~~~
   17 | 
+
+  hint: build with --dynamic to run these values in the embedded engine (adds ~620KB to the binary), or restate the type inside the static surface (https://scriptc.dev/limitations describes the boundary)
 
 tuples.ts:25:15 - error SC1090: spreading a variable-length value into a fixed tuple literal is not supported yet
 
@@ -26,16 +37,23 @@ tuples.ts:25:15 - error SC1090: spreading a variable-length value into a fixed t
      |               ^~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~
   26 | 
 
-tuples.ts:29:13 - error SC1090: '.join()' on arrays of this element type (number, string, boolean and Date arrays join — unions of those with undefined/null arms too, the units printing empty like JS) is not supported yet
+tuples.ts:31:13 - error SC1090: '.length' of a computed tuple expression (the arity is a constant — bind the tuple to a const first) is not supported yet
 
-  28 | const recs: { id: number }[] = [{ id: 1 }];
-  29 | console.log(recs.join(","));
+  30 | }
+  31 | console.log(mk().length);
+     |             ^~~~~~~~~~~
+  32 | 
+
+tuples.ts:35:13 - error SC1090: '.join()' on arrays of this element type (number, string, and boolean arrays join — unions of those with undefined/null arms too, the units printing empty like JS) is not supported yet
+
+  34 | const recs: { id: number }[] = [{ id: 1 }];
+  35 | console.log(recs.join(","));
      |             ^~~~~~~~~~~~~~
-  30 | const tuples: [string, string][] = [["k", "v"]];
+  36 | const tuples: [string, string][] = [["k", "v"]];
 
-tuples.ts:31:13 - error SC1090: '.join()' on arrays of this element type (number, string, boolean and Date arrays join — unions of those with undefined/null arms too, the units printing empty like JS) is not supported yet
+tuples.ts:37:13 - error SC1090: '.join()' on arrays of this element type (number, string, and boolean arrays join — unions of those with undefined/null arms too, the units printing empty like JS) is not supported yet
 
-  30 | const tuples: [string, string][] = [["k", "v"]];
-  31 | console.log(tuples.join(";"));
+  36 | const tuples: [string, string][] = [["k", "v"]];
+  37 | console.log(tuples.join(";"));
      |             ^~~~~~~~~~~~~~~~
-  32 | // Map elements compile through the same REF storage as function elements.
+  38 | // Map elements compile through the same REF storage as function elements.

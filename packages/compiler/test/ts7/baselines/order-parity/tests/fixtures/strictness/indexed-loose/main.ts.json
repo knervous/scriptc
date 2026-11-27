@@ -1,6 +1,0 @@
-{
- "order": [
-  "<repo>/tests/fixtures/strictness/indexed-loose/main.ts"
- ],
- "diags": []
-}

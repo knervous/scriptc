@@ -1,6 +1,0 @@
-{
- "order": [
-  "<repo>/tests/corpus/immediate-clears-and-throws-keep-order.ts"
- ],
- "diags": []
-}

@@ -1,6 +1,0 @@
-{
- "order": [
-  "<repo>/tests/corpus/arena-callback-cycle.ts"
- ],
- "diags": []
-}

@@ -1,6 +1,0 @@
-{
- "order": [
-  "<repo>/tests/corpus/global-object-binding-reads.js"
- ],
- "diags": []
-}

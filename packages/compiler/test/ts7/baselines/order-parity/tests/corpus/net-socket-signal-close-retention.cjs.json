@@ -1,6 +1,0 @@
-{
- "order": [
-  "<repo>/tests/corpus/net-socket-signal-close-retention.cjs"
- ],
- "diags": []
-}

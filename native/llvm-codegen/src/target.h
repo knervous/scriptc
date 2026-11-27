@@ -1,3 +1,4 @@
+// This file was modified from scriptc (Apache-2.0); see MODIFICATIONS.md.
 #pragma once
 
 #include "llvm/ADT/StringRef.h"
@@ -47,6 +48,7 @@ void setProfileLayout(bool Enabled);
 llvm::CodeGenOptLevel codeGenLevel(llvm::StringRef OptLevel);
 std::unique_ptr<llvm::TargetMachine>
 createTargetMachine(llvm::StringRef Triple, llvm::StringRef OptLevel,
-                    std::string &Error, bool RequireAllowed = true);
+                    std::string &Error, bool RequireAllowed = true,
+                    llvm::StringRef Cpu = "generic");
 
 } // namespace scriptc

@@ -1,6 +1,0 @@
-{
- "order": [
-  "<repo>/tests/corpus/6470-promise-reject-async-return.ts"
- ],
- "diags": []
-}

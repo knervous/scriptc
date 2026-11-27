@@ -1,6 +1,0 @@
-{
- "order": [
-  "<repo>/tests/diagnostics/tuple-union-position-handle-beside-record.ts"
- ],
- "diags": []
-}

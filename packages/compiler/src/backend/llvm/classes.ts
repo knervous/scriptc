@@ -1,3 +1,4 @@
+// This file was modified from scriptc (Apache-2.0); see MODIFICATIONS.md.
 import {
   ARENA_RC,
   arenaDisposeLines,
@@ -333,6 +334,11 @@ export function vtEntriesFor(meta: LlClassMeta): { slot: LlVtSlot; impl: LlClass
     for (let c: LlClassMeta | null = meta; c; c = c.base) {
       if (c.def.methods?.includes(slot.method) && !c.def.abstractMethods?.includes(slot.method)) {
         return { slot, impl: c };
+      }
+      // An override reachability pruned: overrides stay reachable only on classes the program can construct
+      // (noteVirtualEdge), so no instance carries this vtable and the entry never dispatches.
+      if (c.def.declaredMethods?.includes(slot.method) && !c.def.methods?.includes(slot.method)) {
+        return { slot, impl: null };
       }
     }
     if (meta.def.abstract === true || !meta.constructorRetained) return { slot, impl: null };
@@ -1011,6 +1017,11 @@ function sameFieldPrefix(base: IrClassDef, cls: IrClassDef): boolean {
   );
 }
 
+/** The newFn initialization stores for fields whose type ADMITS undefined
+ * (undefFieldInitLineC's LLVM twin): undefined-armed union fields start
+ * at the interned unit instance; dyn fields start at native undefined;
+ * jsval fields (an `any` class field under --dynamic) start at the engine's
+ * undefined cell. */
 function undefFieldInits(
   host: ClassHost,
   meta: LlClassMeta,
@@ -1053,10 +1064,11 @@ export function classUndefinedFieldInits(
       );
       return;
     }
-    if (f.type.kind === "dyn") {
-      host.declare("declare ptr @scr_dyn_undefined()");
+    if (f.type.kind === "jsval" || f.type.kind === "dyn") {
+      const undefinedFn = f.type.kind === "dyn" ? "scr_dyn_undefined" : "scr_jsval_undefined";
+      host.declare(`declare ptr @${undefinedFn}()`);
       out.push(
-        `  ${prefix}v${i} = call ptr @scr_dyn_undefined()`,
+        `  ${prefix}v${i} = call ptr @${undefinedFn}()`,
         `  ${prefix}${i} = getelementptr inbounds %${mangleClassStruct(meta.def.name)}, ptr ${object}, i64 0, i32 ${index}`,
         `  store ptr ${prefix}v${i}, ptr ${prefix}${i} ; ${llvmCommentText(f.name)} starts undefined`,
       );

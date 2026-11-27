@@ -1,3 +1,4 @@
+// This file was modified from scriptc (Apache-2.0); see MODIFICATIONS.md.
 // Trivia and UTF-16 positions follow the pinned TypeScript scanner.
 // TypeScript is Copyright Microsoft Corporation, licensed under Apache-2.0.
 
@@ -6,22 +7,10 @@ export function astLineBreak(code: number): boolean {
 }
 
 function whiteSpace(code: number): boolean {
-  return (
-    code === 9 ||
-    code === 11 ||
-    code === 12 ||
-    code === 32 ||
-    code === 133 ||
-    code === 160 ||
+  return code === 9 || code === 11 || code === 12 || code === 32 || code === 133 || code === 160 ||
     // The pinned scanner's CharacterCodes.ogham is U+1685.
-    code === 0x1685 ||
-    (code >= 0x2000 && code <= 0x200b) ||
-    code === 0x202f ||
-    code === 0x205f ||
-    code === 0x3000 ||
-    code === 0xfeff ||
-    astLineBreak(code)
-  );
+    code === 0x1685 || (code >= 0x2000 && code <= 0x200b) || code === 0x202f ||
+    code === 0x205f || code === 0x3000 || code === 0xfeff || astLineBreak(code);
 }
 
 function conflictMarker(text: string, pos: number): boolean {
@@ -35,12 +24,7 @@ function conflictMarker(text: string, pos: number): boolean {
 
 /** Skip precisely the trivia accepted before an AST token. Positions are
  * UTF-16 offsets, including for astral characters and lone surrogates. */
-export function astSkipTrivia(
-  text: string,
-  pos: number,
-  stopAtComments: boolean,
-  inJSDoc: boolean,
-): number {
+export function astSkipTrivia(text: string, pos: number, stopAtComments: boolean, inJSDoc: boolean): number {
   if (pos < 0) return pos;
   let canConsumeStar = false;
   while (pos < text.length) {
@@ -51,10 +35,7 @@ export function astSkipTrivia(
       canConsumeStar = inJSDoc;
       continue;
     }
-    if (whiteSpace(code)) {
-      pos++;
-      continue;
-    }
+    if (whiteSpace(code)) { pos++; continue; }
     if (code === 47 && !stopAtComments) {
       const next = text.charCodeAt(pos + 1);
       if (next === 47) {
@@ -66,10 +47,7 @@ export function astSkipTrivia(
       if (next === 42) {
         pos += 2;
         while (pos < text.length) {
-          if (text.charCodeAt(pos) === 42 && text.charCodeAt(pos + 1) === 47) {
-            pos += 2;
-            break;
-          }
+          if (text.charCodeAt(pos) === 42 && text.charCodeAt(pos + 1) === 47) { pos += 2; break; }
           pos++;
         }
         canConsumeStar = false;
@@ -95,11 +73,7 @@ export function astSkipTrivia(
       while (pos < text.length && !astLineBreak(text.charCodeAt(pos))) pos++;
       continue;
     }
-    if (code === 42 && canConsumeStar) {
-      pos++;
-      canConsumeStar = false;
-      continue;
-    }
+    if (code === 42 && canConsumeStar) { pos++; canConsumeStar = false; continue; }
     break;
   }
   return pos;

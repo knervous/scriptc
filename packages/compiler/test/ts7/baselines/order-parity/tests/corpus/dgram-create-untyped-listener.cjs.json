@@ -1,6 +1,0 @@
-{
- "order": [
-  "<repo>/tests/corpus/dgram-create-untyped-listener.cjs"
- ],
- "diags": []
-}

@@ -1,3 +1,4 @@
+// This file was modified from scriptc (Apache-2.0); see MODIFICATIONS.md.
 /* The frontend's ts.* surface uses scriptc's concrete native AST, semantic
  * objects and session lifecycle over the pinned TypeScript 7 protocol. It
  * Lowering modules use a namespace import to retain both values and types:
@@ -15,8 +16,7 @@
  * prevents their ASTs from entering this frontend.
  *
  * APIs replaced by dedicated services:
- *   - ts.transpileModule — the comptime evaluator runs TypeScript 7's
- *     command line (comptime.ts).
+ *   - ts.transpileModule — lower-comptime keeps 5.9.3 (island).
  *   - ts.resolveModuleName / ts.resolveTypeReferenceDirective — replaced by
  *     resolve.ts, the one resolver shared by the TypeScript 7 program graph
  *     and lowering.
@@ -39,5 +39,5 @@ export * from "./semantic-types.js";
 
 /* No default export, deliberately: ESM cannot hang the TYPE side of the
  * census (ts.Expression, ts.Node, ...) off a default binding, so a default
- * would invite the one import form that loses the types without an error. The port
+ * would invite the one import form that silently loses the types. The port
  * swap is the namespace import above — same one-line change per file. */

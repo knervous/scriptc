@@ -1,6 +1,0 @@
-{
- "order": [
-  "<repo>/tests/diagnostics/cjs-module-mutation/main.ts"
- ],
- "diags": []
-}

@@ -1,0 +1,140 @@
+name: Host feature sets
+
+# The generic native host (native/host) built as each of its feature sets, and the host-island lane against the
+# sets' archives. Started by hand for now (Actions → Host feature sets → Run workflow); a pull_request trigger with a
+# `native/host/**` path filter can follow once the run times are known.
+on:
+  workflow_dispatch:
+
+concurrency:
+  group: host-sets-${{ github.ref }}
+  cancel-in-progress: true
+
+env:
+  CARGO_TERM_COLOR: never
+  # The Android NDK the host's Android build pins, checked against Google's repository manifest (repository2-3.xml).
+  ANDROID_NDK_VERSION: 30.0.16248370
+  ANDROID_NDK_ZIP: android-ndk-r30-linux.zip
+  ANDROID_NDK_SHA1: 5107f898313790e449e87eee2183d9a20602dee9
+
+jobs:
+  # cargo check of every set, per target. The sets are scriptc-host's features: full (the defaults), ui
+  # (default-entry,window,net), headless (default-entry,net) and offline (default-entry). Windows is x86_64-pc-windows-gnullvm cross-built with Zig through
+  # native/host/scripts/zig-wrapper.rs (build-host-pack.mjs windowsGnullvmEnv sets the target's CC, CXX, AR and linker).
+  check:
+    name: check (${{ matrix.target }}, ${{ matrix.set }})
+    runs-on: ubuntu-24.04
+    timeout-minutes: 45
+    strategy:
+      fail-fast: false
+      matrix:
+        target: [x86_64-unknown-linux-gnu, aarch64-linux-android, x86_64-pc-windows-gnullvm]
+        set: [full, ui, headless, offline]
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/cache@v4
+        with:
+          path: |
+            ~/.cargo/registry/index
+            ~/.cargo/registry/cache
+            ~/.cargo/git/db
+          key: cargo-home-${{ hashFiles('native/host/Cargo.lock') }}
+      - name: Linux packages
+        run: |
+          sudo apt-get update --quiet=2
+          sudo env DEBIAN_FRONTEND=noninteractive apt-get install --quiet=2 --yes --no-install-recommends \
+            libfontconfig1-dev libfreetype-dev glslang-tools
+      - name: Rust target
+        run: rustup target add "${{ matrix.target }}"
+      - name: Android NDK
+        if: matrix.target == 'aarch64-linux-android'
+        run: |
+          curl --fail --silent --show-error --location \
+            "https://dl.google.com/android/repository/$ANDROID_NDK_ZIP" --output "$RUNNER_TEMP/ndk.zip"
+          printf '%s  %s\n' "$ANDROID_NDK_SHA1" "$RUNNER_TEMP/ndk.zip" | sha1sum --check --strict -
+          unzip -q "$RUNNER_TEMP/ndk.zip" -d "$RUNNER_TEMP/ndk"
+          ndk="$RUNNER_TEMP/ndk/android-ndk-r30"
+          grep -q "Pkg.Revision = $ANDROID_NDK_VERSION" "$ndk/source.properties"
+          bin="$ndk/toolchains/llvm/prebuilt/linux-x86_64/bin"
+          {
+            echo "ANDROID_NDK_ROOT=$ndk"
+            echo "CC_aarch64_linux_android=$bin/aarch64-linux-android26-clang"
+            echo "CXX_aarch64_linux_android=$bin/aarch64-linux-android26-clang++"
+            echo "AR_aarch64_linux_android=$bin/llvm-ar"
+            echo "CARGO_TARGET_AARCH64_LINUX_ANDROID_LINKER=$bin/aarch64-linux-android26-clang"
+            echo "ANDROID_SYSROOT=$ndk/toolchains/llvm/prebuilt/linux-x86_64/sysroot"
+            echo "ANDROID_API=26"
+          } >> "$GITHUB_ENV"
+      - uses: ./.github/actions/zig
+        if: matrix.target == 'x86_64-pc-windows-gnullvm'
+      - name: Zig wrappers
+        if: matrix.target == 'x86_64-pc-windows-gnullvm'
+        run: |
+          node --input-type=module -e '
+            const { windowsGnullvmEnv } = await import("./native/host/scripts/build-host-pack.mjs");
+            const env = windowsGnullvmEnv();
+            for (const [name, value] of Object.entries(env))
+              if (/^(CC_|CXX_|AR_|CARGO_TARGET_|ZIG_WRAPPER_)/.test(name)) console.log(`${name}=${value}`);
+          ' >> "$GITHUB_ENV"
+      - name: cargo check
+        working-directory: native/host
+        env:
+          SET: ${{ matrix.set }}
+          TARGET: ${{ matrix.target }}
+        run: |
+          case "$SET" in
+            full) features= ;;
+            ui) features="--no-default-features --features default-entry,window,net" ;;
+            headless) features="--no-default-features --features default-entry,net" ;;
+            offline) features="--no-default-features --features default-entry" ;;
+          esac
+          # shellcheck disable=SC2086
+          cargo check --release --locked -p scriptc-host --target "$TARGET" $features
+
+  # The host pack (build-host-pack.mjs: the full, headless and offline archives and host-pack.json), then the
+  # host-island lane (tests/harness/host-island-generic.test.ts) against each archive.
+  generic_host_lane:
+    name: test (generic host lane, Linux x64)
+    runs-on: ubuntu-24.04
+    timeout-minutes: 90
+    steps:
+      - uses: actions/checkout@v4
+      - uses: pnpm/action-setup@v4
+        with:
+          version: 11.1.3
+      - uses: actions/setup-node@v4
+        with:
+          node-version-file: .node-version
+          cache: pnpm
+      - uses: ./.github/actions/llvm-linux
+      - run: pnpm install --frozen-lockfile
+      - uses: ./.github/actions/zig
+      - uses: ./.github/actions/native-packages
+        with:
+          target: linux-x64-gnu
+      - run: pnpm build
+      - uses: actions/cache@v4
+        with:
+          path: |
+            ~/.cargo/registry/index
+            ~/.cargo/registry/cache
+            ~/.cargo/git/db
+          key: cargo-home-${{ hashFiles('native/host/Cargo.lock') }}
+      - name: Linux packages
+        run: |
+          sudo apt-get update --quiet=2
+          sudo env DEBIAN_FRONTEND=noninteractive apt-get install --quiet=2 --yes --no-install-recommends \
+            libfontconfig1-dev libfreetype-dev
+      - name: Host pack
+        run: node native/host/scripts/build-host-pack.mjs --out "$RUNNER_TEMP/host-pack"
+      - name: Host-island lane, each set
+        run: |
+          # SCRIPTW_GENERIC_HOST_PACK runs the typed-fetch test against every archive of the pack; each pass of
+          # the loop runs the rest of the lane against one archive.
+          export SCRIPTW_GENERIC_HOST_PACK="$RUNNER_TEMP/host-pack"
+          for archive in libscriptc_host.a libscriptc_host_headless.a libscriptc_host_offline.a; do  # Linux's sets
+            echo "::group::$archive"
+            SCRIPTW_GENERIC_HOST_LIB="$SCRIPTW_GENERIC_HOST_PACK/artifacts/$archive" \
+              pnpm exec vitest run tests/harness/host-island-generic.test.ts
+            echo "::endgroup::"
+          done

@@ -1,3 +1,4 @@
+// This file was modified from scriptc (Apache-2.0); see MODIFICATIONS.md.
 import {
   BIGINT_BYTES_NAMES,
   type IrClassDef,
@@ -1010,6 +1011,7 @@ const PROCESS_EVENT_LIB_FNS: ReadonlySet<IrLibFn> = new Set([
   "rl.moves",
   "rl.numProp",
   "rl.on",
+  "rl.onClose",
   "rl.pause",
   "rl.prompt",
   "rl.promptWith",
@@ -1627,7 +1629,7 @@ function spelledMemberName(expr: IrExpr, definitions: Map<string, IrExpr>): stri
  * primitive, whose property table is the ordinary one. */
 function typeHoldsCallable(type: IrType): boolean {
   return (
-    type.kind === "func" || type.kind === "classval" || type.kind === "dyn" || type.kind === "jsval"
+    type.kind === "func" || type.kind === "classval" || type.kind === "dyn" || type.kind === "jsword"
   );
 }
 
@@ -2092,8 +2094,8 @@ const RUNTIME_FEATURE_RULES = {
         (INHERITED_MEMBER_NAMES.has(node.key.value) ||
           ARRAY_PROTOTYPE_MEMBER_NAMES.has(node.key.value))),
   }),
-  /** The program has dynamic-tier jsval operations (js.* builtins, the
-   * jsval pass): links the scr_js_* units (two-tier design I3). */
+  /** The program has dynamic-tier jsword operations (js.* builtins, the
+   * jsword pass): links the scr_js_* units (two-tier design I3). */
   dynTier: rule({ prefixes: ["js."] }),
   /** Checked-dynamic stream slots test values and pipe into JavaScript
    * stream objects (scr_stream_dyn.c). */
@@ -2362,6 +2364,13 @@ const RUNTIME_FEATURE_RULES = {
   }),
   /** util.debounce and util.throttle (scr_util_timing.c). */
   utilTiming: rule({ fns: ["util.debounce", "util.throttle"] }),
+  /** The island's embedded modules that call fetch, and the island's
+   * `fetch` global read, link the fetch unit too (this fork). */
+  fetch: rule({
+    initial: (mod) => mod.embedded?.modules.some((m) => m.usesFetch === true) ?? false,
+    prefixes: ["fetch."],
+    expr: (node, _tables) => node.kind === "jsOp" && node.op === "globalGet" && node.name === "fetch",
+  }),
   /** util.markPromiseAsHandled (scr_util_mark_handled.c): it reports its
    * argument check through the checked-dynamic description, so the
    * dyn-async unit comes with it. */
@@ -2372,7 +2381,6 @@ const RUNTIME_FEATURE_RULES = {
   /** events.once(emitter, name, options), and events.once over a name the
    * program does not resolve to a typed tuple (scr_events_once_signal.c). */
   eventsOnceSignal: rule({ fns: ["events.onceSignal", "events.onceAny"] }),
-  fetch: rule({ prefixes: ["fetch."] }),
   fileHandle: rule({ types: ["fileHandle"] }),
   /** filehandle.readableWebStream (scr_fs_web_stream.c): the handle's
    * content as a byte-oriented web stream, its own gated unit. */
@@ -2926,7 +2934,11 @@ const RUNTIME_FEATURE_RULES = {
       "process.stdinIsRaw",
     ],
   }),
-  zlib: rule({ prefixes: ["zlib."] }),
+  /** The island's embedded npm graph importing node:zlib links it too (this fork). */
+  zlib: rule({
+    initial: (mod) => mod.embedded?.edges.some((e) => e.to === "node:zlib") ?? false,
+    prefixes: ["zlib."],
+  }),
   /** node:zlib's Brotli forms: zlib.brotliInstall, which %main calls when
    * the program uses Brotli (scr_brotli.c). */
   brotli: rule({ fns: ["zlib.brotliInstall"] }),
@@ -3169,18 +3181,20 @@ function scanRuntimeFeatures(
     for (const t of nodes.types) type(t);
   } else if (keepGoing()) everyModuleNode(mod, { expr, stmt: keepGoing, type });
   for (const { name, scan } of scans) if (scan.result()) features[name] = true;
+  // scr_dyn_invoke.c's untyped String methods call scr_regex.c's case conversion (scr_str_to_lower/upper).
+  if (features.dynInvoke) features.regex = true;
   // Inline-cache sites of dynamic-tier functions use the tier's caches
   // (scr_js_object.c).
   if (!features.dynTier && mod.functions.some((fn) => fn.tier === "dynamic")) {
     const sites = new JsIcSites(mod);
     features.dynTier = mod.functions.some((fn) => fn.tier === "dynamic" && hasJsIcSite(fn, sites));
   }
-  // A jsval parameter or result (ir/jsval.ts) is retained and released
+  // A jsword parameter or result (ir/jsword.ts) is retained and released
   // through the tier's word reference counting, with or without a js.*
   // operation in the body.
   if (!features.dynTier)
     features.dynTier = mod.functions.some(
-      (fn) => fn.returnType.kind === "jsval" || fn.params.some((p) => p.type.kind === "jsval"),
+      (fn) => fn.returnType.kind === "jsword" || fn.params.some((p) => p.type.kind === "jsword"),
     );
   return features;
 }
@@ -3226,9 +3240,13 @@ export function moduleUsesFileHandle(mod: IrModule): boolean {
   return scanRuntimeFeatures(mod, "fileHandle").fileHandle;
 }
 
-/** True when native fetch operations survive lowering. This links
- * scr_fetch.c and its socket/tls/zlib dependencies and makes the emitted
- * main call scr_fetch_install. Fetch-free graphs keep their link lines. */
+/** True when user code lowers static fetch or the embedded npm graph
+ * reaches the engine's global fetch — the link switch that pulls scr_fetch.c +
+ * its socket/tls/zlib dependencies into the binary (native-toolchain.ts) and has the
+ * emitted main call scr_fetch_install. The npm graph records the embedded
+ * source fact with a parser + binder, so comments, strings, property names,
+ * and local `fetch` bindings do not change the link or target capability.
+ * Fetch-free graphs keep their exact historical link lines. */
 export function moduleUsesFetch(mod: IrModule): boolean {
   return scanRuntimeFeatures(mod, "fetch").fetch;
 }
@@ -3274,8 +3292,39 @@ export function moduleUsesDynBuiltinStream(mod: IrModule): boolean {
   return scanRuntimeFeatures(mod, "dynBuiltinStream").dynBuiltinStream;
 }
 
+/** True when the embedded npm graph has an edge into `builtin` — the
+ * island shim needs the corresponding native bridge linked (zlib's is
+ * the first; the emitted main installs it before any island entry). */
+export function moduleEmbedsBuiltin(mod: IrModule, builtin: string): boolean {
+  return mod.embedded !== undefined && mod.embedded.edges.some((e) => e.to === builtin);
+}
+
+/** Embedded module texts at least this long are DEFLATE-compressed into
+ * the emitted LLVM (island.ts; each stays plain when deflate does not
+ * shrink it) and inflated lazily by the island's module loader at first
+ * load. Below it the zlib round trip cannot pay for itself. */
 export const NPM_COMPRESS_MIN = 1024;
 
+/** True when the emitted npm tables will carry compressed module text —
+ * the SAME candidate test island.ts compresses by, so index.ts's
+ * zlib link switch and emitter.ts's inflater installation stay in
+ * lockstep with the emission (a candidate whose deflate happens not to
+ * shrink stays plain; the installed inflater is then just unused). */
+export function moduleEmbedsCompressedNpm(mod: IrModule): boolean {
+  return (
+    mod.embedded !== undefined &&
+    mod.embedded.modules.some(
+      (m) => m.source.length >= NPM_COMPRESS_MIN || (m.esm ?? "").length >= NPM_COMPRESS_MIN,
+    )
+  );
+}
+
+/** True when the module contains any zlib libCall (the static lowering)
+ * OR the embedded npm graph imports node:zlib (the island shim) — the
+ * link switch that pulls scr_zlib.c + the system libz into the binary
+ * (native-toolchain.ts); zlib-free programs keep their exact link line. Same
+ * generic-walk shape as moduleUsesRegex: `kind`/`fn` discriminants live
+ * only on IR objects. */
 export function moduleUsesZlib(mod: IrModule): boolean {
   return scanRuntimeFeatures(mod, "zlib").zlib;
 }
@@ -3383,6 +3432,9 @@ export function moduleUsesQs(mod: IrModule): boolean {
   return scanRuntimeFeatures(mod, "qs").qs;
 }
 
+/** True when the module uses native util parsing, comparison, or styling.
+ * The utility units also follow their required symbol, inspection, and
+ * warning features, independently of the island's node:util shim. */
 export function moduleUsesParseArgs(mod: IrModule): boolean {
   return scanRuntimeFeatures(mod, "parseArgs").parseArgs;
 }
@@ -3474,9 +3526,29 @@ export function moduleUsesTlsCa(mod: IrModule): boolean {
   return scanRuntimeFeatures(mod, "tlsCa").tlsCa;
 }
 
-/** True when the module has dynamic-tier jsval operations or inline-cache
+/** True when the module has dynamic-tier jsword operations or inline-cache
  * sites: the link switch for the scr_js_* runtime units (two-tier design
  * I3). Programs without them never link a scr_js_ symbol. */
 export function moduleUsesDynTier(mod: IrModule): boolean {
   return scanRuntimeFeatures(mod, "dynTier").dynTier;
+}
+
+/** Whether a host-island program needs the runtime's own fetch unit (scr_fetch.c): a static fetch (`fetch.*` library
+ * calls) or an embedded module that fetches. The page's `fetch` global (`jsOp globalGet fetch`), which the engine island
+ * answers through that unit, is the host's own on the host island: the host's network layer, its page base and cache,
+ * and its offline answer when built without `net`. */
+export function moduleFetchesNatively(mod: Pick<IrModule, "functions" | "embedded">): boolean {
+  if (mod.embedded?.modules.some((m) => m.usesFetch === true)) return true;
+  let found = false;
+  for (const fn of mod.functions) {
+    everyStmtList(fn.body, {
+      expr: (node) => {
+        if (node.kind === "libCall" && node.fn.startsWith("fetch.")) found = true;
+        return !found;
+      },
+      stmt: () => !found,
+    });
+    if (found) return true;
+  }
+  return false;
 }

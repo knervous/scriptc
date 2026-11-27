@@ -1,6 +1,0 @@
-{
- "order": [
-  "<repo>/tests/corpus/8966-js-async-gen-never-delegation-identity.js"
- ],
- "diags": []
-}

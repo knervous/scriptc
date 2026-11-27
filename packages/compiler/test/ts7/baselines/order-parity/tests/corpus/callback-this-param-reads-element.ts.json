@@ -1,6 +1,0 @@
-{
- "order": [
-  "<repo>/tests/corpus/callback-this-param-reads-element.ts"
- ],
- "diags": []
-}

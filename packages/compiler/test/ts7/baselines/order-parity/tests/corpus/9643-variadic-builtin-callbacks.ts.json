@@ -1,6 +1,0 @@
-{
- "order": [
-  "<repo>/tests/corpus/9643-variadic-builtin-callbacks.ts"
- ],
- "diags": []
-}

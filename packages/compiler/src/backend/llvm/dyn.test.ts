@@ -1,7 +1,7 @@
 import { expect, test } from "vitest";
 import {
   DYN,
-  JSVAL,
+  JSWORD,
   NULL_T,
   STRING,
   VOID,
@@ -15,8 +15,8 @@ import { emitLlvmModule } from "./emitter.js";
 
 /** `look(value, key)` boxed as a function value: the box's call thunk
  * converts the second argument to a string and calls the function. With
- * `jsEntry`, the closure also carries its jsval twin body, so the box gets
- * a jsval entry thunk and `convert` a typed callback adapter. */
+ * `jsEntry`, the closure also carries its jsword twin body, so the box gets
+ * a jsword entry thunk and `convert` a typed callback adapter. */
 function boxedFunction(options: { jsEntry?: boolean; convert?: boolean } = {}): IrModule {
   const loc = { file: "boxed-function.ts", start: 0, end: 0 };
   const look: IrType = { kind: "func", params: [DYN, STRING], ret: DYN };
@@ -25,17 +25,17 @@ function boxedFunction(options: { jsEntry?: boolean; convert?: boolean } = {}): 
       ? {
           name: "look%js",
           params: [
-            { localId: "value", name: "value", type: JSVAL },
-            { localId: "key", name: "key", type: JSVAL },
+            { localId: "value", name: "value", type: JSWORD },
+            { localId: "key", name: "key", type: JSWORD },
           ],
-          returnType: JSVAL,
+          returnType: JSWORD,
           locals: [
-            { id: "value", name: "value", type: JSVAL, mutable: false },
-            { id: "key", name: "key", type: JSVAL, mutable: false },
+            { id: "value", name: "value", type: JSWORD, mutable: false },
+            { id: "key", name: "key", type: JSWORD, mutable: false },
           ],
           loc,
           body: [
-            { kind: "return", value: { kind: "varRef", localId: "value", type: JSVAL, loc }, loc },
+            { kind: "return", value: { kind: "varRef", localId: "value", type: JSWORD, loc }, loc },
           ],
         }
       : null;
@@ -182,10 +182,10 @@ test("a call thunk releases what it converted and what the call returned when it
   }
 });
 
-test("a jsval entry thunk releases the result it converted when it gives up", () => {
+test("a jsword entry thunk releases the result it converted when it gives up", () => {
   const llvm = emitLlvmModule(boxedFunction({ jsEntry: true }));
   const body = helperBody(llvm, "sc_jt_\\d+");
-  // The jsval body's result, the word the entry returns (jsval itself).
+  // The jsword body's result, the word the entry returns (jsword itself).
   const returned = /^ {2}(%\w+) = call ptr \S+\(ptr %c, /m.exec(body)?.[1];
   expect(returned).toBeDefined();
   const bailBlock = bail(blocksOf(body), "jtr");

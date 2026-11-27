@@ -1,6 +1,0 @@
-{
- "order": [
-  "<repo>/tests/corpus/915-unknown-tostring-eq.ts"
- ],
- "diags": []
-}

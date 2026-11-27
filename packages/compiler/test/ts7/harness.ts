@@ -18,7 +18,6 @@ import { tmpdir } from "node:os";
 import { join } from "node:path";
 import ts5 from "typescript5";
 import { ambientDtsPath, fallbackDtsPath } from "../../src/frontend/program.js";
-import { fallbackModulesNamedIn } from "../../src/frontend/dts-paths.js";
 import * as ad from "../../src/frontend/ts7/adapter.js";
 
 export { ad, ts5 };
@@ -79,8 +78,7 @@ export function buildTwoWorlds(sources: Record<string, string>, host?: ad.Ts7Hos
     writeFileSync(path, text);
     files.push(path);
   }
-  const modules = Object.values(sources).flatMap((text) => fallbackModulesNamedIn(text));
-  const roots = [...files, ambientDtsPath(), fallbackDtsPath(), ...new Set(modules)];
+  const roots = [...files, ambientDtsPath(), fallbackDtsPath()];
   const p5 = ts5.createProgram(roots, options5());
   const p7 = createProgram(roots, options7(), host);
   return {
@@ -123,7 +121,7 @@ export function kindName5(kind: ts5.SyntaxKind): string {
 }
 
 export function kindName7(kind: number): string {
-  return ((ad.SyntaxKind as Record<number, string | number>)[kind] as string) ?? String(kind);
+  return (ad.SyntaxKind as Record<number, string | number>)[kind] as string ?? String(kind);
 }
 
 /** The one STRUCTURAL divergence the survey suite pinned: an elision in an
@@ -132,9 +130,7 @@ export function kindName7(kind: number): string {
  * elisions (`[1, , 2]`) kept OmittedExpression in both worlds. Guard and
  * flag comparisons except these positions. */
 export function isBindingPatternElision(n5: ts5.Node): boolean {
-  return (
-    ts5.isOmittedExpression(n5) && n5.parent !== undefined && ts5.isArrayBindingPattern(n5.parent)
-  );
+  return ts5.isOmittedExpression(n5) && n5.parent !== undefined && ts5.isArrayBindingPattern(n5.parent);
 }
 
 /* ---- canonical type text ----

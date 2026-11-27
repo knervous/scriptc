@@ -1,6 +1,0 @@
-{
- "order": [
-  "<repo>/tests/corpus/8947-map-get-boxed-nullable-value.ts"
- ],
- "diags": []
-}

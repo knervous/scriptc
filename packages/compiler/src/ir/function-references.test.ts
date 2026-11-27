@@ -89,7 +89,7 @@ const EXPR_FIELDS: Classified<IrExpr> = {
   recordKeyGet: { shapeId: "other" },
   dynFrom: { fnName: "other" },
   dynCall: { calleeName: "other", "spreads[].what": "other" },
-  dynInvoke: { method: "other", calleeName: "other" },
+  dynInvoke: { method: "other", calleeName: "other", domInterface: "other" },
   dynHasKey: { key: "other" },
   dynDestrCheck: { spelling: "other", firstProp: "other" },
   dynIterN: { notIterableMessage: "other" },
@@ -110,9 +110,13 @@ const EXPR_FIELDS: Classified<IrExpr> = {
   unionEq: { unionId: "other" },
   jsonStringify: { indent: "other" },
   dynCheck: { inferredSite: "other" },
+  // This fork's island and page operations.
+  jsOp: { name: "other", calleeName: "other", domInterface: "other" },
 };
 
 const STMT_FIELDS: Classified<IrStmt> = {
+  // This fork: a class-dispatch arm's class and value names.
+  if: { "classArm.className": "other", "classArm.value": "other" },
   varDecl: { localId: "other" },
   assign: { localId: "other" },
   while: { "labels[]": "other" },
@@ -142,6 +146,7 @@ const TYPE_FIELDS: Classified<IrType> = {
 
 const FUNCTION_FIELDS: Record<StringFields<Omit<IrFunction, "body">>, Role> = {
   name: "other",
+  jsName: "other",
   sourceName: "other",
   jsEntry: "reference",
   displayName: "other",
@@ -234,6 +239,25 @@ const MODULE_FIELDS: Record<StringFields<Omit<IrModule, "functions">>, Role> = {
   "contracts.immortalGlobals[]": "other",
   "contracts.programLifetime[]": "other",
   "contracts.inlineArrays[]": "other",
+  // This fork's module metadata: reflection names, the island's embedded modules and the browser object model.
+  "classes[].declaredMethods[]": "other",
+  "closedStringFields[]": "other",
+  "sloppyFiles[]": "other",
+  "embedded.modules[].key": "other",
+  "embedded.modules[].source": "other",
+  "embedded.modules[].esm": "other",
+  "embedded.edges[].from": "other",
+  "embedded.edges[].specifier": "other",
+  "embedded.edges[].to": "other",
+  objectSource: "other",
+  objectProgram: "other",
+  "objectDeferred[]": "other",
+  "objectDemands[]": "other",
+  objectArms: "other",
+  "objectUnits[]": "other",
+  "objectHierarchy[].base": "other",
+  "objectHierarchy[].members[]": "other",
+  "objectHierarchy[].name": "other",
   "contracts.singleOwner[]": "other",
   "wasmModules[].sha256": "other",
   "wasmModules[].bytes": "other",

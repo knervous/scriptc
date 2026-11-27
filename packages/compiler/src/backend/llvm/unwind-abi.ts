@@ -1,3 +1,4 @@
+// This file was modified from scriptc (Apache-2.0); see MODIFICATIONS.md.
 /* The functions that propagate exceptions by unwinding instead of the
  * pending flag (see unwindAbiFunctions). */
 import type { IrExpr, IrModule, IrStmt } from "../../ir/ir.js";
@@ -72,7 +73,7 @@ function recursiveFunctions(edges: ReadonlyMap<string, readonly string[]>): Set<
  * `call` from emitted code that can lower it as an `invoke`: it is not
  * async or a generator, not a constructor, not a method a virtual call can
  * reach or one a vtable holds (an overridden method), not a closure
- * target or a closure's jsval body, not the entry or a library export,
+ * target or a closure's jsword body, not the entry or a library export,
  * not a function a class's descriptor holds, not named by any node other
  * than a `call`'s callee, and not called from an async or generator body
  * (coroutine bodies keep plain calls).
@@ -104,7 +105,7 @@ export function unwindAbiFunctions(
   blocked.add("%error.name.read");
   blocked.add("%error.message.read");
   for (const entry of mod.lib?.exports ?? []) blocked.add(entry.fnName);
-  // A closure's jsval body is called through the function value's jsval
+  // A closure's jsword body is called through the function value's jsword
   // entry (IrFunction.jsEntry), which runtime calls reach.
   for (const fn of mod.functions) if (fn.jsEntry !== undefined) blocked.add(fn.jsEntry);
   // Methods a virtual call can reach, and the overridden methods of class

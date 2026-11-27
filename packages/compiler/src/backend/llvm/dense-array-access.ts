@@ -1,3 +1,4 @@
+// This file was modified from scriptc (Apache-2.0); see MODIFICATIONS.md.
 /* Inline dense-storage fast paths for ordinary array element access.
  *
  * Every strict and optional element operation keeps its runtime entry as
@@ -638,6 +639,12 @@ export function emitDenseArraySet(
   host.declare(`declare void @${setter}(ptr, double, ${acc === "bool" ? "i1 zeroext" : ty})`);
   const call = (attrs: string): void =>
     B.line(`call void @${setter}(ptr ${array}, double ${index.name}, ${ty} ${value})${attrs}`);
+  // A program that may freeze an array (this fork's Object.freeze on compiled arrays) writes through the runtime,
+  // whose setter refuses a frozen array; the caller tests the pending exception.
+  if (host.arraysMayFreeze) {
+    call("");
+    return;
+  }
   if (acc === "ref" && !isRefCounted(element)) {
     call("");
     return;
@@ -936,6 +943,13 @@ export function emitDenseArrayPush(
   const ty = valueType(acc);
   const pusher = `scr_arr_push_${runtimeAccess(acc)}`;
   host.declare(`declare double @${pusher}(ptr, ${acc === "bool" ? "i1 zeroext" : ty})`);
+  // A program that may freeze an array pushes through the runtime, which refuses a frozen array (the caller tests
+  // the pending exception).
+  if (host.arraysMayFreeze) {
+    const length = B.tmp();
+    B.line(`${length} = call double @${pusher}(ptr ${array}, ${ty} ${value})`);
+    return length;
+  }
   const header = (field: number): string => {
     const ptr = B.tmp();
     B.line(`${ptr} = getelementptr inbounds %ScrArr, ptr ${array}, i32 0, i32 ${field}`);

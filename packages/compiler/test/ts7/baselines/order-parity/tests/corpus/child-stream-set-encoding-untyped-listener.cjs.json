@@ -1,6 +1,0 @@
-{
- "order": [
-  "<repo>/tests/corpus/child-stream-set-encoding-untyped-listener.cjs"
- ],
- "diags": []
-}

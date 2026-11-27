@@ -1,4 +1,5 @@
 #!/usr/bin/env node
+// This file was modified from scriptc (Apache-2.0); see MODIFICATIONS.md.
 import { execFile } from "node:child_process";
 import { createHash } from "node:crypto";
 import { availableParallelism, tmpdir } from "node:os";
@@ -49,6 +50,14 @@ const runtimeRoot = join(repoRoot, "packages/runtime");
 const runtimeSrc = join(runtimeRoot, "src");
 const vendorRoot = join(runtimeRoot, "vendor");
 const outputRoot = join(packageRoot, "artifacts");
+
+/** SCR_HOST_ABI as scr_host_island.h defines it. */
+async function hostIslandAbi() {
+  const header = await readFile(join(runtimeSrc, "scr_host_island.h"), "utf8");
+  const abi = Number(/#define\s+SCR_HOST_ABI\s+(\d+)/.exec(header)?.[1]);
+  if (!Number.isInteger(abi)) throw new Error("scr_host_island.h defines no SCR_HOST_ABI");
+  return abi;
+}
 const manifestPath = join(packageRoot, "runtime-pack.json");
 // ICU (and so every ICU-answered Intl form) ships only in the packs that opt
 // in with `icu: true` — linux-x64-gnu in this slice, the one pack whose build
@@ -130,6 +139,7 @@ async function build() {
   // and only a pack that ships it pays for the download.
   const icuSourceRoot = async () =>
     ensureIcuSources(join(repoRoot, "node_modules", ".cache", "scriptc-icu-sources"));
+  const qjsSources = ["dtoa.c", "libregexp.c", "libunicode.c", "quickjs.c"];
   const lreSources = ["libregexp.c", "libunicode.c"];
   const zlibBuild = zlibInputs(config.target.llvm_triple);
   const zstdBuild = zstdInputs(config.target.llvm_triple);
@@ -407,7 +417,8 @@ async function build() {
     const flavors = {};
     // The executable `speed` flavor (--optimization=speed) exists only when
     // it differs from release: its static units are emitted through the host
-    // LLVM helper.
+    // LLVM helper with import bitcode. Its SCR_DYNAMIC variants are the
+    // release objects themselves.
     // Without that helper no build of the pack can link the flavor, and every
     // --optimization=speed build of the pack silently links its release
     // runtime units instead, which is slower at run time. Say why it is
@@ -436,6 +447,7 @@ async function build() {
         ? [["speed", matrix.flavors.release]]
         : []),
     ];
+    const releaseVariants = new Map();
     for (const [flavor, flavorSpec] of flavorPlan) {
       process.stdout.write(`building ${packageManifest.name} ${flavor} runtime\n`);
       // Zig emits DWARF by default, including descriptions of functions
@@ -461,6 +473,11 @@ async function build() {
               ...baseVariant,
               defines: [...(flavorSpec.defines ?? []), ...baseVariant.defines],
             };
+            const variantKey = `${unit.source}\0${variant.id}`;
+            if (flavor === "speed" && variant.defines.includes("SCR_DYNAMIC")) {
+              variants.push(releaseVariants.get(variantKey));
+              continue;
+            }
             const output = join(
               stagedOutputRoot,
               flavor,
@@ -469,7 +486,9 @@ async function build() {
               unit.source.replace(/\.c$/, ".o"),
             );
             const includeFlags = [
-              ...(unit.source === "scr_regex.c" ? ["-I", quickjs] : []),
+              ...(unit.source === "scr_regex.c" || variant.defines.includes("SCR_DYNAMIC")
+                ? ["-I", quickjs]
+                : []),
               ...(unit.source === "scr_tls.c" ||
               unit.source === "scr_cipher.c" ||
               unit.source === "scr_ecdh.c" ||
@@ -567,6 +586,7 @@ async function build() {
               sha256: await sha256(output),
               size: (await stat(output)).size,
             };
+            if (flavor === "release") releaseVariants.set(variantKey, built);
             variants.push(built);
           }
           return { source: unit.source, predicate: unit.predicate, variants };
@@ -664,6 +684,22 @@ async function build() {
       config.vendorArchives === false
         ? []
         : [
+            ...(requestedArchives.has("quickjs")
+              ? [
+                  await archive("quickjs", qjsSources, quickjs, [
+                    ...vendorTarget,
+                    "-std=gnu11",
+                    "-fvisibility=hidden",
+                    "-funsigned-char",
+                    "-DQUICKJS_NG_BUILD",
+                    "-D_GNU_SOURCE",
+                    "-DNDEBUG",
+                    "-Os",
+                    "-I",
+                    quickjs,
+                  ]),
+                ]
+              : []),
             ...(requestedArchives.has("libregexp")
               ? [
                   await archive("libregexp", lreSources, quickjs, [
@@ -863,6 +899,11 @@ async function build() {
       version: packageManifest.version,
       target: matrix.target,
       runtime_abi: { version: 52, marker: "scr_runtime_abi_v52" },
+      // The host island's ABI (scr_host_island.h), when the matrix carries
+      // its units: the compiler refuses a host pack of another version.
+      ...(matrix.runtime_units.some((unit) => unit.source === "scr_host_island.c")
+        ? { host_abi: await hostIslandAbi() }
+        : {}),
       compiler: {
         command: compiler,
         identity: compilerVersion,
@@ -871,6 +912,7 @@ async function build() {
       },
       macros: {
         executable: [
+          "SCR_DYNAMIC",
           "SCR_TEXT_DECODER_LEGACY",
           "SCR_WARNING_REPLACE",
           "SCR_STREAM_WRITE_ERRORS",

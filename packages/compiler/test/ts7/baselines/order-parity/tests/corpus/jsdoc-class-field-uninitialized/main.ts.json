@@ -1,7 +1,0 @@
-{
- "order": [
-  "<repo>/tests/corpus/jsdoc-class-field-uninitialized/widget.js",
-  "<repo>/tests/corpus/jsdoc-class-field-uninitialized/main.ts"
- ],
- "diags": []
-}

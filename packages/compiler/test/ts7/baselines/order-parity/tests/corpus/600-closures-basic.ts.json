@@ -1,6 +1,0 @@
-{
- "order": [
-  "<repo>/tests/corpus/600-closures-basic.ts"
- ],
- "diags": []
-}

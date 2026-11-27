@@ -1,6 +1,0 @@
-{
- "order": [
-  "<repo>/tests/corpus/async-iterable-protocol-parameter.ts"
- ],
- "diags": []
-}

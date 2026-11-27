@@ -1,3 +1,4 @@
+// @dynamic
 type Block = { type: "text"; text: string } | { type: "image"; url: string };
 type Message = { role: string; content: Block[] };
 

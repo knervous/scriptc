@@ -1,6 +1,0 @@
-{
- "order": [
-  "<repo>/tests/corpus/9221-callable-union-members.ts"
- ],
- "diags": []
-}

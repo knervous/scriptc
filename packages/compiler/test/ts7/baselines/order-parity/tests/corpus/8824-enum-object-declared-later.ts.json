@@ -1,6 +1,0 @@
-{
- "order": [
-  "<repo>/tests/corpus/8824-enum-object-declared-later.ts"
- ],
- "diags": []
-}

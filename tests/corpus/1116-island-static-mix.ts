@@ -1,3 +1,4 @@
+// @dynamic
 // A statically-typed program whose types never change: only the calls the
 // static runtime doesn't implement run in the island, and every result
 // flows straight back into static functions, arrays, and classes.

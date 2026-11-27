@@ -1,6 +1,0 @@
-{
- "order": [
-  "<repo>/tests/corpus/2281-domexception-atob-btoa.cjs"
- ],
- "diags": []
-}

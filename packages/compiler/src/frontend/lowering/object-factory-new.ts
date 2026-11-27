@@ -1,23 +1,14 @@
+// This file was modified from scriptc (Apache-2.0); see MODIFICATIONS.md.
 import * as ts from "../ts7/adapter.js";
 import { DYN, type IrExpr, type IrType } from "../../ir/ir.js";
 import { isJsSourceFile, locOf } from "../program.js";
 import type { Lowerer } from "./lowerer.js";
-import { bindingNeverReassigned } from "./binding-analysis.js";
-import { implicitDefaultInstance } from "./generic-functions.js";
-import { type FnSig } from "./call-signatures.js";
+import { bindingNeverReassigned, implicitDefaultInstance, type FnSig } from "./lower-calls.js";
 
-/** The JavaScript function declaration (or function expression binding)
- * `new` names, when it is an ordinary constructor: not a generator or async
- * function. Whether the binding is reassigned is the caller's question. */
-function jsConstructorDeclarationOf(
-  lowerer: Lowerer,
-  expr: ts.NewExpression,
-): {
-  declaration: ts.FunctionDeclaration | ts.FunctionExpression;
-  owner: ts.Node;
-  symbol: ts.Symbol;
-} | null {
-  if (!ts.isIdentifier(expr.expression) || lowerer.peekLocal(expr.expression)) return null;
+/** An ordinary constructor's explicit object return replaces its receiver.
+ * Without observing this or new.target, it can use the function's call ABI. */
+function isObjectFactoryNew(lowerer: Lowerer, expr: ts.NewExpression): boolean {
+  if (!ts.isIdentifier(expr.expression) || lowerer.peekLocal(expr.expression)) return false;
   // This probe also sees ordinary classes during global collection. Leave
   // their deferred diagnostics for the class declaration's lowering.
   const wasCollecting = lowerer.collecting;
@@ -28,145 +19,45 @@ function jsConstructorDeclarationOf(
   } finally {
     lowerer.collecting = wasCollecting;
   }
-  if (!symbol) return null;
-  const owner = symbol.declarations.find(
-    (node) =>
-      (ts.isFunctionDeclaration(node) && node.body !== undefined) ||
-      (ts.isVariableDeclaration(node) &&
-        node.initializer &&
-        ts.isFunctionExpression(node.initializer)),
+  if (!symbol) return false;
+  const owner = lowerer.checker.declarationsOf(symbol).find((node) =>
+    ts.isFunctionDeclaration(node) && node.body !== undefined ||
+    ts.isVariableDeclaration(node) && node.initializer && ts.isFunctionExpression(node.initializer),
   );
-  const declaration =
-    owner &&
-    ts.isVariableDeclaration(owner) &&
-    owner.initializer &&
-    ts.isFunctionExpression(owner.initializer)
-      ? owner.initializer
-      : owner && ts.isFunctionDeclaration(owner)
-        ? owner
-        : null;
-  if (
-    !owner ||
-    !declaration?.body ||
-    !isJsSourceFile(ts.getSourceFileOfNode(declaration)) ||
-    declaration.asteriskToken ||
-    declaration.modifiers?.nodes.some((m) => m.kind === ts.SyntaxKind.AsyncKeyword)
-  )
-    return null;
-  return { declaration, owner, symbol };
-}
-
-/** The never-reassigned JavaScript function declaration (or function
- * expression binding) `new` calls: the constructor whose declaration is the
- * value the binding holds. */
-function jsConstructorFunctionOf(
-  lowerer: Lowerer,
-  expr: ts.NewExpression,
-): ts.FunctionDeclaration | ts.FunctionExpression | null {
-  const found = jsConstructorDeclarationOf(lowerer, expr);
-  if (found === null) return null;
-  return bindingNeverReassigned(lowerer.bindingScope(), found.symbol, found.owner)
-    ? found.declaration
-    : null;
-}
-
-/** An expression whose value replaces the receiver instead of answering it:
- * an object, an array, a function, or a constructed instance. */
-function returnsObjectValue(expression: ts.Expression): boolean {
-  return (
-    ts.isObjectLiteralExpression(expression) ||
-    ts.isArrayLiteralExpression(expression) ||
-    ts.isArrowFunction(expression) ||
-    ts.isFunctionExpression(expression) ||
-    ts.isNewExpression(expression)
-  );
-}
-
-/** An ordinary constructor's explicit object return replaces its receiver.
- * Without observing this or new.target, it can use the function's call ABI. */
-function isObjectFactoryNew(lowerer: Lowerer, expr: ts.NewExpression): boolean {
-  const declaration = jsConstructorFunctionOf(lowerer, expr);
-  if (!declaration?.body) return false;
-  const last = declaration.body.statements.nodes.at(-1);
-  if (
-    !last ||
-    !ts.isReturnStatement(last) ||
-    !last.expression ||
-    !returnsObjectValue(last.expression)
-  )
-    return false;
+  const declaration = owner && ts.isVariableDeclaration(owner) && owner.initializer && ts.isFunctionExpression(owner.initializer)
+    ? owner.initializer : owner && ts.isFunctionDeclaration(owner) ? owner : null;
+  if (!owner || !declaration?.body || !bindingNeverReassigned(lowerer, symbol, owner) || !isJsSourceFile(declaration.getSourceFile()) || declaration.asteriskToken ||
+      declaration.modifiers?.some((m) => m.kind === ts.SyntaxKind.AsyncKeyword)) return false;
+  const objectReturn = (expression: ts.Expression): boolean => ts.isObjectLiteralExpression(expression) ||
+    ts.isArrayLiteralExpression(expression) || ts.isArrowFunction(expression) || ts.isFunctionExpression(expression) || ts.isNewExpression(expression);
+  const last = declaration.body.statements.at(-1);
+  if (!last || !ts.isReturnStatement(last) || !last.expression || !objectReturn(last.expression)) return false;
   let safe = true;
   const visit = (node: ts.Node, nestedArrow = false): void => {
-    if (ts.isClassDeclaration(node) || ts.isClassExpression(node)) {
-      safe = false;
-      return;
-    }
+    if (ts.isClassDeclaration(node) || ts.isClassExpression(node)) { safe = false; return; }
     if (ts.isFunctionLike(node)) {
       if (!ts.isArrowFunction(node)) return;
       nestedArrow = true;
     }
     if (node.kind === ts.SyntaxKind.ThisKeyword || ts.isMetaProperty(node)) safe = false;
-    if (
-      !nestedArrow &&
-      ts.isReturnStatement(node) &&
-      (!node.expression || !returnsObjectValue(node.expression))
-    )
-      safe = false;
+    if (!nestedArrow && ts.isReturnStatement(node) && (!node.expression || !objectReturn(node.expression))) safe = false;
     ts.forEachChild(node, (child) => visit(child, nestedArrow));
   };
-  for (const parameter of declaration.parameters.nodes) visit(parameter);
+  for (const parameter of declaration.parameters) visit(parameter);
   visit(declaration.body);
   return safe;
 }
 
-/** The construction-site refusal for an ordinary constructor whose last
- * statement returns an object, but which `isObjectFactoryNew` rejects: it
- * observes `this` or `new.target`, so the receiver it abandons is visible,
- * or another return answers a primitive or nothing, so the construction
- * mixes the returned object with that receiver. Checked construction would
- * compile the call, so the site keeps the fence the checked path replaced.
- * Null when the constructor is a factory the factory lowering owns, or its
- * last statement does not return an object. */
-export function objectReturningConstructorRefusal(
-  lowerer: Lowerer,
-  expr: ts.NewExpression,
-): string | null {
-  const found = jsConstructorDeclarationOf(lowerer, expr);
-  if (!found) return null;
-  const last = found.declaration.body?.statements.nodes.at(-1);
-  if (
-    !last ||
-    !ts.isReturnStatement(last) ||
-    !last.expression ||
-    !returnsObjectValue(last.expression)
-  )
-    return null;
-  if (isObjectFactoryNew(lowerer, expr)) return null;
-  // A reassigned binding no longer holds the declaration's function: the
-  // assignment may replace it with any value, so the construction keeps the
-  // fence the checked path would otherwise take.
-  if (!bindingNeverReassigned(lowerer.bindingScope(), found.symbol, found.owner))
-    return "object-returning constructors whose binding is reassigned";
-  return "object-returning constructors that observe this or return mixed primitive/object values";
-}
-
 /** Collection must register the shared result before reaching factory
  * bodies: those bodies can reference later globals in the same module. */
-/** The storage of a JavaScript module binding initialized with `new` of an
- * ordinary function: a factory's result and a constructor function's
- * receiver (`const head = new Segment()`) are both checked-dynamic
- * values, which functions declared elsewhere in the module read through
- * the global. */
 export function objectFactoryGlobalType(lowerer: Lowerer, expr: ts.NewExpression): IrType | null {
-  return jsConstructorFunctionOf(lowerer, expr) !== null ? DYN : null;
+  return isObjectFactoryNew(lowerer, expr) ? DYN : null;
 }
 
 export function objectFactorySignature(lowerer: Lowerer, expr: ts.NewExpression): FnSig | null {
   if (!ts.isIdentifier(expr.expression) || !isObjectFactoryNew(lowerer, expr)) return null;
   const generic = lowerer.genericFnOf(expr.expression);
-  const signature = generic?.implicitParams
-    ? implicitDefaultInstance(lowerer, expr, generic)
-    : lowerer.fnSigOf(expr.expression);
+  const signature = generic?.implicitParams ? implicitDefaultInstance(lowerer, expr, generic) : lowerer.fnSigOf(expr.expression);
   return signature && signature.returnType.kind !== "void" ? signature : null;
 }
 
@@ -176,10 +67,8 @@ export function lowerObjectFactoryNew(lowerer: Lowerer, expr: ts.NewExpression):
   const loc = locOf(expr);
   lowerer.noteEdge(signature.name);
   return {
-    kind: "call",
-    callee: signature.name,
-    args: lowerer.completeArgs(expr.arguments?.nodes ?? [], signature.params, loc, expr),
-    type: signature.returnType,
-    loc,
+    kind: "call", callee: signature.name,
+    args: lowerer.completeArgs(expr.arguments ?? [], signature.params, loc, expr),
+    type: signature.returnType, loc,
   };
 }

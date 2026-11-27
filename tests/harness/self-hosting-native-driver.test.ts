@@ -1,34 +1,15 @@
-import { seedBuildEnvironment, verifyBootstrapSeed } from "../../scripts/bootstrap-seed.mjs";
 import { execFile, spawnSync } from "node:child_process";
-import {
-  chmodSync,
-  cpSync,
-  existsSync,
-  mkdirSync,
-  mkdtempSync,
-  readFileSync,
-  renameSync,
-  rmSync,
-  symlinkSync,
-  writeFileSync,
-} from "node:fs";
+import { chmodSync, cpSync, existsSync, mkdirSync, mkdtempSync, readFileSync, renameSync, rmSync, symlinkSync, writeFileSync } from "node:fs";
 import { tmpdir } from "node:os";
 import { delimiter, join, resolve } from "node:path";
-import { isDeepStrictEqual, promisify } from "node:util";
+import { promisify } from "node:util";
 import { pathToFileURL } from "node:url";
 import { WASI } from "node:wasi";
 import { expect, test } from "vitest";
 import type { NativeToolchainManifest } from "../../packages/compiler/src/native/toolchain.js";
 import { RUNTIME_ABI_MARKER } from "../../packages/compiler/src/backend/runtime-abi.js";
-import {
-  nativeBootstrapPlan,
-  runNativeBootstrapChecks,
-} from "../../scripts/ci-native-bootstrap.mjs";
-import { withoutFirstLine } from "./large-artifacts.js";
-import { libnodePack } from "./libnode.js";
-import { checkBuildCacheContracts } from "./native-build-cache-contracts.js";
+import { nativeBootstrapPlan, runNativeBootstrapChecks } from "../../scripts/ci-native-bootstrap.mjs";
 import { bootstrapStep } from "./self-hosting-timing.js";
-import { unbundlePlatformPackages } from "../../scripts/native-cli-bundle.mjs";
 
 const root = join(import.meta.dirname, "../..");
 const exec = promisify(execFile);
@@ -38,10 +19,7 @@ const plan = nativeBootstrapPlan({ phase, sanitize });
 
 function comparableStderr(text: string): string {
   return sanitize
-    ? text.replace(
-        /^==\d+==WARNING: ASan doesn't fully support makecontext\/swapcontext functions and may produce false positives in some cases!\n/gm,
-        "",
-      )
+    ? text.replace(/^==\d+==WARNING: ASan doesn't fully support makecontext\/swapcontext functions and may produce false positives in some cases!\n/gm, "")
     : text;
 }
 
@@ -57,525 +35,182 @@ function absoluteCommand(command: string): string {
   throw new Error(`native tool is not on PATH: ${command}`);
 }
 
-// The seed build is the compiler compiling itself, so it grows with main: on
-// 32-vCPU Sandboxes its fastest plain build went from 471 s (base of
-// 2026-10-27) to 712 s (2026-11-07), about 145 s a week, and the same tree
-// takes up to 1.66 times as long on one machine as on another. Of 244 plain
-// builds on 2026-11-07 the median took 1009 s and the slowest tenth 1447 s
-// or more. Its own limit is twice the 1800 s a step once had, which the
-// fastest build reaches after about ten more weeks of the same growth on the
-// slowest machine; the limit is the place to look when it does. CI builds the
-// seed in a job of its own (bootstrap_seed) and never runs this step.
-//
-// Every step of the rebuild contracts gets this limit too, because they build
-// that compiler again: on 2026-11-23 1.66 times the 1289 s a green plain
-// rebuild took crossed the old 1800 s, and two merge queue batches stopped a
-// healthy build at 30 minutes (jobs 138079687529 and 138080138230).
-const seedBuildTimeoutMs = sanitize ? 5_400_000 : 3_600_000;
-
-test(
-  `the production CLI passes ${phase} bootstrap contracts with Node unavailable`,
-  async () => {
-    const sharedSeed = process.env["SCRIPTC_BOOTSTRAP_SEED_DIRECTORY"];
-    const directory =
-      sharedSeed ??
-      mkdtempSync(
-        join(process.platform === "win32" ? tmpdir() : "/tmp", "scriptc-native-bootstrap-"),
-      );
-    if (sharedSeed) verifyBootstrapSeed(sharedSeed, sanitize);
-    const executable = (name: string) =>
-      join(directory, name + (process.platform === "win32" ? ".exe" : ""));
-    const options = {
-      cwd: root,
-      timeout: seedBuildTimeoutMs,
-      maxBuffer: 16 * 1024 * 1024,
-    };
-    try {
-      const distribution = join(directory, "distribution");
-      if (!sharedSeed)
-        await bootstrapStep("build production CLI seed", () =>
-          exec(
-            process.execPath,
-            [
-              "--max-old-space-size=8192",
-              "--import",
-              "tsx",
-              join(root, "scripts/build-native-cli.mts"),
-              distribution,
-            ],
-            {
-              // The plain lane retains release optimization. Instrumenting a dev
-              // seed avoids optimizing the huge compiler module before ASan can
-              // exercise its complete traversal, serialization and LLVM emission.
-              ...options,
-              timeout: seedBuildTimeoutMs,
-              env: { ...process.env, ...seedBuildEnvironment(sanitize) },
-            },
-          ),
-        );
-      // CI reuses this already-built seed for npm and older-libc installation
-      // smoke tests, avoiding another full compiler build on the critical path.
-      const packageDirectory = process.env["SCRIPTC_BOOTSTRAP_PACKAGE_DIR"];
-      if (plan.packageChecks && packageDirectory !== undefined) {
-        if (process.platform !== "linux" || process.arch !== "x64")
-          throw new Error("bootstrap package export requires the Linux x64 GNU CI host");
-        mkdirSync(packageDirectory, { recursive: true });
-        cpSync(
-          join(root, "packages/cli-linux-x64-gnu/package.json"),
-          join(packageDirectory, "package.json"),
-        );
-        cpSync(distribution, join(packageDirectory, "dist"), { recursive: true });
-        // The npm package depends on its LLVM helper and runtime pack. Link
-        // them into its node_modules, as pnpm links a workspace package's
-        // dependencies, so the package checks resolve them.
-        unbundlePlatformPackages(
-          join(packageDirectory, "dist"),
-          join(packageDirectory, "dist/bin/scriptc.json"),
-          "@scriptc/llvm-linux-x64-gnu",
-        );
-        mkdirSync(join(packageDirectory, "node_modules/@scriptc"), { recursive: true });
-        for (const name of ["llvm-linux-x64-gnu", "runtime-linux-x64-gnu"])
-          symlinkSync(
-            join(root, "packages", name),
-            join(packageDirectory, "node_modules/@scriptc", name),
-            "dir",
-          );
-        writeFileSync(packageDirectory + ".ready", "ready\n");
-      }
-      // All compiler assets must survive moving the complete distribution.
-      const relocated = join(directory, "relocated");
-      renameSync(distribution, relocated);
-      const seed = join(relocated, "bin", "scriptc" + (process.platform === "win32" ? ".exe" : ""));
-      const manifestPath = seed + ".json";
-      const manifest = JSON.parse(readFileSync(manifestPath, "utf8")) as NativeToolchainManifest;
-      manifest.linker = absoluteCommand(manifest.linker);
+test(`the production CLI passes ${phase} bootstrap contracts with Node unavailable`, async () => {
+  const directory = mkdtempSync(join(process.platform === "win32" ? tmpdir() : "/tmp", "scriptc-native-bootstrap-"));
+  const executable = (name: string) => join(directory, name + (process.platform === "win32" ? ".exe" : ""));
+  const options = { cwd: root, timeout: sanitize ? 5_400_000 : 1_800_000, maxBuffer: 16 * 1024 * 1024 };
+  try {
+    const distribution = join(directory, "distribution");
+    await bootstrapStep("build production CLI seed", () =>
+      exec(process.execPath, ["--max-old-space-size=8192", "--import", "tsx", join(root, "scripts/build-native-cli.mts"), distribution], {
+        // The plain lane retains release optimization. Instrumenting a dev
+        // seed avoids optimizing the huge compiler module before ASan can
+        // exercise its complete traversal, serialization and LLVM emission.
+        ...options, env: { ...process.env, SCRIPTC_SAN: sanitize ? "1" : "", SCRIPTC_NATIVE_EMIT_IR: "1",
+          SCRIPTC_NATIVE_OPTIMIZATION: sanitize ? "dev" : "release" },
+      }));
+    // CI reuses this already-built seed for npm and older-libc installation
+    // smoke tests, avoiding another full compiler build on the critical path.
+    const packageDirectory = process.env["SCRIPTC_BOOTSTRAP_PACKAGE_DIR"];
+    if (plan.packageChecks && packageDirectory !== undefined) {
+      if (process.platform !== "linux" || process.arch !== "x64") throw new Error("bootstrap package export requires the Linux x64 GNU CI host");
+      mkdirSync(packageDirectory, { recursive: true });
+      cpSync(join(root, "packages/cli-linux-x64-gnu/package.json"), join(packageDirectory, "package.json"));
+      cpSync(distribution, join(packageDirectory, "dist"), { recursive: true });
+      writeFileSync(packageDirectory + ".ready", "ready\n");
+    }
+    // All compiler assets must survive moving the complete distribution.
+    const relocated = join(directory, "relocated");
+    renameSync(distribution, relocated);
+    const seed = join(relocated, "bin", "scriptc" + (process.platform === "win32" ? ".exe" : ""));
+    const manifestPath = seed + ".json";
+    const manifest = JSON.parse(readFileSync(manifestPath, "utf8")) as NativeToolchainManifest;
+    manifest.linker = absoluteCommand(manifest.linker);
+    if (process.platform === "linux") {
+      // Clang delegates linking to a separate executable. Resolve it before
+      // removing PATH so the complete native toolchain remains available.
+      const linker = await exec(manifest.linker, [...manifest.linker_args, "--print-prog-name=ld"], options);
+      manifest.linker_args.push("--ld-path=" + absoluteCommand(linker.stdout.trim()));
+    }
+    if (process.platform === "darwin") manifest.dsymutil = absoluteCommand(manifest.dsymutil);
+    if (process.platform === "darwin") manifest.relocatable_linker = absoluteCommand("ld");
+    manifest.archiver = absoluteCommand(process.platform === "win32" ? "zig" : "ar");
+    manifest.archiver_args = process.platform === "win32" ? ["ar"] : [];
+    writeFileSync(manifestPath, JSON.stringify(manifest));
+    let sanitizerCompiler: string | undefined;
+    if (sanitize) {
+      sanitizerCompiler = absoluteCommand(process.env["SCRIPTC_CC"] ?? "clang");
       if (process.platform === "linux") {
-        // Clang delegates linking to a separate executable. Resolve it before
-        // removing PATH so the complete native toolchain remains available.
-        const linker = await exec(
-          manifest.linker,
-          [...manifest.linker_args, "--print-prog-name=ld"],
-          options,
-        );
-        manifest.linker_args.push("--ld-path=" + absoluteCommand(linker.stdout.trim()));
+        const linker = await exec(sanitizerCompiler, ["--print-prog-name=ld"], options);
+        const quote = (value: string) => "'" + value.replaceAll("'", "'\\''") + "'";
+        const wrapper = join(directory, "sanitizer-clang");
+        // Preserve the empty PATH while making Clang's child linker explicit.
+        writeFileSync(wrapper, `#!/bin/sh\nexec ${quote(sanitizerCompiler)} ${quote("--ld-path=" + absoluteCommand(linker.stdout.trim()))} "$@"\n`);
+        chmodSync(wrapper, 0o755);
+        sanitizerCompiler = wrapper;
       }
-      if (process.platform === "darwin") manifest.dsymutil = absoluteCommand(manifest.dsymutil);
-      if (process.platform === "darwin") manifest.relocatable_linker = absoluteCommand("ld");
-      manifest.archiver = absoluteCommand(process.platform === "win32" ? "zig" : "ar");
-      manifest.archiver_args = process.platform === "win32" ? ["ar"] : [];
-      writeFileSync(manifestPath, JSON.stringify(manifest));
-      let sanitizerCompiler: string | undefined;
-      if (sanitize) {
-        sanitizerCompiler = absoluteCommand(process.env["SCRIPTC_CC"] ?? "clang");
-        if (process.platform === "linux") {
-          const linker = await exec(sanitizerCompiler, ["--print-prog-name=ld"], options);
-          const quote = (value: string) => "'" + value.replaceAll("'", "'\\''") + "'";
-          const wrapper = join(directory, "sanitizer-clang");
-          // Preserve the empty PATH while making Clang's child linker explicit.
-          writeFileSync(
-            wrapper,
-            `#!/bin/sh\nexec ${quote(sanitizerCompiler)} ${quote("--ld-path=" + absoluteCommand(linker.stdout.trim()))} "$@"\n`,
-          );
-          chmodSync(wrapper, 0o755);
-          sanitizerCompiler = wrapper;
-        }
+    }
+    const nativeOptions = { ...options, env: { ...process.env, PATH: "", SCRIPTC_TOOLCHAIN: manifestPath,
+      SCRIPTC_CACHE_DIR: join(directory, "cache"), ...(sanitizerCompiler === undefined ? {} : { SCRIPTC_CC: sanitizerCompiler }) } };
+    const invoke = async (compiler: string, args: string[], expectedStderr = "") => {
+      const result = await exec(compiler, args, nativeOptions).catch((error: unknown) => {
+        const failure = error as Error & { code?: string | number; signal?: string; stdout?: string; stderr?: string };
+        throw new Error(`${failure.message}\ncode=${failure.code} signal=${failure.signal}\n${failure.stderr ?? ""}\n${failure.stdout ?? ""}`, { cause: error });
+      });
+      expect(comparableStderr(result.stderr)).toBe(expectedStderr);
+      return result.stdout;
+    };
+    const entry = join(root, "packages/compiler/src/native/cli.ts");
+    const ffi = join(directory, ".scriptc/distribution-seed/compiler.ffi.json");
+    const rebuilt = executable("scriptc-rebuilt");
+    const checkProgram = async (compiler: string, source: string, extra: string[] = []) => {
+      // This basename formerly collided with the driver's temporary object.
+      const probeDirectory = join(directory, compiler === seed ? "seed-probes" : "rebuilt-probes");
+      mkdirSync(probeDirectory, { recursive: true });
+      const output = join(probeDirectory, "program.o" + (process.platform === "win32" ? ".exe" : ""));
+      const built = await invoke(compiler, ["build", source, "-o", output, "--optimization=dev", "--strip", ...extra]);
+      expect(built.trim()).toBe(output);
+      const oracle = spawnSync(process.execPath, [source], options);
+      const actual = spawnSync(output, [], nativeOptions);
+      for (const result of [oracle, actual]) {
+        expect(result.error).toBeUndefined();
+        expect(result.signal).toBeNull();
+        expect(result.status, result.stderr.toString()).toBe(0);
       }
-      const nativeOptions = {
-        ...options,
-        env: {
-          ...process.env,
-          PATH: "",
-          SCRIPTC_TOOLCHAIN: manifestPath,
-          SCRIPTC_CACHE_DIR: join(directory, "cache"),
-          ...(sanitizerCompiler === undefined ? {} : { SCRIPTC_CC: sanitizerCompiler }),
-        },
-      };
-      const invoke = async (
-        compiler: string,
-        args: string[],
-        expectedStderr = "",
-        env: Record<string, string> = {},
-      ) => {
-        // An ASan-instrumented compiler's frames are several times larger, and
-        // its recursion over the compiler's own deep ASTs overflows the
-        // default 8 MiB stack (SC3004). Raise the soft limit to the hard limit
-        // for each sanitized compiler process, as a shell's ulimit would.
-        const [file, argv] =
-          sanitize && process.platform !== "win32"
-            ? [
-                "/bin/sh",
-                ["-c", 'ulimit -s "$(ulimit -H -s)" && exec "$0" "$@"', compiler, ...args],
-              ]
-            : [compiler, args];
-        const result = await exec(file, argv, {
-          ...nativeOptions,
-          env: { ...nativeOptions.env, ...env },
-        }).catch((error: unknown) => {
-          const failure = error as Error & {
-            code?: string | number;
-            signal?: string;
-            killed?: boolean;
-            stdout?: string;
-            stderr?: string;
-          };
-          // A step this harness stops reports only "signal=SIGTERM", which
-          // reads like the compiler died; name the limit that fired instead.
-          const timedOut =
-            failure.killed === true ? `\ntimed out after ${options.timeout / 1000}s` : "";
-          throw new Error(
-            `${failure.message}\ncode=${failure.code} signal=${failure.signal}${timedOut}\n${failure.stderr ?? ""}\n${failure.stdout ?? ""}`,
-            { cause: error },
-          );
+      expect(actual.stdout).toEqual(oracle.stdout);
+      expect(actual.stderr).toEqual(oracle.stderr);
+    };
+    const sample = join(root, "tests/corpus/class-array-optional-return.ts");
+    const unionSample = join(root, "tests/corpus/union-nested-layout-discriminant.ts");
+    const receiverSample = join(root, "tests/corpus/llvm-read-receiver-lifetime.ts");
+    // CI assigns command probes and self-rebuilds to separate runners. A
+    // direct invocation retains both phases and drains them before cleanup.
+    const seedChecks = async () => {
+      // All command, library, and dynamic probes run inside the instrumented
+      // compiler in the sanitizer lane, including their failure paths.
+      const probe = seed;
+      expect(await invoke(probe, ["--help"])).toContain("scriptc build");
+      expect((await invoke(probe, ["--version"])).trim()).toBe(manifest.compiler_version);
+      const linked = join(directory, "package link");
+      symlinkSync(relocated, linked, process.platform === "win32" ? "junction" : "dir");
+      const linkedSeed = join(linked, "bin", "scriptc" + (process.platform === "win32" ? ".exe" : ""));
+      const hello = join(root, "tests/corpus/001-hello.ts");
+      const oracle = await exec(process.execPath, [hello], options);
+      const throughLink = await exec(linkedSeed, ["run", hello, "-o", executable("linked-hello"), "--optimization=dev", "--strip"], {
+        ...nativeOptions, env: { ...nativeOptions.env, SCRIPTC_TOOLCHAIN: undefined },
+      });
+      expect(throughLink.stdout).toBe(oracle.stdout);
+      expect(comparableStderr(throughLink.stderr)).toBe(oracle.stderr);
+      await checkProgram(probe, sample);
+      await checkProgram(probe, unionSample);
+      await checkProgram(probe, receiverSample);
+      await checkProgram(probe, join(root, "tests/corpus/closure-nullable-union-return.ts"));
+      await checkProgram(probe, join(root, "tests/corpus/record-optional-json-presence.ts"));
+      await checkProgram(probe, join(root, "tests/corpus/1010-json-stringify-space.ts"));
+      await checkProgram(probe, join(root, "tests/corpus/fs-write-string-bytes-union.ts"));
+
+      const fetchOptions = join(directory, "fetch-options.ts");
+      writeFileSync(fetchOptions, 'async function probe() { const response = await fetch("https://example.invalid", { headers: { accept: "application/json" } }); console.log(response.status); } if (process.env["RUN_NATIVE_FETCH_PROBE"] === "1") await probe();\n');
+      await checkProgram(probe, fetchOptions);
+      expect(await invoke(probe, ["coverage", fetchOptions])).toContain("(100%)");
+
+      const dynamic = join(directory, "dynamic.ts");
+      writeFileSync(dynamic, 'const value: any = { answer: 42 }; console.log(`answer:${value.answer}`);\n');
+      await checkProgram(probe, dynamic, ["--dynamic"]);
+      const comptime = join(directory, "comptime.ts");
+      writeFileSync(comptime, 'const answer = comptime(() => [1, 2, 3].reduce((sum, value) => sum + value, 0) * 7); console.log(answer);\n');
+      expect(await invoke(probe, ["run", comptime, "-o", executable("comptime"), "--strip"])).toBe("42\n");
+
+      const object = join(directory, "program.obj");
+      const linkInfo = JSON.parse(await invoke(probe, ["build", sample, "-o", object, "--print=native-link-info"]));
+      expect(linkInfo.program.object).toBe(object);
+      expect(readFileSync(object).length).toBeGreaterThan(0);
+
+      const profile = join(root, "tests/library-mode/contract-attest/profile.json");
+      const archive = join(directory, "contract.a");
+      const expectedArchive = join(directory, "contract-node.a");
+      await exec(process.execPath, [join(root, "packages/cli/dist/main.js"), "build", "--lib", "--profile", profile, "-o", expectedArchive], options);
+      await invoke(probe, ["build", "--lib", "--profile", profile, "-o", archive]);
+      expect(JSON.parse(readFileSync(archive + ".contract.json", "utf8")))
+        .toEqual(JSON.parse(readFileSync(expectedArchive + ".contract.json", "utf8")));
+
+      // The unmodified package exercises deep validator traversals. Compile it
+      // through the installed CLI, including its async command boundary.
+      const threeProfile = join(root, "tests/library-mode/wasm/three.json");
+      await invoke(probe, ["build", "--lib", "--profile", threeProfile, "-o", join(directory, "three.a")]);
+      if (process.platform !== "win32" && spawnSync("zig", ["version"]).status === 0 && existsSync(join(root, "packages/runtime-wasm32-wasi/runtime-pack.json"))) {
+        const linker = join(directory, "zigcc");
+        writeFileSync(linker, `#!/bin/sh\nexec '${absoluteCommand("zig").replaceAll("'", "'\\''")}' cc "$@"\n`, { mode: 0o755 });
+        const output = join(directory, "three.wasm");
+        // Install the cross-target pack after relocating the native compiler.
+        // Its resolver must discover project dependencies without Node on PATH.
+        const scope = join(directory, "node_modules/@scriptc");
+        mkdirSync(scope, { recursive: true });
+        symlinkSync(join(root, "packages/runtime-wasm32-wasi"), join(scope, "runtime-wasm32-wasi"), "dir");
+        const built = await exec(probe, ["build", "--lib", "--profile", threeProfile, "-o", output], {
+          ...nativeOptions, cwd: directory, env: { ...nativeOptions.env, SCRIPTC_TARGET: "wasm32-wasi", SCRIPTC_LINKER: linker,
+            SCRIPTC_RUNTIME_PACK: undefined, SCRIPTC_NO_CACHE: "1" },
         });
-        expect(comparableStderr(result.stderr)).toBe(expectedStderr);
-        return result.stdout;
-      };
-      const entry = join(root, "packages/compiler/src/native/cli.ts");
-      // The compiler's own source has untyped functions that SC6101 reports
-      // (diagnostics/dynamic-tier.ts). The contracts compare stderr exactly,
-      // so its self-builds leave that performance note out.
-      const quiet = "--no-dynamic-tier-warning";
-      // It also converts values between layouts at several thousand places
-      // SC6001 reports (frontend/lowering/width-copies.ts): its IR nodes
-      // are records of many shapes. The self-builds leave that out too.
-      const copies = "--no-copy-warning";
-      // Several of those record types are built in more than one key order
-      // (spreads of IR nodes), which SC6014 reports once per type
-      // (frontend/lowering/key-order-witness.ts). Left out as well.
-      const keyOrders = "--no-key-order-warning";
-      const ffi = join(directory, ".scriptc/distribution-seed/compiler.ffi.json");
-      const rebuilt = executable("scriptc-rebuilt");
-      const checkProgram = async (compiler: string, source: string, extra: string[] = []) => {
-        // This basename formerly collided with the driver's temporary object.
-        const probeDirectory = join(
-          directory,
-          compiler === seed ? "seed-probes" : "rebuilt-probes",
-        );
-        mkdirSync(probeDirectory, { recursive: true });
-        const output = join(
-          probeDirectory,
-          "program.o" + (process.platform === "win32" ? ".exe" : ""),
-        );
-        const built = await invoke(compiler, [
-          "build",
-          source,
-          "-o",
-          output,
-          "--optimization=dev",
-          "--strip",
-          ...extra,
-        ]);
-        expect(built.trim()).toBe(output);
-        const oracle = spawnSync(process.execPath, [source], options);
-        const actual = spawnSync(output, [], nativeOptions);
-        for (const result of [oracle, actual]) {
-          expect(result.error).toBeUndefined();
-          expect(result.signal).toBeNull();
-          expect(result.status, result.stderr.toString()).toBe(0);
-        }
-        expect(actual.stdout).toEqual(oracle.stdout);
-        expect(actual.stderr).toEqual(oracle.stderr);
-      };
-      const sample = join(root, "tests/corpus/class-array-optional-return.ts");
-      const unionSample = join(root, "tests/corpus/union-nested-layout-discriminant.ts");
-      const receiverSample = join(root, "tests/corpus/llvm-read-receiver-lifetime.ts");
-      // CI assigns command probes and self-rebuilds to separate runners. A
-      // direct invocation retains both phases and drains them before cleanup.
-      const seedChecks = async () => {
-        // All command, library, and dynamic probes run inside the instrumented
-        // compiler in the sanitizer lane, including their failure paths.
-        const probe = seed;
-        expect(await invoke(probe, ["--help"])).toContain("scriptc build");
-        expect((await invoke(probe, ["--version"])).trim()).toBe(manifest.compiler_version);
-        const linked = join(directory, "package link");
-        symlinkSync(relocated, linked, process.platform === "win32" ? "junction" : "dir");
-        const linkedSeed = join(
-          linked,
-          "bin",
-          "scriptc" + (process.platform === "win32" ? ".exe" : ""),
-        );
-        const hello = join(root, "tests/corpus/001-hello.ts");
-        const oracle = await exec(process.execPath, [hello], options);
-        const throughLink = await exec(
-          linkedSeed,
-          ["run", hello, "-o", executable("linked-hello"), "--optimization=dev", "--strip"],
-          {
-            ...nativeOptions,
-            env: { ...nativeOptions.env, SCRIPTC_TOOLCHAIN: undefined },
+        expect(built.stdout.trim()).toBe(output);
+        expect(comparableStderr(built.stderr)).toBe("");
+        const vertices: number[][] = [];
+        const surfaces: number[][] = [];
+        const resources: number[][] = [];
+        const wasi = new WASI({ version: "preview1" });
+        const instance = new WebAssembly.Instance(new WebAssembly.Module(readFileSync(output)), {
+          ...wasi.getImportObject(), scriptc: {
+            vertex: (...args: number[]) => vertices.push(args.map((value) => Number(value.toFixed(9)))),
+            surface: (...args: number[]) => surfaces.push(args.map((value) => Number(value.toFixed(9)))),
+            resource: (...args: number[]) => resources.push(args),
+            panic: () => { throw new Error("unexpected Wasm panic"); },
           },
-        );
-        expect(throughLink.stdout).toBe(oracle.stdout);
-        expect(comparableStderr(throughLink.stderr)).toBe(oracle.stderr);
-        await checkProgram(probe, sample);
-        await checkProgram(probe, unionSample);
-        await checkProgram(probe, receiverSample);
-        await checkProgram(probe, join(root, "tests/corpus/closure-nullable-union-return.ts"));
-        await checkProgram(probe, join(root, "tests/corpus/record-optional-json-presence.ts"));
-        await checkProgram(probe, join(root, "tests/corpus/1010-json-stringify-space.ts"));
-        await checkProgram(probe, join(root, "tests/corpus/fs-write-string-bytes-union.ts"));
-        // Exact import-cycle initialization and weak keys from unions and empty objects.
-        await checkProgram(probe, join(root, "tests/corpus/4592-cycle-const-from-import/main.ts"));
-        await checkProgram(probe, join(root, "tests/corpus/4591-weak-keys-union-records.ts"));
-        await checkProgram(probe, join(root, "tests/corpus/4593-weak-keys-empty-objects.ts"));
-
-        // A build from a lowered program (executable/lowered.ts) writes the
-        // executable a build from the sources writes, and refuses the file
-        // once a source changed.
-        const loweredSource = join(directory, "lowered-probe.ts");
-        writeFileSync(
-          loweredSource,
-          'const parts: string[] = ["lowered", "program"];\nconsole.log(parts.join(" "));\n',
-        );
-        const loweredFile = join(directory, "lowered-probe.lowered");
-        const loweredOutput = executable("lowered-probe");
-        const loweredArgs = [
-          "build",
-          loweredSource,
-          "-o",
-          loweredOutput,
-          "--optimization=dev",
-          "--strip",
-        ];
-        await invoke(probe, [...loweredArgs, "--emit-lowered", loweredFile]);
-        const fromSources = readFileSync(loweredOutput);
-        const loweredLlvm = readFileSync(join(directory, "lowered-probe.ll"));
-        await invoke(probe, [...loweredArgs, "--from-lowered", loweredFile]);
-        expect(readFileSync(join(directory, "lowered-probe.ll")).equals(loweredLlvm)).toBe(true);
-        expect(readFileSync(loweredOutput).equals(fromSources)).toBe(true);
-        expect(spawnSync(loweredOutput, [], nativeOptions).stdout.toString()).toBe(
-          "lowered program\n",
-        );
-        writeFileSync(loweredSource, readFileSync(loweredSource, "utf8") + "// edited\n");
-        const stale = spawnSync(
-          probe,
-          [...loweredArgs, "--from-lowered", loweredFile],
-          nativeOptions,
-        );
-        expect(stale.status).toBe(1);
-        expect(stale.stderr.toString()).toContain(
-          `--from-lowered: ${loweredFile} does not match this build's inputs: ${loweredSource} changed since it was lowered`,
-        );
-
-        const fetchOptions = join(directory, "fetch-options.ts");
-        writeFileSync(
-          fetchOptions,
-          'async function probe() { const response = await fetch("https://example.invalid", { headers: { accept: "application/json" } }); console.log(response.status); } if (process.env["RUN_NATIVE_FETCH_PROBE"] === "1") await probe();\n',
-        );
-        await checkProgram(probe, fetchOptions);
-        expect(await invoke(probe, ["coverage", fetchOptions])).toContain("(100%)");
-
-        const dynamic = join(directory, "dynamic.ts");
-        writeFileSync(
-          dynamic,
-          "const value: any = { answer: 42 }; console.log(`answer:${value.answer}`);\n",
-        );
-        await checkProgram(probe, dynamic);
-        const comptime = join(directory, "comptime.ts");
-        writeFileSync(
-          comptime,
-          "const answer = comptime(() => [1, 2, 3].reduce((sum, value) => sum + value, 0) * 7); console.log(answer);\n",
-        );
-        expect(
-          await invoke(probe, ["run", comptime, "-o", executable("comptime"), "--strip"]),
-        ).toBe("42\n");
-        // The evaluator this compiler starts is the Node host's: it holds no
-        // host object and bakes the values Node computes.
-        const isolated = join(directory, "comptime-isolated.ts");
-        writeFileSync(
-          isolated,
-          `const reached = comptime(() => {
-  const g: any = globalThis;
-  return String(g.constructor.constructor("return typeof process === 'object' ? 'host process' : 'no host'")());
-});
-const table = comptime(() => [Math.sin(0.5), Math.cbrt(2), Math.hypot(1, 2, 3)]);
-console.log(reached, table[0] === Math.sin(0.5), table[1] === Math.cbrt(2), table[2] === Math.hypot(1, 2, 3));
-`,
-        );
-        expect(
-          await invoke(probe, ["run", isolated, "-o", executable("comptime-isolated"), "--strip"]),
-        ).toBe("no host true true true\n");
-        for (const program of [
-          "1050-comptime-tables.ts",
-          "1051-comptime-strings.ts",
-          "1052-comptime-records.ts",
-          "1053-comptime-json.ts",
-          "1054-comptime-modules/main.ts",
-          "8961-comptime-node-values.ts",
-          "8962-comptime-result-data.ts",
-        ]) {
-          const source = join(root, "tests/corpus", program);
-          const oracle = spawnSync(
-            process.execPath,
-            ["--import", join(root, "tests/harness/comptime-shim.mjs"), source],
-            options,
-          );
-          expect(oracle.status, oracle.stderr.toString()).toBe(0);
-          expect(
-            await invoke(probe, ["run", source, "-o", executable("comptime-corpus"), "--strip"]),
-            program,
-          ).toBe(oracle.stdout.toString());
-        }
-
-        // A rebuild answers as a cold build does, whatever was edited.
-        await checkBuildCacheContracts({
-          compiler: probe,
-          directory: join(directory, "build-cache"),
-          env: nativeOptions.env,
-          run: (file, args, env) => exec(file, args, { ...nativeOptions, env }),
         });
-
-        const object = join(directory, "program.obj");
-        const linkInfo = JSON.parse(
-          await invoke(probe, ["build", sample, "-o", object, "--print=native-link-info"]),
-        );
-        expect(linkInfo.program.object).toBe(object);
-        expect(readFileSync(object).length).toBeGreaterThan(0);
-
-        const profile = join(root, "tests/library-mode/contract-attest/profile.json");
-        const archive = join(directory, "contract.a");
-        const expectedArchive = join(directory, "contract-node.a");
-        await exec(
-          process.execPath,
-          [
-            join(root, "packages/cli/dist/main.js"),
-            "build",
-            "--lib",
-            "--profile",
-            profile,
-            "-o",
-            expectedArchive,
-          ],
-          options,
-        );
-        await invoke(probe, ["build", "--lib", "--profile", profile, "-o", archive]);
-        expect(JSON.parse(readFileSync(archive + ".contract.json", "utf8"))).toEqual(
-          JSON.parse(readFileSync(expectedArchive + ".contract.json", "utf8")),
-        );
-
-        // Integer-slot checking walks every library call's argument types,
-        // including bytes and arrays, inside the native compiler itself.
-        const intProfile = join(root, "tests/library-mode/contract-int-libcall/profile.json");
-        const intArchive = join(directory, "contract-int.a");
-        const expectedIntArchive = join(directory, "contract-int-node.a");
-        await exec(
-          process.execPath,
-          [
-            join(root, "packages/cli/dist/main.js"),
-            "build",
-            "--lib",
-            "--profile",
-            intProfile,
-            "-o",
-            expectedIntArchive,
-          ],
-          options,
-        );
-        await invoke(probe, ["build", "--lib", "--profile", intProfile, "-o", intArchive]);
-        const intContract = JSON.parse(readFileSync(intArchive + ".contract.json", "utf8"));
-        expect(intContract.integer_slots).toEqual([{ slot: "Model.phase", class: "i64" }]);
-        expect(intContract).toEqual(
-          JSON.parse(readFileSync(expectedIntArchive + ".contract.json", "utf8")),
-        );
-
-        // The unmodified package exercises deep validator traversals. Compile it
-        // through the installed CLI, including its async command boundary.
-        const threeProfile = join(root, "tests/library-mode/wasm/three.json");
-        await invoke(probe, [
-          "build",
-          "--lib",
-          "--profile",
-          threeProfile,
-          "-o",
-          join(directory, "three.a"),
-        ]);
-        if (
-          process.platform !== "win32" &&
-          spawnSync("zig", ["version"]).status === 0 &&
-          existsSync(join(root, "packages/runtime-wasm32-wasi/runtime-pack.json"))
-        ) {
-          const linker = join(directory, "zigcc");
-          writeFileSync(
-            linker,
-            `#!/bin/sh\nexec '${absoluteCommand("zig").replaceAll("'", "'\\''")}' cc "$@"\n`,
-            { mode: 0o755 },
-          );
-          const output = join(directory, "three.wasm");
-          const missing = spawnSync(
-            probe,
-            ["build", "--lib", "--profile", threeProfile, "-o", output],
-            {
-              ...nativeOptions,
-              cwd: directory,
-              env: {
-                ...nativeOptions.env,
-                SCRIPTC_TARGET: "wasm32-wasi",
-                SCRIPTC_LINKER: linker,
-                SCRIPTC_RUNTIME_PACK: undefined,
-                SCRIPTC_NO_CACHE: "1",
-              },
-            },
-          );
-          expect(missing.status).toBe(1);
-          expect(missing.stderr.toString()).toContain(
-            "error SC3003: runtime pack for wasm32-wasi is not installed; install @scriptc/runtime-wasm32-wasi@",
-          );
-          expect(missing.stderr.toString()).toContain(
-            "hint: scriptc includes the runtime pack for its own platform only",
-          );
-          // Install the cross-target pack after relocating the native compiler.
-          // Its resolver must discover project dependencies without Node on PATH.
-          const scope = join(directory, "node_modules/@scriptc");
-          mkdirSync(scope, { recursive: true });
-          symlinkSync(
-            join(root, "packages/runtime-wasm32-wasi"),
-            join(scope, "runtime-wasm32-wasi"),
-            "dir",
-          );
-          const built = await exec(
-            probe,
-            ["build", "--lib", "--profile", threeProfile, "-o", output],
-            {
-              ...nativeOptions,
-              cwd: directory,
-              env: {
-                ...nativeOptions.env,
-                SCRIPTC_TARGET: "wasm32-wasi",
-                SCRIPTC_LINKER: linker,
-                SCRIPTC_RUNTIME_PACK: undefined,
-                SCRIPTC_NO_CACHE: "1",
-              },
-            },
-          );
-          expect(built.stdout.trim()).toBe(output);
-          expect(comparableStderr(built.stderr)).toBe("");
-          const vertices: number[][] = [];
-          const surfaces: number[][] = [];
-          const resources: number[][] = [];
-          const wasi = new WASI({ version: "preview1" });
-          const instance = new WebAssembly.Instance(new WebAssembly.Module(readFileSync(output)), {
-            ...wasi.getImportObject(),
-            scriptc: {
-              vertex: (...args: number[]) =>
-                vertices.push(args.map((value) => Number(value.toFixed(9)))),
-              surface: (...args: number[]) =>
-                surfaces.push(args.map((value) => Number(value.toFixed(9)))),
-              resource: (...args: number[]) => resources.push(args),
-              panic: () => {
-                throw new Error("unexpected Wasm panic");
-              },
-            },
-          });
-          wasi.initialize(instance);
-          const api = instance.exports as Record<string, (...args: number[]) => number>;
-          api.app_init!();
-          for (const time of [0, 123, 2000]) expect(api.app_frame!(time, 1.5)).toBe(24);
-          api.app_dispose!();
-          const oracle = await exec(
-            process.execPath,
-            [
-              "--input-type=module",
-              "--eval",
-              `
+        wasi.initialize(instance);
+        const api = instance.exports as Record<string, (...args: number[]) => number>;
+        api.app_init!();
+        for (const time of [0, 123, 2000]) expect(api.app_frame!(time, 1.5)).toBe(24);
+        api.app_dispose!();
+        const oracle = await exec(process.execPath, ["--input-type=module", "--eval", `
           const vertices = [], surfaces = [], resources = [];
           globalThis.vertex = (...args) => vertices.push(args.map(value => Number(value.toFixed(9))));
           globalThis.surface = (...args) => surfaces.push(args.map(value => Number(value.toFixed(9))));
@@ -584,287 +219,65 @@ console.log(reached, table[0] === Math.sin(0.5), table[1] === Math.cbrt(2), tabl
           for (const time of [0, 123, 2000]) frame(time, 1.5);
           dispose();
           console.log(JSON.stringify({ vertices, surfaces, resources }));
-        `,
-            ],
-            options,
-          );
-          expect({ vertices, surfaces, resources }).toEqual(JSON.parse(oracle.stdout));
-          expect(oracle.stderr).toBe("");
-          api.app_collect!();
-        }
+        `], options);
+        expect({ vertices, surfaces, resources }).toEqual(JSON.parse(oracle.stdout));
+        expect(oracle.stderr).toBe("");
+        api.app_collect!();
+      }
 
-        const badSource = join(directory, "bad.ts");
-        writeFileSync(badSource, 'const value: number = "wrong"; console.log(value);\n');
-        const retained = executable("retained");
-        writeFileSync(retained, "existing output");
-        const failed = spawnSync(probe, ["build", badSource, "-o", retained], nativeOptions);
-        expect(failed.status).toBe(1);
-        expect(failed.stderr.toString()).toContain("not assignable");
-        expect(readFileSync(retained, "utf8")).toBe("existing output");
-
-        // Programs that need a Node island. The island steps of a build are
-        // one function both drivers call (executable/islands.ts), so this
-        // compiler builds them as the Node-hosted one does: each executable
-        // runs like the program under Node, and each one whose islands are
-        // npm packages also writes the LLVM and IR the Node-hosted compiler
-        // writes. A module of the program itself is the exception: the
-        // static effect gate that admits one to the probe parses with the
-        // TypeScript 5 JavaScript parser, which only the Node-hosted
-        // compiler has, so this one keeps such a load eager. The program is
-        // the same; the load runs when Node starts instead of at its import.
-        const pack = libnodePack();
-        if (pack === null) {
-          // No libnode pack on this machine (libnode.ts; CI requires one).
-          console.log("bootstrap: Node island programs skipped (SCRIPTC_LIBNODE names no pack)");
-        } else {
-          const flagged = join(directory, "island-flag");
-          mkdirSync(join(flagged, "node_modules/tiny"), { recursive: true });
-          writeFileSync(join(flagged, "package.json"), '{ "type": "module" }\n');
-          writeFileSync(
-            join(flagged, "main.ts"),
-            'import { greet } from "tiny";\nconsole.log(greet("island"));\n',
-          );
-          writeFileSync(
-            join(flagged, "node_modules/tiny/package.json"),
-            '{ "name": "tiny", "version": "1.0.0", "main": "index.js", "types": "index.d.ts" }\n',
-          );
-          writeFileSync(
-            join(flagged, "node_modules/tiny/index.js"),
-            '"use strict";\nexports.greet = (name) => "hello from " + name;\n',
-          );
-          writeFileSync(
-            join(flagged, "node_modules/tiny/index.d.ts"),
-            "export declare function greet(name: string): string;\n",
-          );
-          const islandPrograms: { program: string; extra: string[]; same: boolean }[] = [
-            // a package marked "node" in package.json
-            {
-              program: "tests/corpus/6870-node-island-server-fibers/main.ts",
-              extra: [],
-              same: true,
-            },
-            // a package whose lowering is refused
-            {
-              program: "tests/corpus/8810-node-island-sdk-request-values/main.ts",
-              extra: [],
-              same: true,
-            },
-            // a package the pre-scan finds outside the native subset
-            { program: "tests/corpus/6817-node-island-esm/main.ts", extra: [], same: true },
-            // a package that would compile only with runtime fences
-            { program: "tests/corpus/6819-node-island-fenced/main.ts", extra: [], same: true },
-            // a module of the program (sloppy-mode JavaScript): eager here
-            {
-              program: "tests/corpus/8424-sloppy-annexb-block-function-island/main.js",
-              extra: [],
-              same: false,
-            },
-            // an explicit load through @scriptc/node
-            {
-              program: "tests/corpus/6850-node-island-shared-singleton/main.mjs",
-              extra: [],
-              same: true,
-            },
-            // a packaged installed in the project, named on the command line
-            { program: join(flagged, "main.ts"), extra: ["--node-island=tiny"], same: true },
-          ];
-          // The deferral probe builds its host with a C compiler. PATH is
-          // empty here, so the build names it (and, on Linux, the linker
-          // clang delegates to), for both compilers alike.
-          let islandCompiler = absoluteCommand(process.env["CC"] ?? "clang");
-          if (process.platform === "linux") {
-            const linker = await exec(islandCompiler, ["--print-prog-name=ld"], options);
-            const quote = (value: string) => "'" + value.replaceAll("'", "'\\''") + "'";
-            const wrapper = join(directory, "island-cc");
-            writeFileSync(
-              wrapper,
-              `#!/bin/sh\nexec ${quote(islandCompiler)} ${quote("--ld-path=" + absoluteCommand(linker.stdout.trim()))} "$@"\n`,
-            );
-            chmodSync(wrapper, 0o755);
-            islandCompiler = wrapper;
-          }
-          const islandEnv = { SCRIPTC_LIBNODE: pack, CC: islandCompiler };
-          // The Node-hosted compiler, from source, with the same environment
-          // the native one gets apart from PATH (it runs under Node).
-          const hosted = (args: string[]) =>
-            spawnSync(
-              process.execPath,
-              ["--import", "tsx", join(root, "packages/cli/src/main.ts"), ...args],
-              {
-                ...options,
-                env: {
-                  ...process.env,
-                  ...islandEnv,
-                  SCRIPTC_CACHE_DIR: join(directory, "island-hosted-cache"),
-                },
-              },
-            );
-          const native = (args: string[]) => {
-            // As invoke(): a sanitized compiler needs the larger stack.
-            const [file, argv] =
-              sanitize && process.platform !== "win32"
-                ? [
-                    "/bin/sh",
-                    ["-c", 'ulimit -s "$(ulimit -H -s)" && exec "$0" "$@"', probe, ...args],
-                  ]
-                : [probe, args];
-            return spawnSync(file, argv, {
-              ...nativeOptions,
-              env: { ...nativeOptions.env, ...islandEnv },
-            });
-          };
-          await bootstrapStep(
-            "Node island programs match Node and the Node-hosted compiler",
-            async () => {
-              for (const [index, { program, extra, same }] of islandPrograms.entries()) {
-                const source = resolve(root, program);
-                const stem = source.replace(/^.*[\\/]/, "").replace(/\.(ts|mjs|js)$/, "");
-                const flags = [
-                  "--optimization=dev",
-                  "--strip",
-                  "--keep-llvm",
-                  "--emit-ir",
-                  ...extra,
-                ];
-                const built = join(directory, "island-native", String(index));
-                const oracleBuilt = join(directory, "island-hosted", String(index));
-                for (const directoryOf of [built, oracleBuilt])
-                  mkdirSync(directoryOf, { recursive: true });
-                const output = join(built, "program");
-                const build = native(["build", source, "-o", output, ...flags]);
-                expect(build.status, `${program}\n${build.stderr.toString()}`).toBe(0);
-                // Without Node on PATH: the executable loads the recorded pack.
-                const oracle = spawnSync(process.execPath, [source], options);
-                const actual = spawnSync(output, [], nativeOptions);
-                for (const result of [oracle, actual]) {
-                  expect(result.error, program).toBeUndefined();
-                  expect(result.signal, program).toBeNull();
-                }
-                expect(actual.status, `${program}\n${actual.stderr.toString()}`).toBe(
-                  oracle.status,
-                );
-                expect(actual.stdout.toString(), program).toBe(oracle.stdout.toString());
-                expect(actual.stderr.toString(), program).toBe(oracle.stderr.toString());
-                if (!same) continue;
-                // The same build by the Node-hosted compiler writes the same
-                // LLVM, byte for byte, and the same IR: the libnode record, the
-                // deferral snapshots and the module tree's bytes included. The
-                // IR is compared as a value, as the compiler's own is below: the
-                // two compilers serialize a module's members in different orders.
-                const hostedBuild = hosted([
-                  "build",
-                  source,
-                  "-o",
-                  join(oracleBuilt, "program"),
-                  ...flags,
-                ]);
-                expect(hostedBuild.status, `${program}\n${hostedBuild.stderr.toString()}`).toBe(0);
-                const hostedLlvm = readFileSync(join(oracleBuilt, `${stem}.ll`));
-                const hostedIr = readFileSync(join(oracleBuilt, `${stem}.ir.json`), "utf8");
-                // The comparison is over a build that does call into Node.
-                expect(hostedLlvm.includes("@scr_node_island_"), program).toBe(true);
-                expect(hostedIr.includes('"nodeIsland.'), program).toBe(true);
-                expect(
-                  readFileSync(join(built, `${stem}.ll`)).equals(hostedLlvm),
-                  `${program}: the native and the Node-hosted compiler emit different LLVM`,
-                ).toBe(true);
-                expect(
-                  isDeepStrictEqual(
-                    JSON.parse(readFileSync(join(built, `${stem}.ir.json`), "utf8")),
-                    JSON.parse(hostedIr),
-                  ),
-                  `${program}: the native and the Node-hosted compiler lower to different IR`,
-                ).toBe(true);
-              }
-            },
-          );
-        }
-
-        // Which options a command takes is read from the command table
-        // (cli/usage.ts): the native CLI refuses the same ones with the same line.
-        for (const [args, refusal] of [
-          [
-            ["cache", "warm", "--strip"],
-            "scriptc cache warm takes only native optimization/sanitizer options and profile names",
-          ],
-          [
-            ["merge-profiles", "-o", join(directory, "merged.profdata"), "--tier=auto", "a"],
-            "scriptc merge-profiles takes -o <out.profdata>, optionally --sparse, and one or more profiles",
-          ],
-          [
-            ["build", "--lib", "--profile", profile, "--node-island=left-pad"],
-            "scriptc build --lib takes no --backend/--emit/--print/",
-          ],
-          [["build", "--wasm=module.wasm", hello], "--wasm is a coverage-only option"],
-        ] as const) {
-          const refused = spawnSync(probe, args, nativeOptions);
-          expect(refused.status, args.join(" ")).toBe(1);
-          expect(
-            comparableStderr(refused.stderr.toString()).split("\n")[0],
-            args.join(" "),
-          ).toContain(refusal);
-        }
-      };
+      const badSource = join(directory, "bad.ts");
+      writeFileSync(badSource, 'const value: number = "wrong"; console.log(value);\n');
+      const retained = executable("retained");
+      writeFileSync(retained, "existing output");
+      const failed = spawnSync(probe, ["build", badSource, "-o", retained], nativeOptions);
+      expect(failed.status).toBe(1);
+      expect(failed.stderr.toString()).toContain("not assignable");
+      expect(readFileSync(retained, "utf8")).toBe("existing output");
+    };
+    const rebuildChecks = async () => {
+      // The plain lane optimizes the next generation for its fixed-point
+      // check. The sanitizer lane has already instrumented the seed; it
+      // rebuilds an instrumented development compiler and executes it below.
+      // --strip keeps debug metadata out of the IR/LLVM equality comparison.
+      const self = await bootstrapStep("production CLI rebuilds itself", () =>
+        invoke(seed, ["build", entry, "-o", rebuilt, "--strip", "--keep-llvm", "--emit-ir", "--ffi", ffi,
+          ...(sanitize ? ["--sanitize", "--optimization=dev"] : [])],
+        "scriptc: warning: --emit-ir is deprecated; use --emit=ir for IR as the primary output\n"));
+      expect(self.trim()).toBe(rebuilt);
       // The production chain owns the complete frontend and emitter proof:
       // compare the Node seed's IR and LLVM with the native self-rebuild, then
-      // execute the next compiler generation. Large structural checks run in a
-      // roomy child so Vitest's worker remains responsive.
+      // execute the next compiler generation below. Large structural checks
+      // run in a roomy child so Vitest's worker remains responsive.
       const seedDirectory = join(directory, ".scriptc/distribution-seed");
-      const seedIr = join(seedDirectory, "cli.ir.json");
-      const compareArtifacts = async ({ ir, llvm }: { ir: boolean; llvm: boolean }) => {
-        const comparison = await bootstrapStep(
-          `compare Node and native compiler ${[ir ? "IR" : "", llvm ? "LLVM" : ""].filter(Boolean).join(" and ")}`,
-          () =>
-            exec(
-              process.execPath,
-              [
-                "--max-old-space-size=8192",
-                "--import",
-                "tsx",
-                "--input-type=module",
-                "--eval",
-                `
+      const compareArtifacts = async () => {
+        const comparison = await bootstrapStep("compare Node and native compiler IR and LLVM", () =>
+          exec(process.execPath, ["--max-old-space-size=8192", "--import", "tsx", "--input-type=module", "--eval", `
             import assert from 'node:assert/strict';
             import { readFileSync } from 'node:fs';
             import { isDeepStrictEqual } from 'node:util';
-            import { deserializeModuleBytes, validateModule } from ${JSON.stringify(pathToFileURL(join(root, "packages/compiler/src/index.ts")).href)};
-            import { occurrences, withoutRange } from ${JSON.stringify(pathToFileURL(join(root, "tests/harness/large-artifacts.ts")).href)};
-            // Both artifacts are compared as bytes and per-function documents:
-            // either can exceed V8's maximum string length.
-            if (${ir}) {
-              const expected = deserializeModuleBytes(readFileSync(process.argv[1]));
-              const actual = deserializeModuleBytes(readFileSync(process.argv[2]));
-              assert.ok(actual.functions.length > 1000);
-              assert.deepEqual(validateModule(actual), []);
-              assert.ok(isDeepStrictEqual(actual, expected), 'native self-lowering must match the Node seed');
-            }
-            if (${llvm}) {
-              const seedLlvm = readFileSync(process.argv[3]);
-              let nativeLlvm = readFileSync(process.argv[4]);
-              if (${sanitize}) {
-                // The Node sanitizer builds runtime sources directly; the native
-                // executable path also emits the runtime ABI check. Pin that
-                // difference before comparing the rest of the complete module.
-                const declaration = 'declare void @' + ${JSON.stringify(RUNTIME_ABI_MARKER)} + '()\\n';
-                const call = '  call void @' + ${JSON.stringify(RUNTIME_ABI_MARKER)} + '()\\n';
-                for (const line of [declaration, call]) {
-                  assert.equal(occurrences(seedLlvm, line).length, 0);
-                  const found = occurrences(nativeLlvm, line);
-                  assert.equal(found.length, 1);
-                  nativeLlvm = withoutRange(nativeLlvm, found[0], Buffer.byteLength(line));
-                }
+            import { deserializeModule, validateModule } from ${JSON.stringify(pathToFileURL(join(root, "packages/compiler/src/index.ts")).href)};
+            const expected = deserializeModule(readFileSync(process.argv[1], 'utf8'));
+            const actual = deserializeModule(readFileSync(process.argv[2], 'utf8'));
+            assert.ok(actual.functions.length > 1000);
+            assert.deepEqual(validateModule(actual), []);
+            assert.ok(isDeepStrictEqual(actual, expected), 'native self-lowering must match the Node seed');
+            const seedLlvm = readFileSync(process.argv[3], 'utf8');
+            let nativeLlvm = readFileSync(process.argv[4], 'utf8');
+            if (${sanitize}) {
+              // The Node sanitizer builds runtime sources directly; the native
+              // executable path also emits the runtime ABI check. Pin that
+              // difference before comparing the rest of the complete module.
+              const declaration = 'declare void @' + ${JSON.stringify(RUNTIME_ABI_MARKER)} + '()\\n';
+              const call = '  call void @' + ${JSON.stringify(RUNTIME_ABI_MARKER)} + '()\\n';
+              for (const line of [declaration, call]) {
+                assert.equal(seedLlvm.split(line).length, 1);
+                assert.equal(nativeLlvm.split(line).length, 2);
+                nativeLlvm = nativeLlvm.replace(line, '');
               }
-              assert.ok(seedLlvm.equals(nativeLlvm), 'native LLVM emission must match the Node seed');
             }
-          `,
-                seedIr,
-                join(directory, "cli.ir.json"),
-                join(seedDirectory, "cli.ll"),
-                join(directory, "cli.ll"),
-              ],
-              options,
-            ),
-        );
+            assert.ok(seedLlvm === nativeLlvm, 'native LLVM emission must match the Node seed');
+          `, join(seedDirectory, "cli.ir.json"), join(directory, "cli.ir.json"),
+          join(seedDirectory, "cli.ll"), join(directory, "cli.ll")], options));
         expect(comparison.stdout).toBe("");
         expect(comparison.stderr).toBe("");
       };
@@ -875,158 +288,29 @@ console.log(reached, table[0] === Math.sin(0.5), table[1] === Math.cbrt(2), tabl
         await checkProgram(rebuilt, receiverSample);
         await checkProgram(rebuilt, join(root, "tests/corpus/1010-json-stringify-space.ts"));
       };
-      const settle = async (checks: Promise<void>[]) => {
-        for (const check of await Promise.allSettled(checks))
-          if (check.status === "rejected") throw check.reason;
-      };
-      // --strip keeps debug metadata out of the IR/LLVM equality comparison.
-      const rebuildChecks = async () => {
-        // The plain lane optimizes the next generation for its fixed-point check.
-        const self = await bootstrapStep("production CLI rebuilds itself", () =>
-          invoke(
-            seed,
-            [
-              "build",
-              entry,
-              "-o",
-              rebuilt,
-              "--strip",
-              "--keep-llvm",
-              "--emit-ir",
-              "--ffi",
-              ffi,
-              quiet,
-              copies,
-              keyOrders,
-            ],
-            "scriptc: warning: --emit-ir is deprecated; use --emit=ir for IR as the primary output\n",
-          ),
-        );
-        expect(self.trim()).toBe(rebuilt);
-        const fixedPoint = async () => {
-          // The plain lane owns the third-generation fixed point. The sanitizer
-          // lane runs the complete frontend and emitter under ASan in its two
-          // rebuild halves, compares both artifacts, and executes the new
-          // compiler.
+      const fixedPoint = async () => {
+        // The plain lane owns the third-generation fixed point. The sanitizer
+        // lane already runs the full frontend and emitter under ASan in the
+        // self-rebuild, compares both artifacts, and executes the new compiler.
+        if (!sanitize) {
           const seedLlvm = join(directory, "cli.ll");
           const rebuiltLlvm = join(directory, "rebuilt.ll");
-          // Every range's emit worker exits failing (SCRIPTC_EMIT_WORKER_FAIL),
-          // so this generation runs the serial fallback for the whole module
-          // and must still write the LLVM the seed wrote.
           await bootstrapStep("rebuilt compiler emits itself", () =>
-            invoke(
-              rebuilt,
-              [
-                "build",
-                entry,
-                "--emit=llvm",
-                "-o",
-                rebuiltLlvm,
-                "--ffi",
-                ffi,
-                quiet,
-                copies,
-                keyOrders,
-              ],
-              "",
-              { SCRIPTC_EMIT_WORKER_FAIL: "all" },
-            ),
-          );
+            invoke(rebuilt, ["build", entry, "--emit=llvm", "-o", rebuiltLlvm, "--ffi", ffi]));
           // Executable output adds a runtime ABI check; textual LLVM emission
           // omits it. Compare all other output without changing either mode.
-          const withoutAbiCheck = (path: string): Buffer =>
-            withoutFirstLine(
-              withoutFirstLine(
-                readFileSync(path),
-                "declare void @scr_runtime_abi_v",
-                /^declare void @scr_runtime_abi_v\d+\(\)\n$/,
-              ),
-              "  call void @scr_runtime_abi_v",
-              /^  call void @scr_runtime_abi_v\d+\(\)\n$/,
-            );
-          expect(
-            withoutAbiCheck(seedLlvm).equals(withoutAbiCheck(rebuiltLlvm)),
-            "native compiler generations must emit identical LLVM",
-          ).toBe(true);
-        };
-        await settle([compareArtifacts({ ir: true, llvm: true }), probeRebuilt(), fixedPoint()]);
+          const withoutAbiCheck = (path: string): string => readFileSync(path, "utf8")
+            .replace(/^declare void @scr_runtime_abi_v\d+\(\)\n/m, "")
+            .replace(/^  call void @scr_runtime_abi_v\d+\(\)\n/m, "");
+          expect(withoutAbiCheck(seedLlvm) === withoutAbiCheck(rebuiltLlvm), "native compiler generations must emit identical LLVM").toBe(true);
+        }
       };
-      // The sanitizer lane splits the instrumented self-rebuild at the IR
-      // boundary. Its frontend half lowers the compiler inside the instrumented
-      // seed and compares that IR with the seed's; lowering does not depend on
-      // the output's sanitizer or optimization options. Its emitter half runs
-      // the instrumented LLVM emitter on the seed's IR (equal to the native IR
-      // by the frontend half's comparison), compares the LLVM, then links and
-      // executes an instrumented development compiler.
-      const rebuildFrontend = async () => {
-        const lowered = join(directory, "cli.ir.json");
-        const output = await bootstrapStep("sanitized native frontend lowers the compiler", () =>
-          invoke(seed, [
-            "build",
-            entry,
-            "--emit=ir",
-            "-o",
-            lowered,
-            "--ffi",
-            ffi,
-            quiet,
-            copies,
-            keyOrders,
-          ]),
-        );
-        expect(output.trim()).toBe(lowered);
-        await compareArtifacts({ ir: true, llvm: false });
-      };
-      const rebuildEmit = async () => {
-        const self = await bootstrapStep("sanitized native emitter rebuilds the compiler", () =>
-          invoke(
-            seed,
-            [
-              "build",
-              entry,
-              "-o",
-              rebuilt,
-              "--strip",
-              "--keep-llvm",
-              "--ffi",
-              ffi,
-              "--sanitize",
-              "--optimization=dev",
-              // The seed's IR, lowered by the JavaScript compiler with the
-              // seed build's options: an IR artifact records none of what a
-              // lowered program depends on, so each kind is accepted here,
-              // and the two comparisons around this build stand in for them.
-              "--from-lowered",
-              seedIr,
-              "--from-lowered-accept=compiler,options,inputs",
-              quiet,
-              copies,
-              keyOrders,
-            ],
-            "scriptc: warning: --from-lowered: building from " +
-              seedIr +
-              " although its compiler differs: the file holds only an IR module, which does not record its compiler\n" +
-              "scriptc: warning: --from-lowered: building from " +
-              seedIr +
-              " although its options differ: the file holds only an IR module, which does not record its options\n" +
-              "scriptc: warning: --from-lowered: building from " +
-              seedIr +
-              " although its inputs differ: the file holds only an IR module, which does not record its inputs\n",
-          ),
-        );
-        expect(self.trim()).toBe(rebuilt);
-        await settle([compareArtifacts({ ir: false, llvm: true }), probeRebuilt()]);
-      };
-      await runNativeBootstrapChecks(plan, {
-        commands: () => bootstrapStep("seed command and library probes", seedChecks),
-        rebuild: rebuildChecks,
-        "rebuild-frontend": rebuildFrontend,
-        "rebuild-emit": rebuildEmit,
-      });
-    } finally {
-      rmSync(directory, { recursive: true, force: true });
-    }
-  },
-  // The plain rebuild phase took up to 3892 s with a seed built in 1800 s or less.
-  sanitize ? 10_800_000 : 7_200_000,
-);
+      const checks = await Promise.allSettled([compareArtifacts(), probeRebuilt(), fixedPoint()]);
+      for (const check of checks) if (check.status === "rejected") throw check.reason;
+    };
+    await runNativeBootstrapChecks(plan, {
+      commands: () => bootstrapStep("seed command and library probes", seedChecks),
+      rebuild: rebuildChecks,
+    });
+  } finally { rmSync(directory, { recursive: true, force: true }); }
+}, sanitize ? 10_800_000 : 5_400_000);

@@ -1,11 +1,11 @@
-// A project tsconfig with strictPropertyInitialization OFF (strict: false;
-// strictNullChecks stays on — the floor): tsc no longer verifies that
-// initializer-less fields are assigned in the constructor. An
-// unconditionally ctor-assigned field compiles as ever (`Ok`); a field
-// assigned only in a method now DEFERS like a `!` assertion (the slot
-// rides `T | undefined`, reads extract — SEMANTICS.md 372), so `Bad`
-// compiles too. The fence survives exactly where the deferral cannot
-// carry the type: a MAP-typed field (map arms cannot join a union).
+// A project tsconfig that turns `strict` off (strictNullChecks stays on). The
+// strict family is required, not adopted: the build fails with SC0002 naming
+// `strict`, and the checker runs with strictPropertyInitialization on, so
+// tsc's own error names each initializer-less field no constructor assigns
+// (`Bad`, `Worse`). `Ok` assigns its fields unconditionally and passes.
+// Before the family was required, `Bad` compiled with a deferred init (the
+// slot rode `T | undefined`) and `Worse` was fenced: a map-typed field has
+// no deferral union.
 
 class Ok {
   n: number;
@@ -17,14 +17,14 @@ class Ok {
 }
 
 class Bad {
-  v: number; // compiles: deferred init (reads NaN until assigned)
+  v: number; // TS2564: assigned only in a method
   m(): void {
     this.v = 1;
   }
 }
 
 class Worse {
-  m: Map<string, number>; // fenced: no deferral union for map fields
+  m: Map<string, number>; // TS2564: assigned only in a method
   fill(): void {
     this.m = new Map();
   }

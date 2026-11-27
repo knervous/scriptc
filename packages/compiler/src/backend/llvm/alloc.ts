@@ -1,3 +1,4 @@
+// This file was modified from scriptc (Apache-2.0); see MODIFICATIONS.md.
 /* Emitted object allocation and deallocation for records and class
  * instances.
  *
@@ -23,9 +24,11 @@
  * tag in the chunk table; other blocks (another arena's, system fallbacks)
  * go back through scr_rt_free.
  *
- * Inlining is limited to the targets where the allocator can be live: 64-bit,
- * not WASI, not Windows, and not thread-instanced libraries (whose
- * allocator is compiled out). Worker programs inline too, against the
+ * Inlining is limited to 64-bit targets other than WASI, an explicit
+ * Windows triple, and thread-instanced libraries (whose allocator is
+ * compiled out). Windows runs the allocator too (scr_rc.h SCR_SMALL_ALLOC),
+ * and a build for the host ABI (no triple) on Windows inlines; an explicit
+ * Windows triple keeps the out-of-line calls. Worker programs inline too, against the
  * thread-local allocator state, live count and dispose hook of the calling
  * script thread (each thread owns an arena; see scr_runtime.h). Elsewhere
  * the out-of-line calls remain. */
@@ -121,9 +124,11 @@ export function inlineAllocSupported(options: {
   if (options.pointerBits === 32 || options.wasi === true || options.threadInstances === true) {
     return false;
   }
-  // An omitted triple means the host ABI. That stays sound even on a host
-  // whose runtime compiles the allocator out: scr_sa is defined there too
-  // and stays zero, so only the slow paths run.
+  // An omitted triple means the host ABI, Windows included. That stays sound
+  // even on a host whose runtime compiles the allocator out: scr_sa is defined
+  // there too and stays zero, so only the slow paths run. Explicit Windows
+  // triples keep the out-of-line calls (alloc.test.ts pins it), although the
+  // Windows runtime's allocator is live (scr_rc.h SCR_SMALL_ALLOC).
   const triple = (options.targetTriple ?? "").toLowerCase();
   return !/windows|mingw|msvc|cygwin|wasm/.test(triple);
 }

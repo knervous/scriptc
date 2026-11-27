@@ -1,6 +1,0 @@
-{
- "order": [
-  "<repo>/tests/corpus/8007-buffer-fill-swap-utf16le.ts"
- ],
- "diags": []
-}

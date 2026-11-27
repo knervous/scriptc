@@ -1,0 +1,19 @@
+[package]
+name = "audio-decode"
+version = "0.1.0"
+description = "decodeAudioData for a native host: Opus, WAV and MP3 clips decoded to planar f32 and resampled to the context's rate"
+edition = "2024"
+license = "Apache-2.0"
+publish = false
+
+# A member of the host's workspace.
+
+[dependencies]
+# MP3 (music): Symphonia's pure-Rust MPEG audio reader and Layer III decoder, without the rest of
+# Symphonia (its probe and metadata readers). MPL-2.0.
+symphonia-bundle-mp3 = { version = "0.6.1", default-features = false, features = ["mp3"] }
+symphonia-core = { version = "0.6.1", default-features = false }
+
+[build-dependencies]
+# libopus from vendor/libopus (build.rs).
+cc = "1"

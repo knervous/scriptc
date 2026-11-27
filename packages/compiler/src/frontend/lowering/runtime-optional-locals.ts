@@ -1,3 +1,4 @@
+// This file was modified from scriptc (Apache-2.0); see MODIFICATIONS.md.
 import type { IrLocal } from "../../ir/ir.js";
 
 /** Absence facts survive assignments, but a branch-local guard must not
@@ -8,9 +9,7 @@ export class RuntimeOptionalLocals {
   private readonly active = new Map<IrLocal, number>();
   private readonly scopes: { generation: number; removed: Map<IrLocal, number> }[] = [];
 
-  has(local: IrLocal): boolean {
-    return this.active.has(local);
-  }
+  has(local: IrLocal): boolean { return this.active.has(local); }
 
   add(local: IrLocal): void {
     if (!this.active.has(local)) this.active.set(local, ++this.generation);

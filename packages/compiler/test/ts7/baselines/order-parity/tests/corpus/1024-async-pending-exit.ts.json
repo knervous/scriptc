@@ -1,6 +1,0 @@
-{
- "order": [
-  "<repo>/tests/corpus/1024-async-pending-exit.ts"
- ],
- "diags": []
-}

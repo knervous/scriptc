@@ -1,6 +1,0 @@
-{
- "order": [
-  "<repo>/tests/corpus/class-static-block-this-names-the-class.ts"
- ],
- "diags": []
-}

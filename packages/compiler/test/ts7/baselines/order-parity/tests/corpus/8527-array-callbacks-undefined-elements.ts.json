@@ -1,6 +1,0 @@
-{
- "order": [
-  "<repo>/tests/corpus/8527-array-callbacks-undefined-elements.ts"
- ],
- "diags": []
-}

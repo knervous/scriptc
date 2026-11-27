@@ -1,3 +1,4 @@
+// This file was modified from scriptc (Apache-2.0); see MODIFICATIONS.md.
 /* scriptc runtime — the standard library: process, modules, performance
  * timing and node:fs (scr_lib.c). Included by scr_runtime.h, which says where
  * new declarations go. */
@@ -58,7 +59,8 @@ bool scr_module_loaded(double module_id);
 double scr_module_cache_get(ScrStr *filename);
 bool scr_module_cache_has(ScrStr *filename);
 ScrArr *scr_module_cache_keys(void);
-
+/* Raw argv accessors — the island's process shim builds the same
+ * ["scriptc", argv[0], ...] shape from the same stash. */
 int scr_lib_arg_count(void);
 const char *scr_lib_arg(int i);
 /* Takes a leading `flag` argument out of process.argv, as Node keeps its
@@ -95,6 +97,10 @@ ScrStr *scr_process_cwd(void);      /* +1 fresh (getcwd) */
  * `fd` (1 or 2). The runtime's own terminal-interface refresh listener
  * joins the program's listeners in the same order. */
 void scr_stdio_resize_listen(double fd, ScrDyn *listener, bool remove);
+
+/* Submit one raw chunk to fd 1/2 and flush it before returning. Used by all
+ * JavaScript-visible console/process/readline/island output paths so the
+ * internal stdio formatting buffer never delays live output. */
 bool scr_stdio_write(int fd, const void *data, size_t len);
 bool scr_stdio_write_str(int fd, const ScrStr *s);
 int scr_stdio_write_raw(int fd, const void *data, size_t len);
@@ -723,10 +729,47 @@ void scr_fs_mkdir_mode_octal(ScrStr *path, ScrStr *mode);
  * when the path already existed (or on failure, the exception pending). */
 ScrStr *scr_fs_mkdir_recursive_first(ScrStr *path, double mode);
 
-/* Sequentially consistent integer operations and shared Int32 wait queues. */
-typedef struct ScrBytes ScrBytes;
-ScrStr *scr_atomics_wait(ScrBytes *, double, double, double);
-double scr_atomics_notify(ScrBytes *, double, double);
+/* Atomics (scr_lib.c), over an integer typed array's storage, sequentially
+ * consistent. An index outside the array throws a catchable RangeError and
+ * the result is NULL / 0 with the exception pending.
+ *
+ * wait(int32Array, idx, expected, timeoutMs): "not-equal" when the element
+ * differs from ToInt32(expected); otherwise the thread blocks until a notify
+ * on that element ("ok") or the timeout ("timed-out"; +Infinity waits
+ * forever). A thread that may not block (scr_atomics_set_may_block(false):
+ * an embedder's UI thread, as a browser's main thread) throws a TypeError
+ * instead. WASI has no threads: there the wait is a sleep (nothing can
+ * notify). notify(int32Array, idx, count) wakes up to count waiters on that
+ * element in the order they began waiting (+Infinity: all) and answers how
+ * many it woke. Waiters are kept in an address-keyed table under striped
+ * locks (the spec's WaiterList, as engines emulate it), not the OS futex, so
+ * the count is exact on every platform. */
+typedef struct ScrBytes ScrBytes; /* full definition below (C11 repeat) */
+double scr_atomics_load(ScrBytes *arr, double idx);
+double scr_atomics_store(ScrBytes *arr, double idx, double value);
+double scr_atomics_add(ScrBytes *arr, double idx, double value);
+double scr_atomics_sub(ScrBytes *arr, double idx, double value);
+double scr_atomics_and(ScrBytes *arr, double idx, double value);
+double scr_atomics_or(ScrBytes *arr, double idx, double value);
+double scr_atomics_xor(ScrBytes *arr, double idx, double value);
+double scr_atomics_exchange(ScrBytes *arr, double idx, double value);
+double scr_atomics_compare_exchange(ScrBytes *arr, double idx, double expected, double replacement);
+double scr_atomics_notify(ScrBytes *arr, double idx, double count);
+bool scr_atomics_is_lock_free(double size);
+/* Atomics.waitAsync (the frontend's three calls): start answers 0
+ * (not-equal), 1 (timed-out) or 2 (waiting: the promise is stashed);
+ * promise takes the stash (+1), result answers the synchronous outcome (+1).
+ * A waiting promise settles "ok" when a notify on any thread reaches it, or
+ * "timed-out", always on the starting thread's loop. */
+double scr_atomics_wait_async_start(ScrBytes *arr, double idx, double expected, double timeout_ms);
+ScrPromise *scr_atomics_wait_async_promise(void);
+ScrStr *scr_atomics_wait_async_result(void);
+/* Whether the calling thread may block in Atomics.wait (default true, as in
+ * Node; an embedder clears it on its UI thread). Thread-local. */
+void scr_atomics_set_may_block(bool may_block);
+ScrStr *scr_atomics_wait(ScrBytes *arr, double idx, double expected, double timeout_ms);
+/* Atomics as the upstream frontend lowers them (scr_shared.c): one entry for
+ * every read-modify-write operation, by operation code. */
 double scr_atomics_op(ScrBytes *, double, double, double, double);
 double scr_atomics_op_dyn(const ScrDyn *, double, double, double, double);
 ScrStr *scr_atomics_wait_dyn(const ScrDyn *, double, double, double);

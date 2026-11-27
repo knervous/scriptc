@@ -1,6 +1,0 @@
-{
- "order": [
-  "<repo>/tests/corpus/bigint-union-conversion.ts"
- ],
- "diags": []
-}

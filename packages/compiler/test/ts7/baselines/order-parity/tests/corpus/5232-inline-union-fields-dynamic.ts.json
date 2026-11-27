@@ -1,6 +1,0 @@
-{
- "order": [
-  "<repo>/tests/corpus/5232-inline-union-fields-dynamic.ts"
- ],
- "diags": []
-}

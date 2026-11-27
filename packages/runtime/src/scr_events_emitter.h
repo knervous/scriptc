@@ -1,3 +1,4 @@
+// This file was modified from scriptc (Apache-2.0); see MODIFICATIONS.md.
 /* scriptc runtime — node:events EventEmitter (scr_events_emitter.c). Included
  * by scr_runtime.h, which says where new declarations go. */
 #ifndef SCR_EVENTS_EMITTER_H
@@ -42,7 +43,7 @@ typedef struct ScrEmitter {
   const char *cls; /* display name for the leak warning ("EventEmitter") */
 } ScrEmitter;
 
-extern SCR_TL ScrVt scr_emitter_vt; /* main() stamps pre/post */
+extern ScrVt scr_emitter_vt; /* main() stamps pre/post */
 extern SCR_TL double scr_emitter_default_max;
 
 ScrEmitter *scr_emitter_new(void); /* +1, collector-headered */

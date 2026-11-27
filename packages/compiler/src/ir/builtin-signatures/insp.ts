@@ -1,11 +1,24 @@
-import { arrayOf, BOOL, BYTES_U8, DATE_T, DYN, F64, REGEX, STRING, VOID } from "../ir.js";
+// This file was modified from scriptc (Apache-2.0); see MODIFICATIONS.md.
+import { arrayOf, BOOL, BYTES_U8, DATE_T, DYN, F64, REGEX, STRING, VOID, JSVAL } from "../ir.js";
 import { defineLibFnSignatures } from "./shared.js";
 
 /** The insp builtin call slots. */
 export const inspSignatures = defineLibFnSignatures({
   // util.inspect: the error receiver is program-dependent (a builtin or
   // user error class — the error.toString precedent, null slot).
-
+  /** util.inspect (scr_inspect.c — its own link switch, moduleUsesInspect):
+   * the runtime half of the static rendering. Scalar formatters return +1
+   * strings (insp.f64: JS ToString except -0; insp.str: the quoting
+   * ladder + line splitting; insp.regex: /source/flags; insp.buffer:
+   * <Buffer aa ..>). insp.error renders the STACKLESS [Name: message]
+   * form with the code slot as its one property. insp.dyn walks the
+   * checked-dynamic tree entirely in the runtime (its shape lives in the
+   * value); insp.dynS is format's %s twin (dyn strings pass verbatim).
+   * insp.jsval ([value, recurse, depth], --dynamic only) renders the
+   * island scalars and THROWS a catchable TypeError on composites (the
+   * may-throw seed set). begin/entry/moreItems/end drive the frame
+   * engine from the compiler-synthesized per-type traversal helpers
+   * (%util.insp.N — the deepStrictEqual precedent). */
   "insp.f64": { argTypes: [F64], result: STRING },
   /** util.format %j over a checked-dynamic argument: the runtime dyn
    * walk (JS-exact stringify; root undefined/function prints
@@ -136,4 +149,5 @@ export const inspSignatures = defineLibFnSignatures({
    * render's finally) closes what the render left open above it. */
   "insp.mark": { argTypes: [], result: VOID },
   "insp.unwind": { argTypes: [], result: VOID },
+"insp.jsval": { argTypes: [JSVAL, F64, F64], result: STRING },
 });

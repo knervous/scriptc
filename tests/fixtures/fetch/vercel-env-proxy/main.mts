@@ -1,3 +1,4 @@
+// @dynamic
 // Vercel installs this dispatcher when ordinary proxy environment variables
 // are present, without requiring Node's global NODE_USE_ENV_PROXY opt-in.
 import { EnvProxyDispatcher } from "vercel-env-proxy-dispatcher";

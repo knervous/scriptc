@@ -1,0 +1,18 @@
+[package]
+name = "gpu-stream-wgpu"
+version = "0.1.0"
+description = "An executor for a WebGPU command stream (gpu-stream-format) on wgpu"
+edition = "2024"
+license = "Apache-2.0"
+publish = false
+
+[dependencies]
+# The stream's format: opcodes, handle kinds, tickets, limits, refusal codes, enum tables.
+gpu-stream-format = { path = "../gpu-stream-format" }
+# The serde feature gives wgpu-types' WebGPU-name deserializers (the stream's enum tables by name).
+wgpu = { version = "30.0.1", features = ["serde"] }
+serde = { version = "1", features = ["derive"] }
+pollster = "0.4"
+
+[dev-dependencies]
+serde = "1"

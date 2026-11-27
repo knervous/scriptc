@@ -1,7 +1,0 @@
-{
- "order": [
-  "<repo>/tests/corpus/7624-key-order-boxed-callback-records/lib.js",
-  "<repo>/tests/corpus/7624-key-order-boxed-callback-records/main.ts"
- ],
- "diags": []
-}

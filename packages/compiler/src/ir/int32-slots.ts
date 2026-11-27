@@ -1,3 +1,4 @@
+// This file was modified from scriptc (Apache-2.0); see MODIFICATIONS.md.
 import type { IrClassDef, IrExpr, IrFunction, IrGlobal, IrModule, IrStmt, IrType } from "./ir.js";
 import type { IrLibFn } from "./builtin-signatures.js";
 import {
@@ -86,7 +87,7 @@ export function int32ElementSlot(
  * reach checked-dynamic code get live views whose runtime stores commit
  * back into the fields; a field of such a class stays a double when any
  * dynamic store in the program can name it (literal-keyed stores name one
- * property, every other store any property). Classes
+ * property, every other store any property, islands everything). Classes
  * with runtime-provided ancestors, generic families, fields under
  * `++`/`--`, and parameters of functions that escape as values, are
  * constructed through class values, or are virtual-dispatch targets are
@@ -492,7 +493,7 @@ interface Int32SlotsData {
   checkedInt32Arrays: string[];
 }
 
-const DYN_KINDS = new Set<IrType["kind"]>(["dyn", "jsval", "caught"]);
+const DYN_KINDS = new Set<IrType["kind"]>(["dyn", "jsval", "jsword", "caught"]);
 /** Expressions that hand their operands (or produce results) to runtime
  * helpers, reflection, promises or other code the IR does not show. */
 const BOUNDARY_KINDS = new Set<IrExpr["kind"]>([
@@ -500,9 +501,14 @@ const BOUNDARY_KINDS = new Set<IrExpr["kind"]>([
   "intrinsic",
   "jsonStringify",
   "ffiCall",
+  "jsOp",
+  "jsExit",
+  "jsBridgePromise",
+  "jsMarshal",
   "dynCall",
   "dynInvoke",
   "dynFrom",
+  "dynFromJsval",
   "dynCheck",
   "dynObjLit",
   "dynArrLit",
@@ -654,7 +660,7 @@ const DYN_READ_ONLY = new Set<IrLibFn>([
   "insp.dynFormatS",
   "insp.dynHidden",
   // The dynamic-tier operators run their dyn twins (scr_js_value.c); the
-  // conversions move a value between dyn and jsval, and js.toF64 is
+  // conversions move a value between dyn and jsword, and js.toF64 is
   // dynCheck's number check.
   "js.add",
   "js.arithmetic",
@@ -706,6 +712,13 @@ const DYN_READ_ONLY = new Set<IrLibFn>([
   "weakRef.new",
   "weakRef.is",
   "worker.new",
+]);
+const ISLAND_KINDS = new Set<IrExpr["kind"]>([
+  "jsOp",
+  "jsMarshal",
+  "jsExit",
+  "jsBridgePromise",
+  "dynFromJsval",
 ]);
 /** Runtime helpers that do nothing with their dynamic arguments but call
  * one of them, at the argument position given, with the others: the call is
@@ -791,8 +804,8 @@ function walkFunction(
 }
 
 /** The class field names that runtime stores through live dynamic views
- * (typed-ref capsules) can write: every name when `all` (a dynamic store
- * whose key is not a literal), otherwise the
+ * (typed-ref capsules) can write: every name when `all` (islands, jsval
+ * values, or a dynamic store whose key is not a literal), otherwise the
  * literal keys of `dyn.keySet`/`dyn.keyDelete`. A view commits a store back
  * into the instance's native field slots, which the IR does not show. */
 export interface DynamicFieldStores {
@@ -852,7 +865,8 @@ export function dynamicFieldStores(
     walkFunction(fn, scan, {
       expr: (e) => {
         if (dynWritesAll) return;
-        if (
+        if (ISLAND_KINDS.has(e.kind) || e.type.kind === "jsval") dynWritesAll = true;
+        else if (
           e.kind === "libCall" &&
           !DYN_READ_ONLY.has(e.fn) &&
           !compiledCallee(e.args[DYN_CALLS_ARGUMENT.get(e.fn) ?? -1]) &&

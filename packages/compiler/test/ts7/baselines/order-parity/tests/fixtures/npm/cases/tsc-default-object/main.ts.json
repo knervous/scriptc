@@ -1,6 +1,0 @@
-{
- "order": [
-  "<repo>/tests/fixtures/npm/cases/tsc-default-object/main.ts"
- ],
- "diags": []
-}

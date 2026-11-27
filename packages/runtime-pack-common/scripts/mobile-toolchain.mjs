@@ -1,3 +1,4 @@
+// This file was modified from scriptc (Apache-2.0); see MODIFICATIONS.md.
 import { execFileSync } from "node:child_process";
 import { existsSync } from "node:fs";
 import { join } from "node:path";
@@ -55,6 +56,26 @@ export function mobileRuntimeConfig(name, env = process.env, platform = process.
   if (!existsSync(compiler)) throw new Error(`Android NDK compiler is missing: ${compiler}`);
   return {
     ...common,
+    // Android also builds the executable flavors: `--target native:android-arm64`
+    // links them into libmain.so (the android-main output), and the library
+    // flavors stay as they are for --lib.
+    libraryOnly: false,
+    // Units that do not build against bionic at API 26: child processes
+    // (posix_spawn arrives in API 28) and the Node islands (libnode over
+    // ucontext fibers, which bionic has no getcontext for). The library
+    // flavors never carried either, so they are unchanged.
+    omitRuntimeSources: ["scr_child.c"],
+    omitOptionalSources: [
+      "scr_node_island.c",
+      "scr_node_island_handle.c",
+      "scr_node_island_export.c",
+      "scr_node_island_boot.c",
+      "scr_node_island_gc.c",
+      "scr_node_island_stdio.c",
+      "scr_node_island_abort.c",
+      "scr_node_island_events.c",
+      "scr_node_island_child.c",
+    ],
     platform: "linux",
     compiler,
     archiver: join(toolchain, "bin", platform === "win32" ? "llvm-ar.exe" : "llvm-ar"),

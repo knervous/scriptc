@@ -1,3 +1,4 @@
+// This file was modified from scriptc (Apache-2.0); see MODIFICATIONS.md.
 /* node:diagnostics_channel — the in-process pub/sub core (scr_runtime.h
  * has the API contract). Linked only when the IR carries dc.* libCalls
  * (native-toolchain.ts; the zlib gating precedent), pure data structure over the checked-dynamic tree —
@@ -197,6 +198,12 @@ static void dc_throw_arg_type(const char *expected, const char *arg_name, const 
              (int)(cb->v.str->len < 28 ? cb->v.str->len : 28), cb->v.str->data);
     received = detail;
     break;
+  case SCR_DYN_JSVAL:
+    /* An engine callback may well BE a function — subscribing island
+     * values is unarmed (lane dyn-routing-ops); fence loudly rather
+     * than claim "Received an instance of Object". */
+    scr_dyn_isl_fence(cb, "subscribing");
+    return;
   case SCR_DYN_SYMBOL: {
     ScrStr *text = cb->v.symbol.render(cb->v.symbol.value); /* "Symbol(desc)" */
     if (text != NULL) {

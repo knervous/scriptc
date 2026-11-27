@@ -1,6 +1,0 @@
-{
- "order": [
-  "<repo>/tests/corpus/non-null-class-iteration.ts"
- ],
- "diags": []
-}

@@ -1,3 +1,4 @@
+// This file was modified from scriptc (Apache-2.0); see MODIFICATIONS.md.
 import type { IrExpr } from "../../../ir/ir.js";
 
 /**
@@ -6,10 +7,9 @@ import type { IrExpr } from "../../../ir/ir.js";
 export function isSafeToRepeat(expr: IrExpr): boolean {
   if (expr.kind === "varRef") return true;
   if (expr.kind === "recordGet" || expr.kind === "fieldGet") return isSafeToRepeat(expr.obj);
-  // The narrowing bridges over a pure read: extraction and downcast are
-  // reads too (their guards only compare, and the +1 on ref payloads is RC
-  // bookkeeping, not an observable effect — each emission owns its own
-  // copy).
+  // The trust-the-checker narrowing bridges over a pure read: extraction
+  // and downcast are reads too (the +1 on ref payloads is RC bookkeeping,
+  // not an observable effect — each emission owns its own copy).
   if (expr.kind === "unionNarrow" || expr.kind === "downcast") return isSafeToRepeat(expr.value);
   return false;
 }
@@ -31,9 +31,7 @@ export function isSafeToDiscard(expr: IrExpr): boolean {
     case "logical":
       return isSafeToDiscard(expr.left) && isSafeToDiscard(expr.right);
     case "ternary":
-      return (
-        isSafeToDiscard(expr.cond) && isSafeToDiscard(expr.then) && isSafeToDiscard(expr.else_)
-      );
+      return isSafeToDiscard(expr.cond) && isSafeToDiscard(expr.then) && isSafeToDiscard(expr.else_);
     case "strConcat":
       return isSafeToDiscard(expr.left) && isSafeToDiscard(expr.right);
     case "toBool":
@@ -41,10 +39,6 @@ export function isSafeToDiscard(expr: IrExpr): boolean {
     case "unionIsTag":
     case "unionWrap":
       return isSafeToDiscard(expr.value);
-    case "recordHas":
-      return isSafeToDiscard(expr.obj);
-    case "fieldAbsent":
-      return true;
     // Fresh allocations are unobservable too — only their pieces can
     // carry effects (a spread re-reads its source: pure; element and
     // field initializers recurse).
@@ -53,10 +47,7 @@ export function isSafeToDiscard(expr: IrExpr): boolean {
     case "recordLit":
       return expr.fields.every((field) => isSafeToDiscard(field.value));
     case "recordClone":
-      return (
-        isSafeToDiscard(expr.source) &&
-        expr.overrides.every((field) => isSafeToDiscard(field.value))
-      );
+      return isSafeToDiscard(expr.source) && expr.overrides.every((field) => isSafeToDiscard(field.value));
     case "closure":
       return true;
     default:
@@ -74,6 +65,9 @@ export function isSafeToMoveConditionEarlier(expr: IrExpr): boolean {
   if (expr.kind === "unary" && expr.op === "!") return isSafeToMoveConditionEarlier(expr.operand);
   if (expr.kind === "logical") {
     return isSafeToMoveConditionEarlier(expr.left) && isSafeToMoveConditionEarlier(expr.right);
+  }
+  if (expr.kind === "jsOp" && (expr.op === "truthy" || expr.op === "not")) {
+    return expr.args.every(isSafeToRepeat);
   }
   return isSafeToRepeat(expr);
 }

@@ -1,3 +1,4 @@
+// This file was modified from scriptc (Apache-2.0); see MODIFICATIONS.md.
 /* The OS-facing half of the typed-array/Buffer runtime: fs Buffer reads/
  * writes (scr_lib.c's throw formatting), the fs/promises bytes form
  * (scr_async.c's settled-promise minting), crypto.randomBytes, and the
@@ -1516,7 +1517,7 @@ static bool scr_fs_callback_times(const ScrDyn *atime, const ScrDyn *mtime, bool
 }
 
 static ScrArr *scr_fs_cb_vectors(const ScrDyn *buffers) {
-  ScrDyn *snapshot = buffers->kind == SCR_DYN_TYPED_REF && scr_dyn_ref_is_array(buffers)
+  ScrDyn *snapshot = buffers->kind == SCR_DYN_TYPED_REF && scr_dyn_isl_is_array(buffers)
     ? scr_dyn_typed_ref_materialize(buffers) : NULL;
   const ScrDyn *array = snapshot ? snapshot : buffers;
   if (array->kind != SCR_DYN_ARR) {
@@ -2316,7 +2317,7 @@ ScrDyn *scr_fs_callback_call(ScrStr *member, const ScrDyn *args) {
  * replaced write receives it in one call, as in Node, whatever it returns. */
 static bool scr_stdio_write_bytes(int fd, const ScrBytes *b) {
   size_t n = b->len * scr_bytes_elem_size(b->elem);
-#if defined(SCR_WORKERS) || (defined(SCR_LIB) && defined(SCR_THREAD_INSTANCES))
+#if defined(SCR_WORKERS) || defined(SCR_THREAD_INSTANCES)
   if (!b->shared) return scr_stdio_write(fd, b->data, n);
   if (scr_stdio_write_hook) {
     unsigned char *copy = scr_mem_alloc(n ? n : 1);
@@ -2684,7 +2685,7 @@ static ScrBytes *scr_buffer_from_dyn_impl(const ScrDyn *value, const ScrStr *enc
     scr_str_release(text);
     return out;
   }
-  if (value->kind == SCR_DYN_TYPED_REF || value->kind == SCR_DYN_HANDLE) {
+  if (value->kind == SCR_DYN_TYPED_REF || value->kind == SCR_DYN_HANDLE || value->kind == SCR_DYN_JSVAL) {
     return scr_buffer_from_refusal("with an opaque reference");
   }
   char detail[64];

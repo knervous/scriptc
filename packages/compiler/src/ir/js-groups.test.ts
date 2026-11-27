@@ -349,7 +349,7 @@ test("a neutral operation between members needs no recheck", () => {
   expect(summarize(fn)).toEqual([{ subject: "item", keys: ["price", "qty"], members: ["0", "1"] }]);
 });
 
-test("a jsval arithmetic call between members marks the next member", () => {
+test("a jsword arithmetic call between members marks the next member", () => {
   const arithmetic: IrExpr = {
     loc,
     kind: "libCall",
@@ -471,7 +471,7 @@ test("a store to an error-synchronized key is not a member", () => {
   }
 });
 
-test("a store through a jsval word is a member", () => {
+test("a store through a jsword word is a member", () => {
   const word: IrExpr = { loc, kind: "libCall", fn: "js.toDyn", args: [num(3)], type: DYN };
   const fn = fnBody([
     { loc, kind: "exprStmt", expr: write(setOf("qty"), "item", word) },

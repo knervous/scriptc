@@ -1,6 +1,0 @@
-{
- "order": [
-  "<repo>/tests/corpus/9374-promise-allsettled-tuple.ts"
- ],
- "diags": []
-}

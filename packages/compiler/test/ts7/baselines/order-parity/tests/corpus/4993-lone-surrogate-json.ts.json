@@ -1,6 +1,0 @@
-{
- "order": [
-  "<repo>/tests/corpus/4993-lone-surrogate-json.ts"
- ],
- "diags": []
-}

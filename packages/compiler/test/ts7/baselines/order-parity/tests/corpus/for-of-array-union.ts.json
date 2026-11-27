@@ -1,6 +1,0 @@
-{
- "order": [
-  "<repo>/tests/corpus/for-of-array-union.ts"
- ],
- "diags": []
-}

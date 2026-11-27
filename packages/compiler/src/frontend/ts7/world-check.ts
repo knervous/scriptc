@@ -1,9 +1,10 @@
+// This file was modified from scriptc (Apache-2.0); see MODIFICATIONS.md.
 /* Two-world separation, enforced at build time. The 5.9.3 world (the
  * "typescript5" aliased import — parser/transpile islands only) and the
- * 7.1 world (this adapter, over the real "typescript" dependency) must
+ * 7.0.2 world (this adapter, over the real "typescript" dependency) must
  * never exchange AST or checker objects: the enums
  * renumbered between worlds, so a node that crosses carries kinds and flags
- * that MEAN something else on the other side, without any error.
+ * that MEAN something else on the other side, silently.
  *
  * The fence is nominal enum typing: every node interface carries a
  * `kind`/`flags` member typed by its own package's enum declaration, and

@@ -1,3 +1,4 @@
+// This file was modified from scriptc (Apache-2.0); see MODIFICATIONS.md.
 /* node:tls + node:https — the TLS transport under the socket kind,
  * layered exactly the way scr_http.c layers on scr_net.c: the socket
  * surface (ScrNetSocket, and the http req/res/client handles above it)
@@ -473,6 +474,8 @@ typedef struct ScrTlsSrv {
  * h2 secure server advertises h2 alone (an http/1.1-only client fails
  * the handshake with no_application_protocol — Node's h2-only split). */
 static const char *SCR_TLS_ALPN_HTTP11[] = {"http/1.1", NULL};
+/* Never written: shared by every thread instance (mbedTLS takes a non-const
+ * pointer array, so these stay writable data). */
 static const char *SCR_TLS_ALPN_H2[] = {"h2", NULL};
 static const char *SCR_TLS_ALPN_H2_HTTP11[] = {"h2", "http/1.1", NULL};
 

@@ -1,7 +1,0 @@
-{
- "order": [
-  "<repo>/tests/corpus/dynamic-module-let-imports/counter.mjs",
-  "<repo>/tests/corpus/dynamic-module-let-imports/main.ts"
- ],
- "diags": []
-}

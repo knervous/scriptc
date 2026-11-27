@@ -1,6 +1,0 @@
-{
- "order": [
-  "<repo>/tests/diagnostics/cjs-member-alias-writes/main.ts"
- ],
- "diags": []
-}

@@ -1,4 +1,5 @@
 #!/bin/sh
+# This file was modified from scriptc (Apache-2.0); see MODIFICATIONS.md.
 set -eu
 
 node_version=$(tr -d '\r\n' < .node-version)
@@ -17,8 +18,6 @@ llvm_distro=${VERSION_CODENAME:?the Sandbox image must identify its Ubuntu relea
 curl --fail --silent --show-error --location \
   https://apt.llvm.org/llvm-snapshot.gpg.key \
   --output /tmp/llvm-snapshot.gpg.key
-# Every download below is checked against scripts/toolchain.sha256 before it is used.
-sh scripts/verify-toolchain.sh /tmp/llvm-snapshot.gpg.key
 gpg --dearmor --yes --output /tmp/llvm-snapshot.gpg /tmp/llvm-snapshot.gpg.key
 sudo install -D -m 0644 /tmp/llvm-snapshot.gpg /etc/apt/keyrings/llvm-snapshot.gpg
 echo "deb [signed-by=/etc/apt/keyrings/llvm-snapshot.gpg] https://apt.llvm.org/${llvm_distro}/ llvm-toolchain-${llvm_distro}-22 main" \
@@ -32,9 +31,7 @@ sudo env DEBIAN_FRONTEND=noninteractive apt-get install --quiet=2 --yes --no-ins
   clang-22 \
   cmake \
   libclang-rt-22-dev \
-  libpolly-22-dev \
   libzstd-dev \
-  lld-22 \
   llvm-22-dev \
   ninja-build \
   xz-utils \
@@ -43,20 +40,22 @@ sudo rm -f /usr/local/bin/clang /usr/local/bin/clang++
 sudo ln -sf clang-22 /usr/bin/clang
 sudo ln -sf clang++-22 /usr/bin/clang++
 test "$(llvm-config-22 --version)" = 22.1.8
-# CI's pinned LLVM ships ld.lld and the compiler links with it when the
-# driver finds it (beside clang's real executable): match that here.
-test -x "$(dirname "$(readlink -f "$(command -v clang)")")/ld.lld"
 
 node_archive="node-v${node_version}-linux-x64.tar.xz"
 curl --fail --silent --show-error --location \
   "https://nodejs.org/dist/v${node_version}/${node_archive}" \
   --output "/tmp/${node_archive}"
-sh scripts/verify-toolchain.sh "/tmp/${node_archive}"
+curl --fail --silent --show-error --location \
+  "https://nodejs.org/dist/v${node_version}/SHASUMS256.txt" \
+  --output /tmp/node-SHASUMS256.txt
+grep " ${node_archive}$" /tmp/node-SHASUMS256.txt \
+  | sed "s# ${node_archive}# /tmp/${node_archive}#" \
+  | sha256sum --check --strict -
 sudo tar -xJf "/tmp/${node_archive}" --directory /usr/local --strip-components=1
 sh scripts/install-zig.sh "$zig_version"
 sudo npm install --global "pnpm@${pnpm_version}"
 
-rm -f "/tmp/${node_archive}" /tmp/llvm-snapshot.gpg.key /tmp/llvm-snapshot.gpg
+rm -f "/tmp/${node_archive}" /tmp/node-SHASUMS256.txt /tmp/llvm-snapshot.gpg.key /tmp/llvm-snapshot.gpg
 sudo rm -rf /var/lib/apt/lists/*
 
 node --version

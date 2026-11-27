@@ -1,6 +1,0 @@
-{
- "order": [
-  "<repo>/tests/corpus/inspect-getters-dyn.cjs"
- ],
- "diags": []
-}

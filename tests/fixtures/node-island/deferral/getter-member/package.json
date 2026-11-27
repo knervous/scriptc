@@ -1,1 +1,0 @@
-{ "name": "deferral-getter-member", "private": true, "type": "module", "scriptc": { "packages": { "counter-pkg": "node" } } }

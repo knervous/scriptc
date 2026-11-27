@@ -1,0 +1,4 @@
+{
+  // The shape of a project that keeps the strict family but allows implicit `any`.
+  "compilerOptions": { "strict": true, "noImplicitAny": false }
+}

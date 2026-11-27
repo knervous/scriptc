@@ -1,6 +1,0 @@
-{
- "order": [
-  "<repo>/tests/diagnostics/contract-immutable-dynamic-receiver.ts"
- ],
- "diags": []
-}

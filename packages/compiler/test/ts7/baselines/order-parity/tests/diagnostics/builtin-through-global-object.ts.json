@@ -1,6 +1,0 @@
-{
- "order": [
-  "<repo>/tests/diagnostics/builtin-through-global-object.ts"
- ],
- "diags": []
-}

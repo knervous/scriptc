@@ -1,6 +1,0 @@
-{
- "order": [
-  "<repo>/tests/corpus/dyn-typeof-string.js"
- ],
- "diags": []
-}

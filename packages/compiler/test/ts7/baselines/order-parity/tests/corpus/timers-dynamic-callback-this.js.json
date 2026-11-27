@@ -1,6 +1,0 @@
-{
- "order": [
-  "<repo>/tests/corpus/timers-dynamic-callback-this.js"
- ],
- "diags": []
-}

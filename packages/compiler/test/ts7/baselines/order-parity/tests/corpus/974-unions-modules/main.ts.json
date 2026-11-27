@@ -1,7 +1,0 @@
-{
- "order": [
-  "<repo>/tests/corpus/974-unions-modules/result.ts",
-  "<repo>/tests/corpus/974-unions-modules/main.ts"
- ],
- "diags": []
-}

@@ -1,3 +1,4 @@
+// This file was modified from scriptc (Apache-2.0); see MODIFICATIONS.md.
 /* Dynamic values of instances that may hold an InlineArray field
  * (ir/inline-arrays.ts).
  *
@@ -44,7 +45,7 @@ export interface InlineArrayViewIssue {
  * its result holds the instance its argument holds. */
 export const NORMALIZE = "%dyn.class.normalize";
 
-const DYN_KINDS: ReadonlySet<IrType["kind"]> = new Set(["dyn", "jsval", "caught"]);
+const DYN_KINDS: ReadonlySet<IrType["kind"]> = new Set(["dyn", "jsword", "caught"]);
 
 /** Expressions whose value is one of their children's. */
 const PASS_THROUGH: ReadonlySet<IrExpr["kind"]> = new Set([

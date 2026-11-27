@@ -1,3 +1,4 @@
+// @dynamic
 // Optional chaining on 'any' (island-handle) receivers: null/undefined
 // receivers short-circuit to undefined — argument side effects included —
 // and anything else proceeds as the plain engine operation. Member reads,

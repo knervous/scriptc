@@ -1,6 +1,0 @@
-{
- "order": [
-  "<repo>/tests/diagnostics/async-return-thenable.ts"
- ],
- "diags": []
-}

@@ -1,6 +1,0 @@
-{
- "order": [
-  "<repo>/tests/corpus/process-channel-ref-cycle/main.ts"
- ],
- "diags": []
-}

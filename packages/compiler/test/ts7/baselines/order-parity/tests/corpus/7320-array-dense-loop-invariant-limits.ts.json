@@ -1,6 +1,0 @@
-{
- "order": [
-  "<repo>/tests/corpus/7320-array-dense-loop-invariant-limits.ts"
- ],
- "diags": []
-}
