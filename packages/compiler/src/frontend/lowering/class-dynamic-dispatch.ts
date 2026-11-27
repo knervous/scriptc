@@ -456,6 +456,9 @@ export class ClassDynamicDispatch {
           for (const method of owner.methods.keys()) {
             if (method.startsWith("#")) continue;
             const found = lowerer.findMethodOn(target, method);
+            // A library (asyncFree) graph refuses async and generator methods reached through untyped values (the
+            // SC4005 fence in this pass), so the page escape does not make them reachable either.
+            if (found && this.asyncFree && (found.sig.gen || found.sig.async)) continue;
             if (found && !found.sig.abstract) lowerer.noteEdge(`%${found.declarer.def.name}.${method}`);
           }
       } finally { lowerer.speculativeEdges = false; }

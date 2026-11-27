@@ -2112,14 +2112,14 @@ function lowerExprInner(lowerer: Lowerer, expr: ts.Expression): IrExpr {
         const represented = tryLowerExpression(lowerer, expr.expression);
         if (represented && isMatchSliceType(lowerer, represented.type) &&
             (lowerer.isStdlibMember(expr) || isJsSourceFile(expr.getSourceFile()))) {
-          // The compiled match slice is a string[] without index or input: only a
-          // global String.match result (which has neither) may read them as undefined.
-          if (!isGlobalMatchResult(lowerer, expr.expression)) {
-            lowerer.unsupported("SC1090", expr, `reading '.${expr.name.text}' of a stored match result (the compiled string[] slice does not carry index or input; a for-of over matchAll binds '.index')`);
-          }
+          // A stored exec/match/matchAll row keeps its match source (scr_regex.c's pending metadata): index and input
+          // answer from it without a dynamic copy (scr_regex_result_prop); a global String.match result has no source
+          // and answers undefined. Upstream's lowering (property-access.ts there).
           const recv = represented;
-          const read: IrExpr = { kind: "dynKeyGet", value: lowerer.coerceToExpected(recv, DYN),
-            key: { kind: "strLit", value: expr.name.text, type: STRING, loc }, type: DYN, loc };
+          const key: IrExpr = { kind: "strLit", value: expr.name.text, type: STRING, loc };
+          const read: IrExpr = typeEquals(recv.type, arrayOf(STRING))
+            ? { kind: "libCall", fn: "regex.resultProp", args: [recv, key], type: DYN, loc }
+            : { kind: "dynKeyGet", value: lowerer.coerceToExpected(recv, DYN), key, type: DYN, loc };
           return lowerer.maybeNarrow(read, expr);
         }
       }

@@ -1,4 +1,3 @@
-// This file was modified from scriptc (Apache-2.0); see MODIFICATIONS.md.
 // Generated from packages/compiler/src/ir/ir.ts by scripts/generate-ir-fields.mjs.
 // Run `pnpm generate:ir-fields` after changing the fields of an IR node.
 import type { IrExpr, IrStmt, IrType } from "./ir.js";

@@ -291,7 +291,8 @@ jobs:
     strategy:
       fail-fast: false
       matrix:
-        os: [windows-latest, macos-15]
+        # macos-15 is arm64 (the platform the compiler has a native wasm-opt entry for), macos-15-intel x64.
+        os: [windows-latest, macos-15, macos-15-intel]
     steps:
       - uses: actions/checkout@v4
         with:

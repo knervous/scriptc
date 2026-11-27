@@ -8,6 +8,7 @@ import { afterEach, describe, expect, test, vi } from "vitest";
 import { compile, compileC } from "../src/index.js";
 import { MACOS_ARM64_TARGET } from "../src/backend/targets.js";
 import * as llvmSplit from "../src/backend/llvm/split.js";
+import { RUNTIME_ABI_MARKER } from "../src/backend/runtime-abi.js";
 
 const execFileAsync = promisify(execFile);
 const supported = process.platform === "darwin" && process.arch === "arm64" &&
@@ -218,8 +219,9 @@ define void @pairs(ptr noalias %out, ptr %a, ptr %b) {
       .toEqual(await symbols(clangObject, ["-u"]));
     expect(await symbols(helperObject, ["-gU"]))
       .toEqual(await symbols(clangObject, ["-gU"]));
-    expect(await symbols(helperObject, ["-gU"])).toEqual(["0000000000000000 T _main"]);
-    expect(await symbols(helperObject, ["-u"])).toContain("_scr_runtime_abi_v6");
+    // The one global definition is main; its offset is the object's layout (helper and clang agree, above).
+    expect((await symbols(helperObject, ["-gU"])).map((line) => line.replace(/^[0-9a-f]+ /, ""))).toEqual(["T _main"]);
+    expect(await symbols(helperObject, ["-u"])).toContain(`_${RUNTIME_ABI_MARKER}`);
 
     const clangExe = join(dir, "clang-program");
     const linkDriver = join(dir, "clang-driver.c");
@@ -513,7 +515,7 @@ define void @pairs(ptr noalias %out, ptr %a, ptr %b) {
       .stdout.trim().split("\n");
     expect(undefinedSymbols).toContain("_sf_scale");
     expect(undefinedSymbols).toContain("_sf_callback_mix");
-    expect(undefinedSymbols).toContain("_scr_runtime_abi_v6");
+    expect(undefinedSymbols).toContain(`_${RUNTIME_ABI_MARKER}`);
   });
 
   test("helper and clang object paths retain the same outbound FFI C ABI", async () => {

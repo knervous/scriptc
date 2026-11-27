@@ -28,7 +28,7 @@ test
         sanitize,
         "-Wno-deprecated-declarations",
         ...(process.platform === "linux" ? ["-D_GNU_SOURCE"] : []),
-        ...["scr_shared.test.c", ...EXECUTABLE_RUNTIME_SOURCES].map((name) =>
+        ...["scr_shared.test.c", "scr_atomics_wait.c", "scr_ffi_queue.c", ...EXECUTABLE_RUNTIME_SOURCES].map((name) =>
           join(import.meta.dirname, name),
         ),
         ...(process.platform === "linux" ? ["-lm"] : []),

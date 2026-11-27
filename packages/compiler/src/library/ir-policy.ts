@@ -61,6 +61,10 @@ const LIB_MODE_REFUSED_PREFIXES: readonly [string, string][] = [
   ["urj.", "unhandled-rejection tracking"],
   ["dc.", "the diagnostics_channel surface"],
   ["worker.new", "native worker threads"],
+  // A library starts no threads, so nothing could notify a waiter; waitAsync's settlement needs the remote queue,
+  // which library links exclude (scr_atomics_wait.c).
+  ["atomics.wait", "Atomics.wait, Atomics.notify and Atomics.waitAsync"],
+  ["atomics.notify", "Atomics.wait, Atomics.notify and Atomics.waitAsync"],
 ];
 
 /** Value/type kinds whose mere presence means an excluded unit's code (or
@@ -134,6 +138,7 @@ export function moduleLibAsyncSurface(mod: IrModule): { surface: string; loc: Sr
   const features = moduleRuntimeFeatures(mod);
   const coarse: [boolean, string][] = [
     [mod.workers === true, "native worker threads"],
+    [features.atomicsWait, "Atomics.wait, Atomics.notify and Atomics.waitAsync"],
     [features.processEvents, "process signal/exit listeners or the stdin event surface"],
     [features.net, "the node:net surface"],
     [features.http, "the node:http surface"],

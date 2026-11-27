@@ -30,12 +30,13 @@ function selected(
   return matches[0];
 }
 
-test("COFF executables always link the remote queue that scr_lib.c's Atomics and timer workers post through", () => {
-  // scr_lib.c, a base unit, calls scr_remote_post, scr_instance_remote and scr_remote_hold from scr_atomics_notify,
-  // scr_at_timer_main, scr_atomics_wait_async_start and scr_at_async_settle; scr_ffi_queue.c defines them. lld-link
-  // reports them undefined in every Windows executable that does not select the unit (any program without a foreign
-  // FFI callback); the ELF and Mach-O links of the same objects do not.
-  const lib = readFileSync(join(runtimeSources, "scr_lib.c"), "utf8");
+test("COFF executables always link the remote queue that the Atomics wait unit posts through", () => {
+  // scr_atomics_wait.c (Atomics.wait, notify and waitAsync, moved out of the base scr_lib.c) calls scr_remote_post,
+  // scr_instance_remote and scr_remote_hold from scr_atomics_notify, scr_at_timer_main, scr_atomics_wait_async_start
+  // and scr_at_async_settle; scr_ffi_queue.c defines them. COFF links still take the queue unconditionally, as when
+  // the calls were in the base unit (lld-link reports them undefined where ELF and Mach-O drop them with their
+  // sections); narrowing that to the atomicsWait programs needs a Windows run.
+  const lib = readFileSync(join(runtimeSources, "scr_atomics_wait.c"), "utf8");
   const queue = readFileSync(join(runtimeSources, "scr_ffi_queue.c"), "utf8");
   for (const symbol of ["scr_remote_post", "scr_instance_remote", "scr_remote_hold"]) {
     expect(lib).toContain(`${symbol}(`);

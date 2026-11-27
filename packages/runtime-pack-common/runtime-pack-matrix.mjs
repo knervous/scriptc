@@ -76,6 +76,9 @@ export const OPTIONAL_RUNTIME_SOURCES = [
   // unit of its own so a program that joins none links nothing of it. It
   // hands arrays with holes to scr_array.c's scr_arr_join.
   ["scr_arr_join_str.c", "arrJoinStr"],
+  // Atomics.wait, notify and waitAsync; waitAsync settles through promises and the remote queue, so a program that
+  // only loads, stores or exchanges links none of it (and library flavors, which refuse it, carry none).
+  ["scr_atomics_wait.c", "atomicsWait"],
   ["scr_copying.c", "copying"],
   ["scr_file_handle.c", "fileHandle"],
   // writeFile's `flag` disposition and the fs/promises twins; the copyFile
@@ -889,9 +892,10 @@ export function variantsFor(source) {
 
 /* Optional units every COFF executable links, whatever its features: lld-link reports the undefined symbols of every
  * object it links, also those only functions no program reaches refer to, where the ELF and Mach-O links of the same
- * objects do not. scr_lib.c (a base unit) posts through the remote queue (scr_remote_post, scr_instance_remote,
- * scr_remote_hold) from its Atomics.waitAsync and timer workers, and scr_ffi_queue.c defines it: without the unit no
- * Windows executable linked unless the program had a foreign FFI callback. */
+ * objects do not. The Atomics wait unit, scr_atomics_wait.c, posts through the remote queue (scr_remote_post,
+ * scr_instance_remote, scr_remote_hold) from its Atomics.waitAsync and timer workers, and scr_ffi_queue.c defines it.
+ * Those calls were in the base scr_lib.c, when without the queue no Windows executable linked unless the program had a
+ * foreign FFI callback; COFF still links the queue unconditionally (narrowing it to atomicsWait needs a Windows run). */
 const COFF_LINKED_OPTIONAL_SOURCES = new Set(["scr_ffi_queue.c"]);
 
 /* Base units only COFF packs carry: scr_coff_unlinked.c, weak stand-ins for the functions a linked unit calls in an

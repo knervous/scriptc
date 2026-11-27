@@ -127,6 +127,7 @@ export interface RuntimeFeatureSet extends NativeLinkFeatures {
   genReceiver: boolean;
   recordSourceGet: boolean;
   arrJoinStr: boolean;
+  atomicsWait: boolean;
   eventsOnceSignal: boolean;
   mime: boolean;
   sqlite: boolean;
@@ -448,6 +449,7 @@ export function effectiveRuntimeFeatures(
     genReceiver: features.genReceiver === true,
     recordSourceGet: features.recordSourceGet === true,
     arrJoinStr: features.arrJoinStr === true,
+    atomicsWait: features.atomicsWait === true,
     eventsOnceSignal: features.eventsOnceSignal === true,
     mime: features.mime === true,
     sqlite: features.sqlite === true,

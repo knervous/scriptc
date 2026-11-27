@@ -4,6 +4,11 @@ import path from "node:path";
 
 const compilerDist = new URL("../packages/compiler/dist/", import.meta.url);
 
+// The package ships wasm-opt 133 as JavaScript and wasm only (vendor/binaryen-133/binaryen-version_133), not the native
+// per-platform wasm-opt the repository fetches for darwin-arm64. The emitter refuses to fall back to wasm-opt.js
+// silently where a native build exists, so the package asks for it; a caller's own setting wins.
+process.env.SCRIPTC_WASMOPT_TOOL ??= "js";
+
 /** Compiles `entry` to a WasmGC module at `options.outPath` (default: the entry with a `.wasm` extension). */
 export async function compile(entry, options = {}) {
   const { compile: compileModule } = await import(new URL("index.js", compilerDist));

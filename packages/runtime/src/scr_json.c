@@ -26,6 +26,7 @@
 #include "scr_message.h" /* the message format's wrapper hook */
 #include "scr_key.h"
 #include "scr_record_source_private.h"
+#include "scr_dyn_native.h" /* scr_record_frozen_word */
 
 /* The JavaScript object model build asks scr_dyn_handle_props.c about a
  * runtime handle's own properties (a Date, RegExp, Map, Set, buffer or
@@ -26194,13 +26195,13 @@ static ScrStr *scr_dyn_to_string_method_args(const ScrDyn *d, const ScrStr *enc,
   return scr_dyn_to_string(d, enc);
 }
 
-/* A typed capsule over a compiled record (its type key `record:...`): the record's frozen bit (scr_dyn_native.c, the
- * native-dyn runtime; weak, since a program without it has no frozen records). */
-bool scr_record_is_frozen(const void *record) __attribute__((weak));
-
+/* A typed capsule over a compiled record (its type key `record:...`): the record's frozen bit, read in place
+ * (scr_dyn_native.h). It was a weak reference to scr_dyn_native.c's scr_record_is_frozen, which an ELF link resolves to
+ * null without the native-dyn unit but ld64 refuses on arm64; a program without that unit freezes no record, so the
+ * bit reads clear. */
 static bool scr_dyn_typed_ref_frozen_record(const ScrDyn *value) {
-  return value->kind == SCR_DYN_TYPED_REF && scr_record_is_frozen && value->v.typed_ref.type_key_len > 7 &&
-    memcmp(value->v.typed_ref.type_key, "record:", 7) == 0 && scr_record_is_frozen(value->v.typed_ref.ptr);
+  return value->kind == SCR_DYN_TYPED_REF && value->v.typed_ref.type_key_len > 7 &&
+    memcmp(value->v.typed_ref.type_key, "record:", 7) == 0 && scr_record_frozen_word(value->v.typed_ref.ptr);
 }
 
 /* A typed capsule over a compiled array (its type key `array<...>`; the referent is the ScrArr). */

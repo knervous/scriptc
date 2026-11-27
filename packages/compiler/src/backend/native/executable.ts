@@ -210,6 +210,8 @@ const RUNTIME_UNITS: readonly RuntimeUnit[] = [
   unit((u) => u.opts.recordSourceGet === true, "scr_record_source_get.c"),
   // The join of an array of strings (scr_arr_join_str.c).
   unit((u) => u.opts.arrJoinStr === true, "scr_arr_join_str.c"),
+  // Atomics.wait, notify and waitAsync (scr_atomics_wait.c).
+  unit((u) => u.opts.atomicsWait === true, "scr_atomics_wait.c"),
   unit((u) => u.opts.copying, "scr_copying.c"),
   unit((u) => u.opts.fileHandle, "scr_file_handle.c"),
   // writeFile's `flag` option and the fs/promises twins; the copyFile mode
@@ -541,9 +543,10 @@ const RUNTIME_UNITS: readonly RuntimeUnit[] = [
   // fsPromises.watch's async iterator: a queue over the watcher unit, its
   // own gate (native/executable.ts pulls scr_watch.c with it).
   unit((u) => u.opts.watchEvents, "scr_watch_async.c"),
-  // Every COFF executable links the remote queue: lld-link resolves scr_lib.o's remote-queue calls (scr_remote_post,
-  // scr_instance_remote, scr_remote_hold) though no program without a foreign callback reaches them, where ELF and
-  // Mach-O drop them with their sections (runtime-pack-matrix.mjs COFF_LINKED_OPTIONAL_SOURCES).
+  // Every COFF executable links the remote queue: lld-link resolves the remote-queue calls (scr_remote_post,
+  // scr_instance_remote, scr_remote_hold) of the Atomics wait unit, scr_atomics_wait.c (in the base scr_lib.c before
+  // it was a unit of its own), though no program without a foreign callback or Atomics.waitAsync reaches them, where
+  // ELF and Mach-O drop them with their sections (runtime-pack-matrix.mjs COFF_LINKED_OPTIONAL_SOURCES).
   unit((u) => u.opts.foreignFfi || targetPlatform(u.driver) === "win32", "scr_ffi_queue.c"),
   unit((u) => u.opts.nodeTest, "scr_test.c"),
   unit((u) => u.opts.webcrypto, "scr_webcrypto.c"),

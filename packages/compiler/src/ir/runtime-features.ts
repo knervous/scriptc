@@ -2550,6 +2550,15 @@ const RUNTIME_FEATURE_RULES = {
    * the typed entry (scr_arr_join_str.c), which joins a hole-free string
    * array in two passes and hands every other array to scr_arr_join. A unit
    * of its own so a program that joins no string array links nothing of it. */
+  /** Atomics.wait, Atomics.notify and Atomics.waitAsync, typed or through an untyped argument: scr_atomics_wait.c, a
+   * unit of its own because waitAsync settles through promises and the remote queue (a program that only loads,
+   * stores or exchanges links nothing of it). */
+  atomicsWait: rule({
+    fns: [
+      "atomics.wait", "atomics.notify", "atomics.waitAsyncStart", "atomics.waitAsyncPromise", "atomics.waitAsyncResult",
+      "atomics.waitDyn", "atomics.notifyDyn",
+    ],
+  }),
   arrJoinStr: rule({
     expr: (node, _tables) =>
       node.kind === "arrIntrinsic" &&
@@ -3035,6 +3044,7 @@ function noRuntimeFeatures(): RuntimeFeatures {
     processExtras: false,
     qs: false,
     recordSourceGet: false,
+    atomicsWait: false,
     arrJoinStr: false,
     regex: false,
     searchParams: false,

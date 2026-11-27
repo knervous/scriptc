@@ -1248,6 +1248,12 @@ function libraryNativeFeatures(
     copying: features.copying,
     textDecoderLegacy: features.legacyTextDecoder,
     dynInvoke: features.dynInvoke,
+    ...(features.recordSourceGet ? { recordSourceGet: true } : {}),
+    ...(features.arrJoinStr ? { arrJoinStr: true } : {}),
+    ...(features.dynBuffer ? { dynBuffer: true } : {}),
+    ...(features.dynTier ? { dynTier: true } : {}),
+    ...(features.mutableBuffers ? { mutableBuffers: true } : {}),
+    ...(features.fnMemberProps ? { fnMemberProps: true } : {}),
     ...(mod.lib?.identity !== undefined ? { buildId: mod.lib.identity.buildId } : {}),
   };
 }
@@ -1323,6 +1329,12 @@ async function compileLibraryNative(
     copying: features.copying,
     textDecoderLegacy: features.textDecoderLegacy,
     dynInvoke: features.dynInvoke,
+    ...(features.recordSourceGet ? { recordSourceGet: true } : {}),
+    ...(features.arrJoinStr ? { arrJoinStr: true } : {}),
+    ...(features.dynBuffer ? { dynBuffer: true } : {}),
+    ...(features.dynTier ? { dynTier: true } : {}),
+    ...(features.mutableBuffers ? { mutableBuffers: true } : {}),
+    ...(features.fnMemberProps ? { fnMemberProps: true } : {}),
   };
   if (packTarget !== null) await compilePackedLibrary(archiveOptions, packTarget);
   else await compileExternalCLibrary(archiveOptions);

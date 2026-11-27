@@ -24,6 +24,7 @@ output/
 /packages/cli/bin/
 /packages/runtime-*/artifacts/
 /packages/runtime-*/runtime-pack.json
+/packages/runtime-*/runtime-pack.verified.json
 /packages/runtime-*/.runtime-pack-*
 !tests/fixtures/fetch/node_modules/eventsource-parser/dist/
 !tests/fixtures/npm/node_modules/*/dist/

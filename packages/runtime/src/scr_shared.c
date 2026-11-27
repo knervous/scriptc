@@ -5,6 +5,7 @@
  * consistent instructions, other element and bulk accesses as relaxed ones
  * (scr_shared_load, scr_shared_store). No lock orders them. */
 #include "scr_runtime.h"
+#include "scr_atomics_private.h"
 #include "scr_numeric.h"
 #include <math.h>
 #include <stdatomic.h>
@@ -304,7 +305,7 @@ static ScrStr *scr_atomics_value_text(const ScrDyn *value) {
 /* The integer typed array an untyped Atomics argument holds, or NULL with
  * Node's TypeError pending. `waitable` requires an Int32Array, as wait and
  * notify do. */
-static ScrBytes *scr_atomics_dyn_array(const ScrDyn *value, bool waitable) {
+ScrBytes *scr_atomics_dyn_array(const ScrDyn *value, bool waitable) {
   if (value->kind == SCR_DYN_BYTES && !value->v.bytes->is_data_view) {
     ScrBytesElem elem = value->v.bytes->elem;
     bool integer = elem == SCR_BYTES_I8 || elem == SCR_BYTES_U8 || elem == SCR_BYTES_I16 ||
@@ -327,12 +328,4 @@ double scr_atomics_op_dyn(const ScrDyn *array, double index, double value, doubl
   return bytes ? scr_atomics_op(bytes, index, value, replacement, operation) : 0;
 }
 
-ScrStr *scr_atomics_wait_dyn(const ScrDyn *array, double index, double expected, double timeout) {
-  ScrBytes *bytes = scr_atomics_dyn_array(array, true);
-  return bytes ? scr_atomics_wait(bytes, index, expected, timeout) : NULL;
-}
-
-double scr_atomics_notify_dyn(const ScrDyn *array, double index, double count) {
-  ScrBytes *bytes = scr_atomics_dyn_array(array, true);
-  return bytes ? scr_atomics_notify(bytes, index, count) : 0;
-}
+/* scr_atomics_wait_dyn and scr_atomics_notify_dyn are in scr_atomics_wait.c, with wait and notify. */

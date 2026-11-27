@@ -5,7 +5,7 @@ import { release as osRelease, tmpdir } from "node:os";
 import { dirname, join } from "node:path";
 import { promisify } from "node:util";
 import { afterEach, describe, expect, test } from "vitest";
-import type { NativeLinkInfo } from "@scriptc/compiler";
+import { RUNTIME_ABI_MARKER, type NativeLinkInfo } from "@scriptc/compiler";
 
 const execFileAsync = promisify(execFile);
 const require = createRequire(import.meta.url);
@@ -142,6 +142,6 @@ describe.runIf(supported)("macOS arm64 native link info", () => {
     const error = await execFileAsync("clang", [
       "-target", "arm64-apple-macosx14.0.0", object, stub, "-o", join(dir, "bad"),
     ]).then(() => null, (failure: { stderr?: string }) => failure);
-    expect(error?.stderr).toContain("scr_runtime_abi_v6");
+    expect(error?.stderr).toContain(RUNTIME_ABI_MARKER);
   });
 });

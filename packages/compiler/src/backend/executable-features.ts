@@ -118,6 +118,7 @@ export function executableLinkFeatures(
     ...(features.genReceiver ? { genReceiver: true } : {}),
     ...(features.recordSourceGet ? { recordSourceGet: true } : {}),
     ...(features.arrJoinStr ? { arrJoinStr: true } : {}),
+    ...(features.atomicsWait ? { atomicsWait: true } : {}),
     ...(features.eventsOnceSignal ? { eventsOnceSignal: true } : {}),
     ...(features.mime ? { mime: true } : {}),
     ...(features.sqlite ? { sqlite: true } : {}),

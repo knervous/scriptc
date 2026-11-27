@@ -217,6 +217,9 @@ export interface NativeLinkFeatures {
    * scr_arr_join_str.c. Absent (false) for every other program, a join of
    * numbers among them, so they keep their runtime objects byte for byte. */
   arrJoinStr?: boolean;
+  /** Atomics.wait, notify or waitAsync (runtime feature atomicsWait): scr_atomics_wait.c. Absent (false) for every
+   * other program. */
+  atomicsWait?: boolean;
   /** events.once with options: scr_events_once_signal.c. Absent (not
    * false) for programs without it. */
   eventsOnceSignal?: boolean;

@@ -229,6 +229,8 @@ export interface CcOptions {
   recordSourceGet?: boolean;
   /** A join of an array of strings: compiles scr_arr_join_str.c. */
   arrJoinStr?: boolean;
+  /** Atomics.wait, notify or waitAsync: compiles scr_atomics_wait.c. */
+  atomicsWait?: boolean;
   /** events.once with options (events.onceSignal): compiles
    * scr_events_once_signal.c. */
   eventsOnceSignal?: boolean;

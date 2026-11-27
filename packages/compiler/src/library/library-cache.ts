@@ -69,6 +69,14 @@ export interface EarlyLibraryNativeFeatures {
   zlib: boolean;
   copying: boolean;
   textDecoderLegacy: boolean;
+  /** Runtime gates the archive selects pack objects by (backend/library-pack.ts libraryArchiveFeatures), each
+   * present only when the program reaches it. */
+  recordSourceGet?: boolean;
+  arrJoinStr?: boolean;
+  dynBuffer?: boolean;
+  dynTier?: boolean;
+  mutableBuffers?: boolean;
+  fnMemberProps?: boolean;
   /** Volatile exact-source build identity emitted from the tiny identity TU. */
   buildId?: string;
 }
@@ -129,16 +137,26 @@ const BOOLEAN_NATIVE_KEYS = [
   "textDecoderLegacy",
 ] as const satisfies readonly (keyof EarlyLibraryNativeFeatures)[];
 
+const OPTIONAL_NATIVE_KEYS = [
+  "recordSourceGet",
+  "arrJoinStr",
+  "dynBuffer",
+  "dynTier",
+  "mutableBuffers",
+  "fnMemberProps",
+] as const satisfies readonly (keyof EarlyLibraryNativeFeatures)[];
+
 function validNativeFeatures(value: unknown): value is EarlyLibraryNativeFeatures {
   return validSharedNativeFeatures<EarlyLibraryNativeFeatures>(
     value,
     BOOLEAN_NATIVE_KEYS,
-    (native) => native.buildId === undefined || /^[0-9a-f]{16}$/.test(native.buildId),
+    (native) => (native.buildId === undefined || /^[0-9a-f]{16}$/.test(native.buildId)) &&
+      OPTIONAL_NATIVE_KEYS.every((key) => native[key] === undefined || typeof native[key] === "boolean"),
   );
 }
 
 function cacheKey(options: EarlyLibraryCacheOptions): string {
-  return sharedCacheKey("early-library-v2", [
+  return sharedCacheKey("early-library-v3", [
     resolve(options.profilePath),
     options.profileBytes,
     resolve(options.entryPath),

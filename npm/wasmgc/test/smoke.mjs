@@ -103,6 +103,20 @@ try {
   check(api.status === 0 && result?.good === true && result.bad === false && /bad\.ts:2: .*string/.test(result.text) && fs.existsSync(path.join(dir, "api/generics.wasm")),
     `import("scriptw") compile: ${api.ms} ms`, { stdout: api.stdout, stderr: api.stderr });
 
+  // On Linux, the run a darwin-arm64 install makes: the compiler has a native wasm-opt entry for that platform, which
+  // the package does not ship, so the package must ask for its wasm-opt.js. The platform is faked before the compiler
+  // loads, and TypeScript 7's checker is this machine's (its darwin package is not installed here).
+  const tsgo = path.join(dir, "node_modules/@typescript/typescript-linux-x64/lib/tsc");
+  if (process.platform === "linux" && process.arch === "x64" && fs.existsSync(tsgo)) {
+    fs.writeFileSync(path.join(dir, "fake-darwin-arm64.mjs"),
+      'Object.defineProperty(process, "platform", { value: "darwin" }); Object.defineProperty(process, "arch", { value: "arm64" });\n');
+    const env = { ...process.env, SCRIPTC_TS7_EXECUTABLE: tsgo };
+    delete env.SCRIPTC_WASMOPT_TOOL;
+    const mac = sh(process.execPath, ["--import", "./fake-darwin-arm64.mjs", path.join(dir, "node_modules/scriptw/bin/cli.mjs"), "run", "hello.ts"], { env });
+    const oracle = sh(process.execPath, ["hello.ts"]);
+    check(mac.status === 0 && mac.stdout === oracle.stdout, `run hello.ts as darwin-arm64 (wasm-opt.js): ${mac.ms} ms`, mac.stderr);
+  }
+
   // --version: the package and compiler versions, and the commit assemble.mjs stamped.
   const version = scriptw(["--version"]);
   const pkg = JSON.parse(fs.readFileSync(path.join(dir, "node_modules/scriptw/package.json"), "utf8"));

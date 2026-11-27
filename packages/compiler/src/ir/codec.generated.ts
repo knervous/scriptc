@@ -1,4 +1,3 @@
-// This file was modified from scriptc (Apache-2.0); see MODIFICATIONS.md.
 // Generated from packages/compiler/src/ir/ir.ts by scripts/generate-ir-codec.mjs.
 // Run `pnpm generate:ir-codec` after changing the IR's types.
 import type { IrBindingSource, IrClassDef, IrContracts, IrExpr, IrFfiCallbackParam, IrFfiContextParam, IrFfiImport, IrFfiParam, IrFfiReleaseParam, IrFunction, IrGlobal, IrLibCallback, IrLibExport, IrLibIdentity, IrLibSection, IrLibTrapOverlay, IrLocal, IrModule, IrNodeIslandModules, IrParam, IrRecordField, IrRecordLink, IrRecordShape, IrStmt, IrType, IrUnionDef, IrUnionDiscriminant, IrWasmModule, IrWasmUntranslated, SrcLoc } from "./ir.js";

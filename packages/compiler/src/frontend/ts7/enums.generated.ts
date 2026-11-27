@@ -1,4 +1,3 @@
-// This file was modified from scriptc (Apache-2.0); see MODIFICATIONS.md.
 /* eslint-disable @typescript-eslint/no-duplicate-enum-values -- TypeScript aliases are part of the protocol. */
 // Generated from typescript@7.0.2 by scripts/generate-ts7-ast-schema.mjs.
 // TypeScript is Copyright Microsoft Corporation, licensed under Apache-2.0.

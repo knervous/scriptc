@@ -194,22 +194,7 @@ bool scr_dyn_native_instance_of_global(const ScrDyn *value, const char *name, si
   return false;
 }
 
-/* ── frozen records (record.freeze / record.inherit) ──────────────────────
- * Upstream scriptc's design on this runtime's rc word: a record a program may freeze (llvm/frozen-records.ts) keeps
- * SCR_RECORD_FROZEN beside its count, its emitted release counts without the bit, and every write to it tests the
- * bit first. A count never reaches the bit; an immortal record (rc SIZE_MAX, every bit set) is never frozen, and its
- * word does not read as frozen. Records keep their layout. */
-#if SIZE_MAX > UINT32_MAX
-#define SCR_RECORD_FROZEN ((size_t)1 << 62)
-#else
-#define SCR_RECORD_FROZEN ((size_t)1 << 30)
-#endif
-
-static bool scr_record_frozen_word(const void *record) {
-  size_t rc = *(const size_t *)record;
-  return rc != SIZE_MAX && (rc & SCR_RECORD_FROZEN) != 0;
-}
-
+/* SCR_RECORD_FROZEN and scr_record_frozen_word are in scr_dyn_native.h (scr_json.c reads the bit too). */
 bool scr_record_is_frozen(const void *record) { return scr_record_frozen_word(record); }
 
 /* Object.freeze of a record crossing as an untyped value (the compiler emits it for freezable shapes only): the
