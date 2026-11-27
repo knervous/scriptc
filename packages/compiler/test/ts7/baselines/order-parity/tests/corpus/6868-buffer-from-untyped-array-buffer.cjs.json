@@ -1,6 +1,0 @@
-{
- "order": [
-  "<repo>/tests/corpus/6868-buffer-from-untyped-array-buffer.cjs"
- ],
- "diags": []
-}

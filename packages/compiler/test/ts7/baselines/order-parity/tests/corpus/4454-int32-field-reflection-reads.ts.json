@@ -1,6 +1,0 @@
-{
- "order": [
-  "<repo>/tests/corpus/4454-int32-field-reflection-reads.ts"
- ],
- "diags": []
-}

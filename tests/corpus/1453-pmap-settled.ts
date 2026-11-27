@@ -1,8 +1,9 @@
 // The pMap pattern: a manual Promise.allSettled — concurrent workers over a
 // shared counter, results filled BY INDEX into a mapper-less
 // Array.from({ length }) array, failures collected as rejected results in
-// input order. PromiseSettledResult records keep their value (undefined
-// for a void mapper) and their caught reason.
+// input order. PromiseSettledResult maps to the honest { status } subset
+// (value/reason drop; the awaited mapper still runs — and throws — from
+// the dropped `value` initializer).
 
 async function pMap<T, R>(
   items: T[],
@@ -40,13 +41,10 @@ async function work(n: number, idx: number): Promise<void> {
 
 async function main(): Promise<void> {
   const settled = await pMap([1, 2, 3, 4, 5, 6, 7], (n, i) => work(n, i), 3);
-  // Settled array is in INPUT order regardless of completion order.
+  // Settled array is in INPUT order regardless of completion order; the
+  // status tag survives the honest subset.
   console.log(settled.map((s) => s.status).join(","));
   console.log(settled.length);
-  for (const s of settled) {
-    if (s.status === "fulfilled") console.log("value", s.value);
-    else console.log("reason", (s.reason as Error).message);
-  }
 
   // Zero items: no workers, empty results.
   const none = await pMap([] as number[], (n, i) => work(n, i), 4);
@@ -60,11 +58,12 @@ async function main(): Promise<void> {
 }
 main();
 
-// Manually-built settled results outside pMap read back whole.
+// Manually-built settled results outside pMap: the status tag reads back;
+// value/reason drop (effect-free initializers drop at compile time).
 const manual: PromiseSettledResult<number> = { status: "fulfilled", value: 42 };
-console.log(manual.status, manual);
+console.log(manual.status);
 const manualRej: PromiseSettledResult<number> = { status: "rejected", reason: "nope" };
-console.log(manualRej.status, manualRej);
+console.log(manualRej.status);
 
 // Mapper-less Array.from({ length }) with union elements: absent slots ARE
 // undefined (JS-exact reads before any write).

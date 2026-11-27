@@ -1,6 +1,0 @@
-{
- "order": [
-  "<repo>/tests/corpus/create-require-factory-base-evaluated.cjs"
- ],
- "diags": []
-}

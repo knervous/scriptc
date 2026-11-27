@@ -1,1 +1,0 @@
-{ "name": "island-worker-hold-await", "private": true, "type": "module", "scriptc": { "packages": { "counter-pkg": "node" } } }

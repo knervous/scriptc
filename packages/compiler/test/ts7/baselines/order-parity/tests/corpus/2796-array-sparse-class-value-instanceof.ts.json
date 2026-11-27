@@ -1,6 +1,0 @@
-{
- "order": [
-  "<repo>/tests/corpus/2796-array-sparse-class-value-instanceof.ts"
- ],
- "diags": []
-}

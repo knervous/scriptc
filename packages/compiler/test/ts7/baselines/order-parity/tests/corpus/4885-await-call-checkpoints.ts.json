@@ -1,6 +1,0 @@
-{
- "order": [
-  "<repo>/tests/corpus/4885-await-call-checkpoints.ts"
- ],
- "diags": []
-}

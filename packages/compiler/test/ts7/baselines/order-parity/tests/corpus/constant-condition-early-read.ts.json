@@ -1,6 +1,0 @@
-{
- "order": [
-  "<repo>/tests/corpus/constant-condition-early-read.ts"
- ],
- "diags": []
-}

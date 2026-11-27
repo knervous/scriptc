@@ -1,8 +1,0 @@
-{
- "order": [
-  "<repo>/tests/corpus/pick-alias-view-modules/registry.ts",
-  "<repo>/tests/corpus/pick-alias-view-modules/globals.ts",
-  "<repo>/tests/corpus/pick-alias-view-modules/main.ts"
- ],
- "diags": []
-}

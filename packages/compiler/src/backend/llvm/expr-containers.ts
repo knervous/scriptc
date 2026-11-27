@@ -1,3 +1,4 @@
+// This file was modified from scriptc (Apache-2.0); see MODIFICATIONS.md.
 import { dynDesc } from "../../ir/analysis.js";
 /* Focused LLVM expression emission extracted from emitter.ts. */
 import { emitInlineArrayLength, inlineFieldTail } from "./inline-arrays.js";
@@ -589,6 +590,16 @@ export function emitStrIntrinsic(
       B.line(`${t} = sitofp ${host.sizeType} ${emitStringByteLength(host, r.name)} to double`);
       return { name: t, type: e.type };
     }
+    case "cpAt":
+      // The code point AT a UTF-16 index as a one-code-point string (+1):
+      // this fork's string-for-of desugar.
+      return call(
+        "scr_str_cp_at",
+        "ptr (ptr, double)",
+        `ptr ${r.name}, double ${args[0]!.name}`,
+        "ptr",
+        true,
+      );
     case "cpAtByte": {
       // sc_str_cp_at_byte (string-reads.ts) answers ASCII bytes from the
       // charAt table inline. The cursor is a character start, an exact
@@ -793,12 +804,15 @@ export function emitArrIntrinsic(
             return arrPush(host, r.name, kind, v.name, elem);
           })!;
         });
+        if (host.arraysMayFreeze) host.emitPendingCheck();
         return { name: length, type: e.type };
       }
       // In an int32 kind loop's fast copy, every value is checked before
       // the first appends.
       vs.forEach((v, i) => host.emitInt32KindStoreCheck(e.receiver, v, e.args[i]!));
-      return { name: emitArrayValues(host, r.name, access, elem, vs), type: e.type };
+      const length = emitArrayValues(host, r.name, access, elem, vs);
+      if (host.arraysMayFreeze) host.emitPendingCheck();
+      return { name: length, type: e.type };
     }
     case "pushSpread": {
       // `a.push(...src)`: append src's elements in order (borrowed src,
@@ -811,6 +825,7 @@ export function emitArrIntrinsic(
         host.emitPublishedArrayGuard(r.name, e.receiver.type, 1, f64Lit(0), n);
       }
       host.emitArrayCopyLoop(r.name, src.name, acc);
+      if (host.arraysMayFreeze) host.emitPendingCheck();
       host.declare(`declare double @scr_arr_len(ptr)`);
       const t = B.tmp();
       B.line(`${t} = call double @scr_arr_len(ptr ${r.name})`);
@@ -830,7 +845,9 @@ export function emitArrIntrinsic(
       // from right to left so the final front order is source order.
       const vs = e.args.map((a) => host.emitExpr(a));
       host.emitPublishedArrayGuard(r.name, e.receiver.type, 4, f64Lit(0), f64Lit(vs.length));
-      return { name: emitArrayValues(host, r.name, acc, elem, vs, true), type: e.type };
+      const length = emitArrayValues(host, r.name, acc, elem, vs, true);
+      if (host.arraysMayFreeze) host.emitPendingCheck();
+      return { name: length, type: e.type };
     }
     case "unshiftSpread": {
       // The runtime snapshots the borrowed source and handles self-spread.
@@ -844,6 +861,7 @@ export function emitArrIntrinsic(
       host.declare(`declare double @scr_arr_unshift_spread(ptr, ptr)`);
       const t = B.tmp();
       B.line(`${t} = call double @scr_arr_unshift_spread(ptr ${r.name}, ptr ${src.name})`);
+      if (host.arraysMayFreeze) host.emitPendingCheck();
       return { name: t, type: e.type };
     }
     case "pop":
@@ -893,6 +911,11 @@ export function emitArrIntrinsic(
       B.line(
         `${state} = call zeroext i8 @scr_arr_${method}_state(ptr ${r.name}, ptr ${rawSlot})${denseRaw === null ? "" : " cold"}`,
       );
+      if (host.arraysMayFreeze) {
+        // A frozen array throws from the runtime call; the check splits the block, so the phi names its tail.
+        host.emitPendingCheck();
+        slowLabel = B.currentLabel();
+      }
       B.line(`${slowRaw} = load i64, ptr ${rawSlot}`);
       B.line(`${has} = icmp eq i8 ${state}, 1`);
       const lf = foreignElements ? B.newLabel("remove.f") : la;
@@ -1113,6 +1136,7 @@ export function emitArrIntrinsic(
       const t = host.emitArrayMutationResult(r.name, e.receiver.type, noOp, () => {
         const made = B.tmp();
         B.line(`${made} = call ptr @scr_arr_reverse(ptr ${r.name})`);
+        if (host.arraysMayFreeze) host.emitPendingCheck();
         return made;
       });
       return host.own({ name: t, type: e.type });
@@ -1211,7 +1235,9 @@ export function emitArrIntrinsic(
       host.declare(`declare ptr @scr_arr_splice(ptr, double, double)`);
       const t = B.tmp();
       B.line(`${t} = call ptr @scr_arr_splice(ptr ${r.name}, double ${start.name}, double ${cnt})`);
-      return host.own({ name: t, type: e.type });
+      const out = host.own({ name: t, type: e.type });
+      if (host.arraysMayFreeze) host.emitPendingCheck();
+      return out;
     }
     case "spliceInsert": {
       const start = host.emitExpr(e.args[0]!);
@@ -1228,7 +1254,9 @@ export function emitArrIntrinsic(
       B.line(
         `${t} = call ptr @scr_arr_splice_insert(ptr ${r.name}, double ${start.name}, double ${count.name}, ptr ${items.name})`,
       );
-      return host.own({ name: t, type: e.type });
+      const out = host.own({ name: t, type: e.type });
+      if (host.arraysMayFreeze) host.emitPendingCheck();
+      return out;
     }
     case "flatCopy":
     case "flatOne": {

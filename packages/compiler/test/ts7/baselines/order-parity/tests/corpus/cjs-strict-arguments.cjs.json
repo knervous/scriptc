@@ -1,6 +1,0 @@
-{
- "order": [
-  "<repo>/tests/corpus/cjs-strict-arguments.cjs"
- ],
- "diags": []
-}

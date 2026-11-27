@@ -17,7 +17,7 @@ import { F64, STRING, VOID, type IrFunction, type IrModule } from "./ir.js";
 import { deserializeModuleBytes } from "./serialize.js";
 
 // Programs with many node kinds: classes, closures, async, generators,
-// dynamic values, closures with jsval entries, streams, records, regexes,
+// dynamic values, closures with jsword entries, streams, records, regexes,
 // lone surrogates and BigIntStats.
 const PROGRAMS = [
   "1003-json-parse-unions.ts",
@@ -139,7 +139,7 @@ test("absent optional fields stay absent", () => {
   expect(Object.keys(back.functions[0]!).sort()).toEqual(Object.keys(source.functions[0]!).sort());
 });
 
-test("a closure body keeps the name of its jsval entry", () => {
+test("a closure body keeps the name of its jsword entry", () => {
   const source: IrFunction = {
     name: "%fn.add",
     params: [],

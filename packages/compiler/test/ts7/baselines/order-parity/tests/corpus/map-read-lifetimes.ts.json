@@ -1,6 +1,0 @@
-{
- "order": [
-  "<repo>/tests/corpus/map-read-lifetimes.ts"
- ],
- "diags": []
-}

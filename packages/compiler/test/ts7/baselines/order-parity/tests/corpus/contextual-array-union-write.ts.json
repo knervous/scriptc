@@ -1,6 +1,0 @@
-{
- "order": [
-  "<repo>/tests/corpus/contextual-array-union-write.ts"
- ],
- "diags": []
-}

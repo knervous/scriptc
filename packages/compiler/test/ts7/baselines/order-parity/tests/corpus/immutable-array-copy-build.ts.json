@@ -1,6 +1,0 @@
-{
- "order": [
-  "<repo>/tests/corpus/immutable-array-copy-build.ts"
- ],
- "diags": []
-}

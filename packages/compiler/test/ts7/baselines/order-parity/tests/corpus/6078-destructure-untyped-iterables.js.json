@@ -1,6 +1,0 @@
-{
- "order": [
-  "<repo>/tests/corpus/6078-destructure-untyped-iterables.js"
- ],
- "diags": []
-}

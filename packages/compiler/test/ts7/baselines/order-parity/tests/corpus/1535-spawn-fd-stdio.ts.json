@@ -1,6 +1,0 @@
-{
- "order": [
-  "<repo>/tests/corpus/1535-spawn-fd-stdio.ts"
- ],
- "diags": []
-}

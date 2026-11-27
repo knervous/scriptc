@@ -26,14 +26,14 @@ function holding(type: IrType | null): IrModule {
 }
 
 const on = (mod: IrModule): string[] =>
-  Object.entries(executableLinkFeatures(mod))
+  Object.entries(executableLinkFeatures(mod, false))
     .filter(([, value]) => value === true)
     .map(([name]) => name);
 
 describe("the link features of a program", () => {
   test("a program with no optional runtime links none", () => {
     expect(on(holding(null))).toEqual([]);
-    expect(executableLinkFeatures(holding(null))).toMatchObject(noLinkFeatures());
+    expect(executableLinkFeatures(holding(null), false)).toMatchObject(noLinkFeatures());
   });
 
   test.each(["http2Session", "http2Stream"] as const)(

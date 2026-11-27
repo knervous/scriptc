@@ -1,7 +1,0 @@
-{
-  "entry": "workloads/record-boundaries.ts",
-  "args": [
-    "8"
-  ],
-  "scaleArg": 0
-}

@@ -1,3 +1,4 @@
+// This file was modified from scriptc (Apache-2.0); see MODIFICATIONS.md.
 import { typedRefConstructor } from "./shapes.js";
 /* Focused LLVM expression emission extracted from emitter.ts. */
 import { InternalCompilerError } from "../../errors.js";
@@ -485,6 +486,10 @@ export function streamTypedRefCommitAdapter(
                 `  %prototype = call ptr @${mangleFunction(meta.def.instancePrototypeHelper)}(ptr %prototype_receiver)`,
               ]
             : [`  %prototype = call ptr @${mangleFunction(meta.def.prototypeDataHelper!)}()`]),
+          // A prototype that could not be built (NULL, its exception pending) fails the commit like a bag copy.
+          `  %prototype_missing = icmp eq ptr %prototype, null`,
+          `  br i1 %prototype_missing, label %bag_fail, label %prototype_ok`,
+          `prototype_ok:`,
           `  %with_prototype = call ptr @scr_dyn_set_prototype(ptr %bag, ptr %prototype)`,
           `  call void @scr_dyn_release_v(ptr %prototype)`,
           `  call void @scr_dyn_release_v(ptr %with_prototype)`,
@@ -984,6 +989,14 @@ export function streamTypedRefMaterializeAdapter(
           `${prototype} = call ptr @${mangleFunction(meta.def.instancePrototypeHelper)}(ptr ${receiver})`,
         );
       } else B.line(`${prototype} = call ptr @${mangleFunction(meta.def.prototypeDataHelper!)}()`);
+      // A prototype that could not be built (NULL, its exception pending): the materialized view fails with it.
+      const missing = B.tmp(), failed = B.newLabel("proto.missing"), built = B.newLabel("proto.ok");
+      B.line(`${missing} = icmp eq ptr ${prototype}, null`);
+      B.condBr(missing, failed, built);
+      B.startBlock(failed);
+      B.line(`call void @scr_dyn_release_v(ptr ${out})`);
+      B.terminate(`ret ptr null`);
+      B.startBlock(built);
       B.line(`${attached} = call ptr @scr_dyn_set_prototype(ptr ${out}, ptr ${prototype})`);
       B.line(`call void @scr_dyn_release_v(ptr ${prototype})`);
       B.line(`call void @scr_dyn_release_v(ptr ${attached})`);
@@ -1333,6 +1346,11 @@ export function streamTypedRefMaterializeAdapter(
           }
         }
       });
+      // A frozen record's live view is frozen: a write through the untyped value throws before it can commit.
+      if (host.freezableShapes.has(t.shapeId)) {
+        host.declare(`declare void @scr_record_freeze_view(ptr, ptr)`);
+        B.line(`call void @scr_record_freeze_view(ptr %p, ptr ${out})`);
+      }
       if (dirent) {
         host.declare(`declare void @scr_dyn_dirent_finish(ptr)`);
         B.line(`call void @scr_dyn_dirent_finish(ptr ${out})`);

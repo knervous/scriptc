@@ -1,6 +1,0 @@
-{
- "order": [
-  "<repo>/tests/corpus/integer-clone-int32-slots.ts"
- ],
- "diags": []
-}

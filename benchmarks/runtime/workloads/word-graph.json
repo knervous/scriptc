@@ -1,7 +1,0 @@
-{
-  "entry": "workloads/word-graph.ts",
-  "args": [
-    "2"
-  ],
-  "scaleArg": 0
-}

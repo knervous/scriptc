@@ -1,6 +1,0 @@
-{
- "order": [
-  "<repo>/tests/corpus/unknown-array-holes.ts"
- ],
- "diags": []
-}

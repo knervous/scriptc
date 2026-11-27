@@ -1,3 +1,4 @@
+// This file was modified from scriptc (Apache-2.0); see MODIFICATIONS.md.
 /* Static immutability facts the backend uses to drop run-time immutability
  * checks (see computeConstructionFacts). Pure functions of the IR module. */
 import type { DynamicFieldStores } from "../ir/int32-slots.js";
@@ -15,7 +16,7 @@ import {
 /** Fields that are never written once their object can be observed outside
  * its own construction (cycle-mutability.ts derives the facts from every
  * store in the IR, including typed-ref commits from checked-dynamic code,
- * and disables them for library builds).
+ * and disables them for library builds and dynamic islands).
  *
  * Outside constructors, a reference read from such a field stays valid for
  * as long as its owner object is alive: nothing can replace it and release

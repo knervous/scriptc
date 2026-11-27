@@ -1,192 +1,58 @@
-import { dynUndefinedExpr, varRef } from "../../ir/build.js";
-import { builtinClassKind, builtinClassValue } from "./builtins/builtin-class-dyn.js";
+// This file was modified from scriptc (Apache-2.0); see MODIFICATIONS.md.
 import * as ts from "../ts7/adapter.js";
-import {
-  BOOL,
-  DYN,
-  STRING,
-  SYMBOL_T,
-  VOID,
-  isUnitType,
-  type IrExpr,
-  type IrFunction,
-  type IrStmt,
-  type SrcLoc,
-} from "../../ir/ir.js";
+import { BOOL, DYN, STRING, SYMBOL_T, isUnitType, type IrExpr, type IrFunction, type IrStmt, type SrcLoc } from "../../ir/ir.js";
+import { varRef } from "../../ir/build.js";
 import { locOf } from "../program.js";
-import {
-  classMemberNameOf,
-  classValueRef,
-  exactClassOfReceiver,
-  storedClassValueType,
-  findGenericMethodOn,
-  findMethodOn,
-  type ClassInfo,
-} from "./lower-classes.js";
+import { classMemberNameOf, classValueRef, exactClassOfReceiver, storedClassValueType, findGenericMethodOn, findMethodOn, type ClassInfo } from "./lower-classes.js";
 import type { Lowerer } from "./lowerer.js";
-import type { ScrDiagnostic } from "../../diagnostics/diagnostic.js";
-import { PoisonError, newFnCtx } from "./lowerer.js";
-import { classMethodValue, runsOverDynamicReceiver } from "./class-method-values.js";
-import { iteratorPrototypeExpr } from "./iterator-prototype.js";
-import { withoutParenthesesAssertionsNonNull } from "../outer-expressions.js";
+import { PoisonError, dynUndefinedExpr, newFnCtx } from "./lowerer.js";
+import { classMethodValue } from "./class-method-values.js";
 
 /** Data added to a top-level class prototype has shared identity and remains
  * separate from instance fields. Allocate lazily so inheritance and module
  * initialization order do not require hoisting source assignments. */
-export function classPrototypeData(
-  lowerer: Lowerer,
-  info: ClassInfo,
-  loc: SrcLoc,
-  receiver?: IrExpr,
-  metadataOnly = false,
-): IrExpr | null {
+export function classPrototypeData(lowerer: Lowerer, info: ClassInfo, loc: SrcLoc, receiver?: IrExpr, metadataOnly = false): IrExpr | null {
   if (info.localClass) {
     if (!receiver) return null;
     info.localPrototypeData = true;
-    const value: IrExpr =
-      receiver.type.kind === "classval"
-        ? receiver
-        : {
-            kind: "fieldGet",
-            obj: receiver,
-            className: info.def.name,
-            field: `%classEnvironment:${info.def.name}`,
-            type: { kind: "classval", className: info.def.name },
-            loc,
-          };
-    const base: IrExpr | null = info.callableBase
-      ? info.callableBase.iterator
-        ? // `class extends Iterator` in JavaScript: the base prototype is
-          // the runtime's live %Iterator.prototype%, not a native class's.
-          iteratorPrototypeExpr(loc)
-        : {
-            kind: "libCall",
-            fn: "dyn.classBasePrototype",
-            args: [
-              {
-                kind: "libCall",
-                fn: "dyn.getPrototype",
-                args: [{ kind: "dynFrom", value, type: DYN, loc }],
-                type: DYN,
-                loc,
-              },
-            ],
-            type: DYN,
-            loc,
-          }
-      : info.base && !info.base.builtinError
-        ? classPrototypeData(lowerer, info.base, loc, {
-            kind: "dynCheck",
-            value: {
-              kind: "libCall",
-              fn: "dyn.getPrototype",
-              args: [{ kind: "dynFrom", value, type: DYN, loc }],
-              type: DYN,
-              loc,
-            },
-            type: { kind: "classval", className: info.base.def.name },
-            loc,
-          })
-        : null;
-    return {
-      kind: "libCall",
-      fn: "dyn.classPrototype",
-      args: [{ kind: "dynFrom", value, type: DYN, loc }, base ?? dynUndefinedExpr(loc)],
-      type: DYN,
-      loc,
+    const value: IrExpr = receiver.type.kind === "classval" ? receiver : {
+      kind: "fieldGet", obj: receiver, className: info.def.name, field: `%classEnvironment:${info.def.name}`,
+      type: { kind: "classval", className: info.def.name }, loc,
     };
+    const base: IrExpr | null = info.callableBase ? { kind: "libCall", fn: "dyn.classBasePrototype", args: [
+      { kind: "libCall", fn: "dyn.getPrototype", args: [{ kind: "dynFrom", value, type: DYN, loc }], type: DYN, loc },
+    ], type: DYN, loc }
+      : info.base && !info.base.builtinError ? classPrototypeData(lowerer, info.base, loc,
+        { kind: "dynCheck", value: { kind: "libCall", fn: "dyn.getPrototype", args: [{ kind: "dynFrom", value, type: DYN, loc }], type: DYN, loc },
+          type: { kind: "classval", className: info.base.def.name }, loc }) : null;
+    return { kind: "libCall", fn: "dyn.classPrototype", args: [
+      { kind: "dynFrom", value, type: DYN, loc }, base ?? dynUndefinedExpr(loc),
+    ], type: DYN, loc };
   }
-  if (
-    info.mixinInstance ||
-    info.generic ||
-    info.genericInstance ||
-    info.def.runtime ||
-    info.builtinEmitter ||
-    info.builtinStream ||
-    info.builtinError
-  )
-    return null;
+  if (info.mixinInstance || info.generic || info.genericInstance || info.def.runtime || info.builtinEmitter || info.builtinStream || info.builtinError) return null;
   if (info.def.prototypeDataHelper === undefined) {
-    const base = info.callableBase
-      ? varRef(info.callableBase.prototypeId, DYN, loc)
-      : info.base && !info.base.builtinError
-        ? classPrototypeData(
-            lowerer,
-            info.base,
-            loc,
-            info.def.baseValueGlobal
-              ? varRef(
-                  info.def.baseValueGlobal,
-                  { kind: "classval", className: info.base.def.name },
-                  loc,
-                )
-              : undefined,
-            metadataOnly,
-          )
-        : null;
+    const base = info.callableBase ? varRef(info.callableBase.prototypeId, DYN, loc)
+      : info.base && !info.base.builtinError ? classPrototypeData(lowerer, info.base, loc,
+        info.def.baseValueGlobal ? varRef(info.def.baseValueGlobal, { kind: "classval", className: info.base.def.name }, loc) : undefined, metadataOnly) : null;
     if (info.base && !info.base.builtinError && base === null) return null;
-    const selected = selectedArmPrototype(lowerer, info, loc, metadataOnly);
     const name = `%prototype.data.${info.def.name}`;
     const globalId = `%g.${name}`;
     const readyId = `${globalId}.ready`;
     info.def.prototypeDataHelper = name;
     lowerer.shareHelper(name);
     const className = info.def.jsName ?? info.def.name;
-    lowerer.globalsList.push({
-      id: globalId,
-      name: `${className}.prototype`,
-      type: DYN,
-      mutable: true,
-    });
-    lowerer.globalsList.push({
-      id: readyId,
-      name: `${className}.prototype.ready`,
-      type: BOOL,
-      mutable: true,
-    });
+    lowerer.globalsList.push({ id: globalId, name: `${className}.prototype`, type: DYN, mutable: true });
+    lowerer.globalsList.push({ id: readyId, name: `${className}.prototype.ready`, type: BOOL, mutable: true });
     const value = varRef(globalId, DYN, loc);
     const helper: IrFunction = {
-      name,
-      params: [],
-      returnType: DYN,
-      locals: [],
-      loc,
-      speculativeDispatch: true,
+      name, params: [], returnType: DYN, locals: [], loc, speculativeDispatch: true,
       body: [
-        {
-          kind: "if",
-          cond: { kind: "unary", op: "!", operand: varRef(readyId, BOOL, loc), type: BOOL, loc },
-          then: [
-            {
-              kind: "assign",
-              localId: globalId,
-              value: base
-                ? { kind: "libCall", fn: "dyn.objCreate", args: [selected ?? base], type: DYN, loc }
-                : { kind: "dynObjLit", fields: [], type: DYN, loc },
-              loc,
-            },
-            // util.inspect prints an instance with its class's name.
-            {
-              kind: "exprStmt",
-              expr: {
-                kind: "libCall",
-                fn: "dyn.nameClassPrototype",
-                args: [value, { kind: "strLit", value: className, type: STRING, loc }],
-                type: VOID,
-                loc,
-              },
-              loc,
-            },
-            {
-              kind: "assign",
-              localId: readyId,
-              value: { kind: "boolLit", value: true, type: BOOL, loc },
-              loc,
-            },
-          ],
-          else_: null,
-          loc,
-        },
+        { kind: "if", cond: { kind: "unary", op: "!", operand: varRef(readyId, BOOL, loc), type: BOOL, loc }, then: [
+          { kind: "assign", localId: globalId, value: base
+            ? { kind: "libCall", fn: "dyn.objCreate", args: [base], type: DYN, loc }
+            : { kind: "dynObjLit", fields: [], type: DYN, loc }, loc },
+          { kind: "assign", localId: readyId, value: { kind: "boolLit", value: true, type: BOOL, loc }, loc },
+        ], else_: null, loc },
         { kind: "return", value, loc },
       ],
     };
@@ -194,609 +60,97 @@ export function classPrototypeData(
   }
   if (!metadataOnly && !info.prototypeObservedMethodsReady) {
     info.prototypeObservedMethodsReady = true;
-    const helper = lowerer.liftedFnNamed(info.def.prototypeDataHelper)!;
+    const helper = lowerer.liftedFns.find((fn) => fn.name === info.def.prototypeDataHelper)!;
     const value = varRef(`%g.${info.def.prototypeDataHelper}`, DYN, loc);
     // Materialize only observed method slots. Own declarations stop lookup
-    // at the correct prototype even if an ancestor is replaced later. An
-    // abstract declaration emits no prototype member in JavaScript, so it
-    // gets no slot: lookup continues to the ancestors, and the concrete
-    // descendants' prototypes carry the implementations.
+    // at the correct prototype even if an ancestor is replaced later.
     for (const [method, access] of lowerer.prototypeMethodAccesses) {
-      if (
-        !info.methods.has(method) ||
-        info.methods.get(method)?.abstract ||
-        method.startsWith("get:") ||
-        method.startsWith("set:")
-      )
-        continue;
-      const compiled = classMethodValue(lowerer, access, info, method, locOf(access));
+      if (!info.methods.has(method) || method.startsWith("get:") || method.startsWith("set:")) continue;
+      // An abstract declaration has no runtime slot: the prototype has no such property (JS erases it).
+      if (findMethodOn(lowerer, info, method)?.sig.abstract) continue;
+      // A refusal here is already a diagnostic; this post-lowering wave has no statement to poison, so the build goes on.
+      let compiled: ReturnType<typeof classMethodValue>;
+      try { compiled = classMethodValue(lowerer, access, info, method, locOf(access)); }
+      catch (e) { if (e instanceof PoisonError) continue; throw e; }
       if (!compiled) continue;
-      // A method value without a checked-dynamic form (an async method's
-      // promise-returning signature) gets no data slot.
-      const boxedValue = lowerer.coerceToExpected(compiled, DYN);
-      if (boxedValue.type.kind !== "dyn") continue;
-      const originalId = `%g.${info.def.prototypeDataHelper}.original.${method}`;
-      lowerer.globalsList.push({
-        id: originalId,
-        name: `${info.def.jsName ?? info.def.name}.prototype.${method}.original`,
-        type: DYN,
-        mutable: true,
-      });
-      info.prototypeOriginals ??= new Map();
-      info.prototypeOriginals.set(method, originalId);
-      const descriptor: IrExpr = {
-        kind: "dynObjLit",
-        fields: [
-          {
-            key: { kind: "strLit", value: "value", type: STRING, loc },
-            value: varRef(originalId, DYN, loc),
-          },
-          {
-            key: { kind: "strLit", value: "writable", type: STRING, loc },
-            value: lowerer.coerceToExpected({ kind: "boolLit", value: true, type: BOOL, loc }, DYN),
-          },
-          {
-            key: { kind: "strLit", value: "configurable", type: STRING, loc },
-            value: lowerer.coerceToExpected({ kind: "boolLit", value: true, type: BOOL, loc }, DYN),
-          },
-        ],
-        type: DYN,
-        loc,
-      };
+      const descriptor: IrExpr = { kind: "dynObjLit", fields: [
+        { key: { kind: "strLit", value: "value", type: STRING, loc }, value: lowerer.coerceToExpected(compiled, DYN) },
+        { key: { kind: "strLit", value: "writable", type: STRING, loc }, value: lowerer.coerceToExpected({ kind: "boolLit", value: true, type: BOOL, loc }, DYN) },
+        { key: { kind: "strLit", value: "configurable", type: STRING, loc }, value: lowerer.coerceToExpected({ kind: "boolLit", value: true, type: BOOL, loc }, DYN) },
+      ], type: DYN, loc };
       const init = helper.body[0]!;
-      if (init.kind === "if") {
-        // This adds slots to a helper that an earlier unit may have lifted.
-        // The lifted-functions table only grows by addition, so the in-place
-        // write is no part of this unit's function: name it (unit-journal.ts
-        // UnitEvents.touch), so the unit carries the changed helper instead of
-        // HeldTables.check finding an unnamed write. A helper this unit lifted
-        // is not yet held when the unit started, so naming it costs the unit
-        // nothing.
-        lowerer.unitEvents?.touch(info.def.prototypeDataHelper);
-        init.then.push({ kind: "assign", localId: originalId, value: boxedValue, loc });
-        init.then.push({
-          kind: "exprStmt",
-          expr: {
-            kind: "libCall",
-            fn: "dyn.defineProperty",
-            args: [
-              value,
-              lowerer.coerceToExpected({ kind: "strLit", value: method, type: STRING, loc }, DYN),
-              descriptor,
-            ],
-            type: DYN,
-            loc,
-          },
-          loc,
-        });
-      }
+      if (init.kind === "if") init.then.push({ kind: "exprStmt", expr: { kind: "libCall", fn: "dyn.defineProperty", args: [value,
+        lowerer.coerceToExpected({ kind: "strLit", value: method, type: STRING, loc }, DYN), descriptor], type: DYN, loc }, loc });
     }
   }
   return { kind: "call", callee: info.def.prototypeDataHelper, args: [], type: DYN, loc };
 }
 
-/** Whether reads of method `name` on instances of `info` use the observed
- * prototype slot: the census marked the name and the class has prototype
- * data that holds the method. Classes without prototype data (generic
- * instantiations, mixins and their subclasses) and function-local classes
- * check for the property and otherwise use the declared method. */
-export function observedPrototypeMethod(
-  lowerer: Lowerer,
-  info: ClassInfo,
-  name: string,
-  loc: SrcLoc,
-  receiver?: IrExpr,
-): boolean {
-  if (!lowerer.prototypeMethodAccesses.has(name)) return false;
-  // Building the data also marks a function-local class whose instances
-  // need it. That class value's prototype holds only methods the program
-  // replaced there, so its reads check for the key (own or inherited) and
-  // otherwise use the declared method.
-  const data = classPrototypeData(lowerer, info, loc, receiver);
-  return data !== null && info.localClass === undefined;
-}
-
-/** Whether `info`'s whole prototype can be reflected: module-level program
- * classes on a chain that has a prototype object of its own (no generic,
- * mixin or runtime-provided class, and no built-in chain whose prototype
- * the runtime owns). */
-export function prototypeViewable(info: ClassInfo): boolean {
-  for (let c: ClassInfo | null = info; c; c = c.base)
-    if (
-      c.decl === null ||
-      c.localClass !== undefined ||
-      c.generic !== undefined ||
-      c.genericInstance !== undefined ||
-      c.mixinInstance !== undefined ||
-      c.callableBase !== undefined ||
-      c.extendsDate !== undefined ||
-      c.def.runtime ||
-      c.builtinEmitter ||
-      c.builtinStream ||
-      c.builtinError ||
-      c.builtinEventTarget
-    )
-      return false;
-  return true;
-}
-
-/** The class whose prototype view a member reflection starts at, for a
- * receiver whose static class is `receiver`: that class when it inherits
- * the member and its prototype can be reflected (a subclass may replace
- * what its base declared, and Node's [[Get]] walks the receiver's own
- * prototype chain), else the class that declares the member. */
-export function prototypeViewStart(
-  lowerer: Lowerer,
-  receiver: ClassInfo | null,
-  declarer: ClassInfo,
-): ClassInfo {
-  if (receiver === null || receiver.def.name === declarer.def.name) return declarer;
-  if (!prototypeViewable(receiver)) return declarer;
-  return lowerer.isSubclassOf(receiver.def.name, declarer.def.name) ? receiver : declarer;
-}
-
-/** The constructible, reflectable classes below `info`, the most derived
- * first: a receiver's own class answers before the classes it extends. */
-function reflectableDescendants(lowerer: Lowerer, info: ClassInfo): ClassInfo[] {
-  const found: ClassInfo[] = [];
-  const visit = (current: ClassInfo): void => {
-    for (const child of current.subclasses) {
-      if (prototypeViewable(child) && lowerer.classCanBeConstructed(child)) found.push(child);
-      visit(child);
-    }
-  };
-  visit(info);
-  // Preorder reversed puts every descendant before its ancestors.
-  return found.reverse();
-}
-
-/** The prototype view a reflected member read or write starts from for a
- * receiver statically typed `receiver`. Node's [[Get]] and [[Set]] start at
- * the receiver's own prototype, so an instance of a subclass passed through
- * a base-class parameter answers what the subclass prototype holds. The view
- * is the static class's own when no constructible subclass can exist; a
- * shared helper otherwise selects the value's own class at run time. */
-export function receiverPrototypeView(
-  lowerer: Lowerer,
-  receiver: ClassInfo | null,
-  declarer: ClassInfo,
-  value: IrExpr,
-  loc: SrcLoc,
-): { prototype: IrExpr; start: ClassInfo } | null {
-  const start = prototypeViewStart(lowerer, receiver, declarer);
-  const staticView = reflectClassPrototype(lowerer, start, loc, value);
-  if (!staticView) return null;
-  // Only a value on the static class's own chain can be unboxed as one: a
-  // structural receiver that names the member without being an instance of
-  // that class keeps the declaring class's view.
-  const onChain =
-    receiver !== null &&
-    prototypeViewable(receiver) &&
-    (receiver.def.name === declarer.def.name ||
-      lowerer.isSubclassOf(receiver.def.name, declarer.def.name));
-  const descendants = onChain ? reflectableDescendants(lowerer, start) : [];
-  if (descendants.length === 0) return { prototype: staticView, start };
-  const name = `%class.prototypeView:${start.def.name}`;
-  lowerer.shareHelper(name);
-  if (lowerer.liftedFnNamed(name) === undefined) {
-    // Claim the name before lowering the members: a member body's typed read
-    // of a reflected member of this chain asks for this same view while it is
-    // being built, and its call must name this one helper rather than push a
-    // second function of the same name.
-    const reserved: IrFunction = {
-      name,
-      params: [{ localId: "value", name: "value", type: DYN }],
-      returnType: DYN,
-      locals: [],
-      body: [],
-      loc,
-    };
-    lowerer.liftedFns.push(reserved);
-    // The members of the classes below `start` all refused a view: the
-    // helper still answers `start`'s own prototype, which is what a caller
-    // that cannot select a descendant gets.
-    reserved.body = buildPrototypeView(lowerer, start, descendants, staticView, loc) ?? [
-      { kind: "return", value: staticView, loc },
-    ];
-    reserved.locals = [
-      { id: "value", name: "value", type: DYN, mutable: false },
-      {
-        id: "%prototype.instance",
-        name: "%prototype.instance",
-        type: { kind: "object", className: start.def.name },
-        mutable: false,
-      },
-    ];
-  }
-  return { prototype: { kind: "call", callee: name, args: [value], type: DYN, loc }, start };
-}
-
-/** The body of the helper that selects a constructible descendant's
- * prototype at run time; null when every descendant refused a view. */
-function buildPrototypeView(
-  lowerer: Lowerer,
-  start: ClassInfo,
-  descendants: readonly ClassInfo[],
-  staticView: IrExpr,
-  loc: SrcLoc,
-): IrStmt[] | null {
-  const instanceId = "%prototype.instance";
-  const instance: IrExpr = {
-    kind: "varRef",
-    localId: instanceId,
-    type: { kind: "object", className: start.def.name },
-    loc,
-  };
-  const body: IrStmt[] = [
-    {
-      kind: "varDecl",
-      localId: instanceId,
-      init: {
-        kind: "dynCheck",
-        value: varRef("value", DYN, loc),
-        type: { kind: "object", className: start.def.name },
-        loc,
-      },
-      loc,
-    },
-  ];
-  for (const descendant of descendants) {
-    const view = reflectClassPrototype(lowerer, descendant, loc, {
-      kind: "dynCheck",
-      value: varRef("value", DYN, loc),
-      type: { kind: "object", className: descendant.def.name },
-      loc,
-    });
-    if (!view || descendant.prototypeReflectionRefusal !== undefined) continue;
-    body.push({
-      kind: "if",
-      cond: {
-        kind: "instanceOf",
-        value: instance,
-        className: descendant.def.name,
-        type: BOOL,
-        loc,
-      },
-      then: [{ kind: "return", value: view, loc }],
-      else_: null,
-      loc,
-    });
-  }
-  if (body.length === 1) return null;
-  body.push({ kind: "return", value: staticView, loc });
-  return body;
-}
-
 export function hasClassPrototypeData(info: ClassInfo): boolean {
-  return (
-    info.callableBase !== undefined ||
-    info.localPrototypeData === true ||
-    info.def.prototypeDataHelper !== undefined ||
-    (info.base !== null && hasClassPrototypeData(info.base))
-  );
-}
-
-/** Methods and accessors that live on the class's prototype. */
-function declaresPrototypeMembers(decl: ts.ClassLikeDeclaration): boolean {
-  return decl.members.nodes.some(
-    (member) =>
-      (ts.isMethodDeclaration(member) || ts.isAccessor(member)) &&
-      !ts.isPrivateIdentifier(member.name) &&
-      !ts.getModifiers(member)?.some((modifier) => modifier.kind === ts.SyntaxKind.StaticKeyword),
-  );
-}
-
-/** The global that is true once the class's prototype view has been
- * populated by reflection (reflectClassPrototype): the view then holds an
- * own `constructor` unless the program deleted it. A view that was never
- * reflected leaves `constructor` implicit. */
-export function prototypeReflectedFlag(lowerer: Lowerer, info: ClassInfo): string {
-  if (info.prototypeReflectedFlag) return info.prototypeReflectedFlag;
-  const id = `%g.%prototype.data.${info.def.name}.reflected`;
-  lowerer.globalsList.push({
-    id,
-    name: `${info.def.jsName ?? info.def.name}.prototype.reflected`,
-    type: BOOL,
-    mutable: true,
-  });
-  info.prototypeReflectedFlag = id;
-  return id;
-}
-
-/** Whether the member's body reads or calls a member of its class through
- * `this` that the checked-dynamic dispatch cannot answer: a generic method
- * whose type parameters do not come from its parameters (the dispatch has no
- * specialization to hand out, and fences at run time), or one a subclass
- * overrides. Such a body cannot run over a checked-dynamic receiver, so the
- * view takes the member's compiled, receiver-checked value instead: its body
- * then keeps the class's typed `this`, and a read of the generic method
- * lowers as the typed call site does (monomorphized where the call sits). */
-function bodyNeedsTypedReceiver(
-  lowerer: Lowerer,
-  info: ClassInfo,
-  member: ts.MethodDeclaration | ts.AccessorDeclaration,
-): boolean {
-  if (member.body === undefined) return false;
-  let refused = false;
-  ts.walkPreorder(member.body, (node) => {
-    if (refused) return "skip";
-    // `this` inside a nested function, method, accessor or class body is
-    // that construct's own receiver, never the class instance's, so the scan
-    // does not cross into one: a helper object's `appendChild` is not the
-    // class's, and an inner class's field initializer (even one holding an
-    // arrow) reads the inner instance. An arrow keeps the enclosing `this`,
-    // so a read through one still counts.
-    if (
-      ts.isFunctionExpression(node) ||
-      ts.isFunctionDeclaration(node) ||
-      ts.isMethodDeclaration(node) ||
-      ts.isGetAccessorDeclaration(node) ||
-      ts.isSetAccessorDeclaration(node) ||
-      ts.isConstructorDeclaration(node) ||
-      ts.isClassDeclaration(node) ||
-      ts.isClassExpression(node)
-    )
-      return "skip";
-    if (
-      (!ts.isPropertyAccessExpression(node) && !ts.isElementAccessExpression(node)) ||
-      node.expression.kind !== ts.SyntaxKind.ThisKeyword
-    )
-      return undefined;
-    const name = ts.isPropertyAccessExpression(node)
-      ? node.name.text
-      : ts.isStringLiteralLike(node.argumentExpression)
-        ? node.argumentExpression.text
-        : null;
-    if (name === null || findMethodOn(lowerer, info, name) !== null) return undefined;
-    const generic = findGenericMethodOn(lowerer, info, name);
-    if (generic === null) return undefined;
-    const specialized =
-      generic.info.implicitParams !== undefined &&
-      generic.declarer.decl !== undefined &&
-      !lowerer.overrideBelow(info, name);
-    if (!specialized) refused = true;
-    return undefined;
-  });
-  return refused;
-}
-
-/** The prototype-view value of a TypeScript member that can run over a
- * checked-dynamic receiver: the declaration lowered with `this` as that
- * receiver (lowerLambda's checked receiver), so an object made from the
- * class's prototype reads fields, calls methods and runs accessors with
- * itself as `this`. Null for a JavaScript member (already
- * receiver-independent) and for one that needs a native receiver. */
-function dynamicPrototypeMemberValue(
-  lowerer: Lowerer,
-  info: ClassInfo,
-  member: ts.MethodDeclaration | ts.AccessorDeclaration,
-): IrExpr | null {
-  if (info.decl === null || !runsOverDynamicReceiver(lowerer, info, member)) return null;
-  const context = newFnCtx(false, null, null, DYN);
-  context.thisBoundary = true;
-  const previousClass = lowerer.currentClass;
-  lowerer.currentClass = info;
-  lowerer.fnStack.push(context);
-  const before = lowerer.diags.length;
-  // The member is lowered a second time, over a dynamic receiver. A statement
-  // in its body that refuses that receiver (a typed field read used where the
-  // checker requires its static type, a collection key) is no lowering of this
-  // attempt, and its diagnostic is not the program's: the member's own
-  // lowering at its declaration reports what that source refuses. Recording it
-  // would fail a build over a view the source never asked for (getPrototypeOf
-  // over an untyped value builds one for every class).
-  //
-  // A JavaScript statement that refuses becomes a run-time fence, so the
-  // attempt still holds every statement of the body. A TypeScript statement
-  // that refuses becomes nothing — the source keeps compile fences — so a
-  // value built here would run the member with part of its body missing. Any
-  // diagnostic the attempt captured therefore discards the value, and the
-  // member falls back to the compiled receiver-checked wrapper (as a member
-  // that needs a native receiver already does).
-  const held = lowerer.diagSink;
-  const heldDiscarded = lowerer.discardedCapture;
-  const captured: ScrDiagnostic[] = [];
-  lowerer.diagSink = captured;
-  lowerer.discardedCapture = true;
-  try {
-    const value = lowerer.coerceToExpected(lowerer.lowerLambda(member, true), DYN);
-    return captured.length === 0 ? value : null;
-  } catch (error) {
-    // A member whose signature cannot lower as a value (a rest parameter,
-    // for one) takes the same road.
-    if (!(error instanceof PoisonError)) throw error;
-    return null;
-  } finally {
-    lowerer.diagSink = held;
-    lowerer.discardedCapture = heldDiscarded;
-    lowerer.diags.splice(before);
-    lowerer.fnStack.pop();
-    lowerer.currentClass = previousClass;
-  }
+  return info.callableBase !== undefined || info.localPrototypeData === true || info.def.prototypeDataHelper !== undefined || (info.base !== null && hasClassPrototypeData(info.base));
 }
 
 /** Populate the shared prototype view before exposing it to reflection.
  * Methods and accessors are non-enumerable and retain declaration identity. */
-export function reflectClassPrototype(
-  lowerer: Lowerer,
-  info: ClassInfo,
-  loc: SrcLoc,
-  receiver: IrExpr,
-): IrExpr | null {
+export function reflectClassPrototype(lowerer: Lowerer, info: ClassInfo, loc: SrcLoc, receiver: IrExpr): IrExpr | null {
   const prototype = classPrototypeData(lowerer, info, loc, receiver);
   if (!prototype || !info.decl) return prototype;
   const refuse = (message: string): IrExpr => {
     const name = `%prototype.refusal:${info.def.name}`;
-    if (lowerer.liftedFnNamed(name) === undefined)
-      lowerer.liftedFns.push({
-        name,
-        params: [],
-        locals: [],
-        returnType: DYN,
-        body: [{ kind: "runtimeFence", code: "SC1090", message, loc }],
-        loc,
-      });
+    if (!lowerer.liftedFns.some((fn) => fn.name === name)) lowerer.liftedFns.push({
+      name, params: [], locals: [], returnType: DYN, body: [{ kind: "runtimeFence", code: "SC1090", message, loc }], loc,
+    });
     info.prototypeReflectionRefusal = name;
     return { kind: "call", callee: name, args: [], type: DYN, loc };
   };
-  if (info.prototypeReflectionRefusal)
-    return { kind: "call", callee: info.prototypeReflectionRefusal, args: [], type: DYN, loc };
+  if (info.prototypeReflectionRefusal) return { kind: "call", callee: info.prototypeReflectionRefusal, args: [], type: DYN, loc };
   // Local JavaScript factories initialize captured prototype members on
   // their constructor value, so the shared runtime view is already complete.
   if (info.localClass && info.runtimePrototypeMembers) return prototype;
-  // A function-local class declaring no prototype members (zod 4's
-  // `class Definition extends Parent {}`) has nothing to install: its
-  // shared runtime view is complete once its base's is.
-  if (info.localClass && declaresPrototypeMembers(info.decl))
-    return refuse("prototype reflection on a function-local class is not supported yet");
+  if (info.localClass) return refuse("prototype reflection on a function-local class is not supported yet");
   if (info.base && !info.base.builtinError) {
-    reflectClassPrototype(
-      lowerer,
-      info.base,
-      loc,
-      info.def.baseValueGlobal
-        ? varRef(info.def.baseValueGlobal, { kind: "classval", className: info.base.def.name }, loc)
-        : receiver,
-    );
-    if (info.base.prototypeReflectionRefusal)
-      return refuse("prototype reflection with this base class is not supported yet");
+    reflectClassPrototype(lowerer, info.base, loc, info.def.baseValueGlobal
+      ? varRef(info.def.baseValueGlobal, { kind: "classval", className: info.base.def.name }, loc) : receiver);
+    if (info.base.prototypeReflectionRefusal) return refuse("prototype reflection with this base class is not supported yet");
   }
-  const helper = lowerer.liftedFnNamed(info.def.prototypeDataHelper);
+  const helper = lowerer.liftedFns.find((fn) => fn.name === info.def.prototypeDataHelper);
   const initialization = helper?.body[0];
   if (!helper || initialization?.kind !== "if" || info.prototypeReflectionReady) return prototype;
   info.prototypeReflectionReady = true;
-  // The rebuild below changes an existing lifted helper in place. Name it for
-  // the unit being recorded (unit-journal.ts UnitEvents.touch): the helper
-  // table only grows by addition, so the write must be carried by the unit
-  // that made it.
-  lowerer.unitEvents?.touch(helper.name);
   // Earlier method or JSON views may have installed only observed slots.
   // Rebuild them in declaration order when the entire prototype is exposed.
   // Lowering passes may have rebuilt these statements, so match their
   // operation instead of relying on the original statement's identity.
-  initialization.then = initialization.then.filter(
-    (statement) =>
-      !(
-        statement.kind === "exprStmt" &&
-        ((statement.expr.kind === "libCall" && statement.expr.fn === "dyn.defineProperty") ||
-          (statement.expr.kind === "call" && statement.expr.callee === "%dyn.class.defineProperty"))
-      ),
-  );
-  const define = (key: IrExpr, fields: { key: string; value: IrExpr }[]): IrStmt => ({
-    kind: "exprStmt",
-    expr: {
-      kind: "libCall",
-      fn: "dyn.defineProperty",
-      args: [
-        prototype,
-        lowerer.coerceToExpected(key, DYN),
-        {
-          kind: "dynObjLit",
-          fields: [
-            ...fields,
-            {
-              key: "configurable",
-              value: { kind: "boolLit" as const, value: true, type: BOOL, loc },
-            },
-          ].map((field) => ({
-            key: { kind: "strLit", value: field.key, type: STRING, loc },
-            value: lowerer.coerceToExpected(field.value, DYN),
-          })),
-          type: DYN,
-          loc,
-        },
-      ],
-      type: DYN,
-      loc,
-    },
-    loc,
-  });
-  const writable = {
-    key: "writable",
-    value: { kind: "boolLit", value: true, type: BOOL, loc } as IrExpr,
-  };
-  initialization.then.push(
-    define({ kind: "strLit", value: "constructor", type: STRING, loc }, [
-      { key: "value", value: classValueRef(lowerer, info, info.decl) },
-      writable,
-    ]),
-    {
-      kind: "assign",
-      localId: prototypeReflectedFlag(lowerer, info),
-      value: { kind: "boolLit", value: true, type: BOOL, loc },
-      loc,
-    },
-  );
-  // The members lower on top of whatever frames requested the view (a
-  // `super` call in a subclass's method); their `this` is their own receiver.
+  initialization.then = initialization.then.filter((statement) =>
+    !(statement.kind === "exprStmt" &&
+      (statement.expr.kind === "libCall" && statement.expr.fn === "dyn.defineProperty" ||
+       statement.expr.kind === "call" && statement.expr.callee === "%dyn.class.defineProperty")));
+  const define = (key: IrExpr, fields: { key: string; value: IrExpr }[]): IrStmt => ({ kind: "exprStmt", expr: {
+    kind: "libCall", fn: "dyn.defineProperty", args: [prototype, lowerer.coerceToExpected(key, DYN), {
+      kind: "dynObjLit", fields: [...fields, { key: "configurable", value: { kind: "boolLit" as const, value: true, type: BOOL, loc } }].map((field) => ({
+        key: { kind: "strLit", value: field.key, type: STRING, loc }, value: lowerer.coerceToExpected(field.value, DYN),
+      })), type: DYN, loc,
+    }], type: DYN, loc,
+  }, loc });
+  const writable = { key: "writable", value: { kind: "boolLit", value: true, type: BOOL, loc } as IrExpr };
+  initialization.then.push(define({ kind: "strLit", value: "constructor", type: STRING, loc }, [
+    { key: "value", value: classValueRef(lowerer, info, info.decl) }, writable,
+  ]));
   const context = newFnCtx(false, null, null, DYN);
-  context.thisBoundary = true;
   lowerer.fnStack.push(context);
   try {
-    for (const member of info.decl.members.nodes) {
-      if (
-        (!ts.isMethodDeclaration(member) && !ts.isAccessor(member)) ||
-        !member.body ||
-        ts.isPrivateIdentifier(member.name) ||
-        ts.getModifiers(member)?.some((modifier) => modifier.kind === ts.SyntaxKind.StaticKeyword)
-      )
-        continue;
+    for (const member of info.decl.members) {
+      if ((!ts.isMethodDeclaration(member) && !ts.isAccessor(member)) || !member.body || ts.isPrivateIdentifier(member.name) ||
+          ts.getModifiers(member)?.some((modifier) => modifier.kind === ts.SyntaxKind.StaticKeyword)) continue;
       const name = classMemberNameOf(lowerer, member.name);
-      if (name === null)
-        return refuse(
-          "prototype reflection with an unresolved computed member is not supported yet",
-        );
-      const method = ts.isMethodDeclaration(member)
-        ? name
-        : `${ts.isGetAccessor(member) ? "get" : "set"}:${name}`;
-      // A member whose value or key has no lowering refuses the reflection
-      // at run time; its own diagnostic must not escape this walk (the
-      // walk runs from emitReachable, after statement fences are placed).
-      let before = lowerer.diags.length;
-      let value: IrExpr | null;
-      try {
-        // A member whose body reads another member through `this` that the
-        // checked-dynamic dispatch cannot answer (a generic method) keeps
-        // its compiled, receiver-checked value, so its body runs with the
-        // class's typed `this` instead of fencing at run time. Every other
-        // member takes the dynamic-receiver view.
-        value = bodyNeedsTypedReceiver(lowerer, info, member)
-          ? (classMethodValue(lowerer, info.decl, info, method, loc) ??
-            dynamicPrototypeMemberValue(lowerer, info, member))
-          : (dynamicPrototypeMemberValue(lowerer, info, member) ??
-            classMethodValue(lowerer, info.decl, info, method, loc));
-      } catch (error) {
-        if (!(error instanceof PoisonError)) throw error;
-        lowerer.diags.splice(before);
-        return refuse(
-          "prototype reflection with a member that has no lowering is not supported yet",
-        );
-      }
-      if (!value || !lowerer.dynConvertible(value.type))
-        return refuse(
-          "prototype reflection with a member that cannot cross a checked value boundary is not supported yet",
-        );
-      let key: IrExpr;
-      before = lowerer.diags.length;
-      try {
-        key = ts.isComputedPropertyName(member.name)
-          ? lowerer.lowerExpr(member.name.expression)
-          : { kind: "strLit", value: member.name.text, type: STRING, loc };
-      } catch (error) {
-        if (!(error instanceof PoisonError)) throw error;
-        lowerer.diags.splice(before);
-        return refuse(
-          "prototype reflection with a computed member key that has no lowering is not supported yet",
-        );
-      }
-      initialization.then.push(
-        define(
-          key,
-          ts.isMethodDeclaration(member)
-            ? [{ key: "value", value }, writable]
-            : [{ key: ts.isGetAccessor(member) ? "get" : "set", value }],
-        ),
-      );
+      if (name === null) return refuse("prototype reflection with an unresolved computed member is not supported yet");
+      const method = ts.isMethodDeclaration(member) ? name : `${ts.isGetAccessor(member) ? "get" : "set"}:${name}`;
+      const value = classMethodValue(lowerer, info.decl, info, method, loc);
+      if (!value || !lowerer.dynConvertible(value.type)) return refuse(`prototype reflection with a member that cannot cross a checked value boundary is not supported yet (${info.def.name}.${method}${value ? `: ${lowerer.fmt(value.type)}` : ""})`);
+      const key: IrExpr = ts.isComputedPropertyName(member.name) ? lowerer.lowerExpr(member.name.expression)
+        : { kind: "strLit", value: member.name.text, type: STRING, loc };
+      initialization.then.push(define(key, ts.isMethodDeclaration(member) ? [{ key: "value", value }, writable]
+        : [{ key: ts.isGetAccessor(member) ? "get" : "set", value }]));
     }
   } finally {
     helper.locals.push(...context.locals);
@@ -805,769 +159,128 @@ export function reflectClassPrototype(
   return prototype;
 }
 
-export function isCompiledPrototypeMember(
-  lowerer: Lowerer,
-  info: ClassInfo,
-  name: string,
-): boolean {
-  return (
-    name === "constructor" ||
-    name === "__proto__" ||
-    !!findMethodOn(lowerer, info, name) ||
-    !!findGenericMethodOn(lowerer, info, name) ||
-    !!findMethodOn(lowerer, info, `get:${name}`) ||
-    !!findMethodOn(lowerer, info, `set:${name}`)
-  );
-}
-
-/** `Error.prototype` read as the checked-dynamic object, as a value or for
- * a member other than `toString` and `constructor`, which keep the Error
- * class's prototype data (`this.toString !== Error.prototype.toString`
- * compares class method values). */
-export function isErrorPrototypeValue(
-  lowerer: Lowerer,
-  expr: ts.PropertyAccessExpression,
-): boolean {
-  let node: ts.Node = expr;
-  while (ts.isParenthesizedExpression(node.parent)) node = node.parent;
-  const parent = node.parent;
-  return (
-    expr.name.text === "prototype" &&
-    lowerer.isStdlibGlobal(expr.expression, "Error") &&
-    !(
-      ts.isPropertyAccessExpression(parent) &&
-      parent.expression === node &&
-      (parent.name.text === "toString" || parent.name.text === "constructor")
-    )
-  );
-}
-
-/** Whether a bare `C.prototype` read is only read (readOnlyPrototypeUse):
- * the object of a reflection that does not change it, `typeof`, an operand
- * of `===` / `!==` / `in`, or the initializer of a `const` whose every use
- * only reads it. In these positions the complete view of the prototype
- * (reflectClassPrototype) answers. Objects that inherit from it run the
- * class's methods with themselves as the receiver, which the methods'
- * receiver-independent lowering (reflectedClassMethodValue) supports.
- * A use that could change the prototype keeps the diagnostic. */
-function prototypeViewPosition(lowerer: Lowerer, expr: ts.PropertyAccessExpression): boolean {
-  return readOnlyPrototypeUse(lowerer, expr, 0);
-}
-
-/** The binding of a class's prototype view that `init` aliases
- * (`const q = p`), or null. `seen` breaks the cycle a pair of aliases
- * would otherwise walk. */
-function aliasedPrototypeView(
-  lowerer: Lowerer,
-  init: ts.Expression,
-  seen: Set<ts.VariableDeclaration>,
-): ts.VariableDeclaration | null {
-  let value = init;
-  while (ts.isParenthesizedExpression(value)) value = value.expression;
-  if (!ts.isIdentifier(value)) return null;
-  const declaration = lowerer.checker.getSymbolAtLocation(value)?.valueDeclaration;
-  if (declaration === undefined || !ts.isVariableDeclaration(declaration)) return null;
-  return isPrototypeViewBinding(lowerer, declaration, seen) ? declaration : null;
-}
-
-/** Whether `decl` binds a class's prototype view (`const proto = C.prototype`
- * or an alias of such a binding, `const alias = proto`) whose every use
- * only reads it (readOnlyPrototypeUse): its storage is the checked-dynamic
- * prototype object rather than the class's instance type the checker gives
- * it. */
-export function isPrototypeViewBinding(
-  lowerer: Lowerer,
-  decl: ts.VariableDeclaration,
-  seen: Set<ts.VariableDeclaration> = new Set(),
-): boolean {
-  if (seen.has(decl)) return false;
-  seen.add(decl);
-  let init = decl.initializer;
-  while (init && ts.isParenthesizedExpression(init)) init = init.expression;
-  if (!init) return false;
-  if (ts.isPropertyAccessExpression(init) && init.name.text === "prototype") {
-    const info = exactClassOfReceiver(lowerer, init.expression);
-    if (info === null || info === undefined || !viewableClass(lowerer, info, init.expression))
-      return false;
-  } else if (aliasedPrototypeView(lowerer, init, seen) === null) return false;
-  return readOnlyPrototypeUse(lowerer, init, 0);
-}
-
-/** Whether `node` reads a binding of a class's prototype view
- * (isPrototypeViewBinding): its value is the prototype object, whatever
- * instance type the checker gives it. */
-export function isPrototypeViewReference(lowerer: Lowerer, node: ts.Expression): boolean {
-  while (ts.isParenthesizedExpression(node)) node = node.expression;
-  if (!ts.isIdentifier(node)) return false;
-  const declaration = lowerer.checker.getSymbolAtLocation(node)?.valueDeclaration;
-  return (
-    declaration !== undefined &&
-    ts.isVariableDeclaration(declaration) &&
-    isPrototypeViewBinding(lowerer, declaration)
-  );
-}
-
-/** The `Object.create(proto)` call a variable declaration runs, with
- * parentheses and type assertions stripped, when its prototype is a class's
- * prototype view (`C.prototype`, or a binding of it): `const made =
- * Object.create(proto) as C`. The created object has no instance layout, so
- * the binding holds it checked-dynamic and every member access goes through
- * the prototype view, as Node resolves it. Null for every other initializer
- * (including an explicit record or array target, whose cast keeps its
- * conversion). */
-export function prototypeMadeSource(
-  lowerer: Lowerer,
-  decl: ts.VariableDeclaration,
-): ts.CallExpression | null {
-  if (!ts.isIdentifier(decl.name) || !decl.initializer) return null;
-  const call = withoutParenthesesAssertionsNonNull(decl.initializer);
-  if (
-    !ts.isCallExpression(call) ||
-    !ts.isPropertyAccessExpression(call.expression) ||
-    call.arguments.nodes.length < 1 ||
-    call.arguments.nodes.length > 2 ||
-    call.arguments.nodes.some(ts.isSpreadElement) ||
-    lowerer.stdlibGlobalMember(call.expression, "Object") !== "create"
-  )
-    return null;
-  const proto = withoutParenthesesAssertionsNonNull(call.arguments.nodes[0]!);
-  if (ts.isPropertyAccessExpression(proto) && proto.name.text === "prototype") {
-    const info = exactClassOfReceiver(lowerer, proto.expression);
-    return info && info !== null && viewableClass(lowerer, info, proto.expression) ? call : null;
-  }
-  return isPrototypeViewReference(lowerer, proto) ? call : null;
-}
-
-/** Whether `decl` binds an object made from a class's prototype
- * (prototypeMadeSource) with a class or untyped target: its storage is
- * checked-dynamic, because the object has no native layout. */
-export function isPrototypeMadeBinding(lowerer: Lowerer, decl: ts.VariableDeclaration): boolean {
-  if (prototypeMadeSource(lowerer, decl) === null) return false;
-  const type = lowerer.mapTypeOf(lowerer.typeOf(decl.name));
-  return type === null || type.kind === "dyn" || type.kind === "object";
-}
-
-/** The program class whose prototype a prototype-made binding was created
- * from (prototypeMadeSource), directly or through a binding of the
- * prototype. Null when the class cannot be named there. */
-export function prototypeMadeClass(
-  lowerer: Lowerer,
-  decl: ts.VariableDeclaration,
-): ClassInfo | null {
-  const call = prototypeMadeSource(lowerer, decl);
-  if (!call) return null;
-  let proto: ts.Expression = withoutParenthesesAssertionsNonNull(call.arguments.nodes[0]!);
-  if (!ts.isPropertyAccessExpression(proto)) {
-    if (!isPrototypeViewReference(lowerer, proto)) return null;
-    const declaration = lowerer.checker.getSymbolAtLocation(proto)?.valueDeclaration;
-    if (!declaration || !ts.isVariableDeclaration(declaration) || !declaration.initializer)
-      return null;
-    proto = withoutParenthesesAssertionsNonNull(declaration.initializer);
-    if (!ts.isPropertyAccessExpression(proto) || proto.name.text !== "prototype") return null;
-  }
-  if (proto.name.text !== "prototype") return null;
-  return exactClassOfReceiver(lowerer, proto.expression) ?? null;
-}
-
-/** Whether `node` reads a binding of an object made from a class's
- * prototype (isPrototypeMadeBinding): its storage is the created object,
- * which has no instance layout, so every member access is dynamic. */
-export function isPrototypeMadeReference(lowerer: Lowerer, node: ts.Expression): boolean {
-  while (ts.isParenthesizedExpression(node)) node = node.expression;
-  if (!ts.isIdentifier(node)) return false;
-  const declaration = lowerer.checker.getSymbolAtLocation(node)?.valueDeclaration;
-  return (
-    declaration !== undefined &&
-    ts.isVariableDeclaration(declaration) &&
-    isPrototypeMadeBinding(lowerer, declaration)
-  );
-}
-
-/** `Object` and `Reflect` functions that read an object without changing
- * it, by the argument position that takes the object. */
-const READING_OBJECT_FUNCTIONS = new Map<string, number>([
-  ["create", 0],
-  ["getPrototypeOf", 0],
-  ["setPrototypeOf", 1],
-  ["getOwnPropertyDescriptor", 0],
-  ["getOwnPropertyDescriptors", 0],
-  ["getOwnPropertyNames", 0],
-  ["getOwnPropertySymbols", 0],
-  ["keys", 0],
-  ["values", 0],
-  ["entries", 0],
-  ["isFrozen", 0],
-  ["isSealed", 0],
-  ["isExtensible", 0],
-]);
-const READING_REFLECT_FUNCTIONS = new Map<string, number>([
-  ["getPrototypeOf", 0],
-  ["setPrototypeOf", 1],
-  ["getOwnPropertyDescriptor", 0],
-  ["ownKeys", 0],
-  ["has", 0],
-  ["isExtensible", 0],
-]);
-
-/** Whether the prototype value `node` evaluates to (`C.prototype`, or a
- * read of a `const` it initialized) is used only to read it: as the object of
- * a reflection that does not change it (Object.create, getPrototypeOf,
- * getOwnPropertyDescriptor, `in`, `===`, `typeof`, …), or, read through a
- * binding, for a member it reads or calls. Such a use can see the
- * prototype's full view: no member of it is replaced, so the compiled
- * dispatch of the class's instances stays what the view shows. A `const`
- * qualifies when every reference to it does. */
-function readOnlyPrototypeUse(lowerer: Lowerer, node: ts.Expression, depth: number): boolean {
-  let child: ts.Node = node;
-  let parent = child.parent;
-  while (parent && ts.isParenthesizedExpression(parent)) {
-    child = parent;
-    parent = parent.parent;
-  }
-  if (!parent) return false;
-  if (ts.isCallExpression(parent) && ts.isPropertyAccessExpression(parent.expression)) {
-    const args = parent.arguments.nodes;
-    const objectMethod = lowerer.stdlibGlobalMember(parent.expression, "Object");
-    const reflectMethod = lowerer.stdlibGlobalMember(parent.expression, "Reflect");
-    const position =
-      (objectMethod !== null ? READING_OBJECT_FUNCTIONS.get(objectMethod) : undefined) ??
-      (reflectMethod !== null ? READING_REFLECT_FUNCTIONS.get(reflectMethod) : undefined);
-    if (position !== undefined) return args[position] === child;
-    // `mock.method(C.prototype, "name", …)`: the mock installs its wrapper
-    // through the prototype object, the representation a named prototype
-    // write reaches.
-    if (args[0] === child && parent.expression.name.text === "method") return true;
-  }
-  if (ts.isTypeOfExpression(parent)) return true;
-  if (
-    ts.isBinaryExpression(parent) &&
-    (parent.operatorToken.kind === ts.SyntaxKind.EqualsEqualsEqualsToken ||
-      parent.operatorToken.kind === ts.SyntaxKind.ExclamationEqualsEqualsToken ||
-      (parent.operatorToken.kind === ts.SyntaxKind.InKeyword && parent.right === child))
-  )
-    return true;
-  // A member read or call through a binding of the prototype; the direct
-  // `C.prototype.m` spelling lowers through the named prototype paths.
-  if (depth > 0 && ts.isPropertyAccessExpression(parent) && parent.expression === child)
-    return !isWriteTarget(parent);
-  if (
-    depth < 2 &&
-    ts.isVariableDeclaration(parent) &&
-    parent.initializer === child &&
-    ts.isIdentifier(parent.name) &&
-    (ts.getCombinedNodeFlags(parent) & ts.NodeFlags.Const) !== 0
-  )
-    return everyReferenceReadsPrototype(lowerer, parent.name, depth + 1);
-  return false;
-}
-
-/** Whether `access` is written, deleted or updated rather than read. */
-function isWriteTarget(access: ts.Node): boolean {
-  let node = access;
-  while (ts.isParenthesizedExpression(node.parent)) node = node.parent;
-  const parent = node.parent;
-  if (ts.isBinaryExpression(parent))
-    return (
-      parent.left === node &&
-      parent.operatorToken.kind >= ts.SyntaxKind.FirstAssignment &&
-      parent.operatorToken.kind <= ts.SyntaxKind.LastAssignment
-    );
-  return (
-    ts.isDeleteExpression(parent) ||
-    ((ts.isPrefixUnaryExpression(parent) || ts.isPostfixUnaryExpression(parent)) &&
-      (parent.operator === ts.SyntaxKind.PlusPlusToken ||
-        parent.operator === ts.SyntaxKind.MinusMinusToken))
-  );
-}
-
-function everyReferenceReadsPrototype(
-  lowerer: Lowerer,
-  name: ts.Identifier,
-  depth: number,
-): boolean {
-  const symbol = lowerer.checker.getSymbolAtLocation(name);
-  if (symbol === undefined) return false;
-  let ok = true;
-  let references = 0;
-  const visit = (node: ts.Node): void => {
-    if (!ok) return;
-    if (ts.isIdentifier(node) && node !== name && node.text === name.text) {
-      if (lowerer.checker.getSymbolAtLocation(node) === symbol) {
-        references++;
-        if (!readOnlyPrototypeUse(lowerer, node, depth)) ok = false;
-      }
-      return;
-    }
-    ts.forEachChild(node, visit);
-  };
-  visit(ts.getSourceFileOfNode(name));
-  return ok && references > 0;
-}
-
-/** Whether a bare `C.prototype` read is asserted to `any` or `unknown`
- * (`(C.prototype as any)`): the cast asks for the value's dynamic form —
- * the prototype object itself — so a member written through it is an own
- * property of the prototype, which the instances' checked-dynamic view then
- * reads. */
-function erasedCastPosition(lowerer: Lowerer, expr: ts.PropertyAccessExpression): boolean {
-  let node: ts.Node = expr;
-  while (
-    ts.isParenthesizedExpression(node.parent) ||
-    ts.isNonNullExpression(node.parent) ||
-    ts.isSatisfiesExpression(node.parent)
-  )
-    node = node.parent;
-  const parent = node.parent;
-  return (
-    (ts.isAsExpression(parent) || ts.isTypeAssertion(parent)) &&
-    parent.expression === node &&
-    (lowerer.typeOf(parent).flags & (ts.TypeFlags.Any | ts.TypeFlags.Unknown)) !== 0
-  );
-}
-
-/** A module-level class named directly (not a class value that may hold a
- * subclass at run time): its prototype has a complete view. A JavaScript
- * class's methods there accept any receiver; a TypeScript class's check that
- * the receiver is an instance of the class, as their direct calls do. */
-function viewableClass(lowerer: Lowerer, info: ClassInfo, receiver: ts.Expression): boolean {
-  return (
-    info.decl !== null &&
-    info.localClass === undefined &&
-    exactClassOfReceiver(lowerer, receiver) === info
-  );
-}
-
-/** The complete prototype view of the class `node` names, when it is a
- * viewable class (util.inherits's superCtor); null otherwise. */
-export function classPrototypeView(
-  lowerer: Lowerer,
-  node: ts.Expression,
-  loc: SrcLoc,
-): IrExpr | null {
-  const info = exactClassOfReceiver(lowerer, node);
-  if (!info || !viewableClass(lowerer, info, node)) return null;
-  return reflectClassPrototype(lowerer, info, loc, classValueRef(lowerer, info, node));
+export function isCompiledPrototypeMember(lowerer: Lowerer, info: ClassInfo, name: string): boolean {
+  return name === "constructor" || name === "__proto__" ||
+    !!findMethodOn(lowerer, info, name) || !!findGenericMethodOn(lowerer, info, name) ||
+    !!findMethodOn(lowerer, info, `get:${name}`) || !!findMethodOn(lowerer, info, `set:${name}`);
 }
 
 /** Named data and method slots have native descriptors. Bare reflection and
  * accessor replacement still require a complete view of the prototype. */
-export function lowerClassPrototypeData(
-  lowerer: Lowerer,
-  expr: ts.PropertyAccessExpression,
-): IrExpr | null {
+export function lowerClassPrototypeData(lowerer: Lowerer, expr: ts.PropertyAccessExpression): IrExpr | null {
   if (expr.questionDotToken || expr.name.text !== "prototype") return null;
   const stored = storedClassValueType(lowerer, expr.expression);
-  const info =
-    exactClassOfReceiver(lowerer, expr.expression) ??
+  const info = exactClassOfReceiver(lowerer, expr.expression) ??
     (stored?.kind === "classval" ? lowerer.classes.get(stored.className) : undefined);
   if (!info) return null;
-  // Error.prototype as a value: the checked-dynamic object an ES5
-  // constructor function inherits from (`F.prototype =
-  // Object.create(Error.prototype)`).
-  if (isErrorPrototypeValue(lowerer, expr))
-    return { kind: "libCall", fn: "dyn.errorPrototype", args: [], type: DYN, loc: locOf(expr) };
-  // EventEmitter.prototype and the stream prototypes: the untyped
-  // constructor's prototype object (builtin-class-dyn.ts).
-  const builtinKind = builtinClassKind(info.def.name);
-  if (builtinKind !== null) {
-    const loc = locOf(expr);
-    return {
-      kind: "dynKeyGet",
-      value: builtinClassValue(builtinKind, loc),
-      key: { kind: "strLit", value: "prototype", type: STRING, loc },
-      type: DYN,
-      loc,
-    };
-  }
   const parent = expr.parent;
-  const descriptorKey =
-    ts.isCallExpression(parent) &&
-    parent.arguments.nodes[0] === expr &&
-    ts.isPropertyAccessExpression(parent.expression) &&
-    (lowerer.stdlibGlobalMember(parent.expression, "Object") === "defineProperty" ||
-      lowerer.stdlibGlobalMember(parent.expression, "Reflect") === "defineProperty") &&
-    parent.arguments.nodes[1] &&
-    ts.isStringLiteral(parent.arguments.nodes[1])
-      ? parent.arguments.nodes[1].text
-      : null;
-  const name =
-    ts.isPropertyAccessExpression(parent) && parent.expression === expr
-      ? parent.name.text
-      : ts.isElementAccessExpression(parent) &&
-          parent.expression === expr &&
-          parent.argumentExpression &&
-          ts.isStringLiteral(parent.argumentExpression)
-        ? parent.argumentExpression.text
-        : descriptorKey;
-  const observed = name !== null && lowerer.prototypeMethodAccesses.has(name);
-  const method = observed && findMethodOn(lowerer, info, name);
-  // A name some class on the chain declares as an accessor: the full view
-  // carries the getter and setter, so a read or write through the prototype
-  // runs them with the prototype object as `this` (a write that finds only
-  // a setter calls it, as Node's [[Set]] does), and a definition replaces
-  // the accessor the instances' dispatch reads.
-  const accessor =
-    name !== null &&
-    (findMethodOn(lowerer, info, `get:${name}`) !== null ||
-      findMethodOn(lowerer, info, `set:${name}`) !== null);
-  if (name === "constructor") {
+  const descriptorKey = ts.isCallExpression(parent) && parent.arguments[0] === expr &&
+    ts.isPropertyAccessExpression(parent.expression) && lowerer.stdlibGlobalMember(parent.expression, "Object") === "defineProperty" &&
+    parent.arguments[1] && ts.isStringLiteral(parent.arguments[1]) ? parent.arguments[1].text : null;
+  const name = ts.isPropertyAccessExpression(parent) && parent.expression === expr ? parent.name.text
+    : ts.isElementAccessExpression(parent) && parent.expression === expr && parent.argumentExpression && ts.isStringLiteral(parent.argumentExpression)
+      ? parent.argumentExpression.text : descriptorKey;
+  const method = name !== null && lowerer.prototypeMethodAccesses.has(name) && findMethodOn(lowerer, info, name);
+  // `C.prototype.constructor`, and the bare prototype as a value (identity
+  // tests, Object.getPrototypeOf comparisons): the complete prototype view
+  // (every method and accessor installed), or its run-time refusal.
+  if (name === "constructor" || name === null && !info.localClass) {
     return reflectClassPrototype(lowerer, info, locOf(expr), classValueRef(lowerer, info, expr));
   }
-  if (accessor && (observed || descriptorKey !== null))
-    return reflectClassPrototype(lowerer, info, locOf(expr), classValueRef(lowerer, info, expr));
-  // The whole prototype of a function-local class: the shared view
-  // Object.getPrototypeOf answers for its instances.
-  if (name === null && info.localClass) {
-    const receiver = lowerer.lowerExprExpecting(expr.expression, {
-      kind: "classval",
-      className: info.def.name,
-    });
-    return reflectClassPrototype(lowerer, info, locOf(expr), receiver);
+  if (name === null || isCompiledPrototypeMember(lowerer, info, name) && !method) {
+    lowerer.unsupported("SC1090", expr, "class prototype reflection and accessor replacement (named prototype data and methods compile)");
   }
-  if (
-    name === null &&
-    prototypeViewPosition(lowerer, expr) &&
-    viewableClass(lowerer, info, expr.expression)
-  )
-    return reflectClassPrototype(lowerer, info, locOf(expr), classValueRef(lowerer, info, expr));
-  // `(C.prototype as any)`: the prototype object as a dynamic value, the
-  // same one a named prototype write reaches, so a member written through
-  // the cast is what the instances' checked-dynamic view reads.
-  if (name === null && erasedCastPosition(lowerer, expr)) {
-    const value = classPrototypeData(
-      lowerer,
-      info,
-      locOf(expr),
-      info.localClass
-        ? lowerer.lowerExprExpecting(expr.expression, {
-            kind: "classval",
-            className: info.def.name,
-          })
-        : undefined,
-    );
-    if (value !== null) return value;
-  }
-  if (name === null || (isCompiledPrototypeMember(lowerer, info, name) && !method)) {
-    lowerer.unsupported(
-      "SC1090",
-      expr,
-      "class prototype reflection and accessor replacement (named prototype data and methods compile)",
-    );
-  }
-  const value = classPrototypeData(
-    lowerer,
-    info,
-    locOf(expr),
-    info.localClass
-      ? lowerer.lowerExprExpecting(expr.expression, { kind: "classval", className: info.def.name })
-      : undefined,
-  );
-  if (value === null)
-    lowerer.unsupported(
-      "SC1090",
-      expr,
-      "prototype data on local, generic, mixin, or runtime-provided classes",
-    );
+  const value = classPrototypeData(lowerer, info, locOf(expr), info.localClass
+    ? lowerer.lowerExprExpecting(expr.expression, { kind: "classval", className: info.def.name }) : undefined);
+  if (value === null) lowerer.unsupported("SC1090", expr, "prototype data on local, generic, mixin, or runtime-provided classes");
   return value;
 }
 
 /** Object.assign may add data without exposing an incomplete prototype view.
  * The runtime refuses replacement of compiled members at the individual Set. */
-export function lowerClassPrototypeAssign(
-  lowerer: Lowerer,
-  call: ts.CallExpression,
-): IrExpr | null {
-  const target = call.arguments.nodes[0];
-  if (!target || !ts.isPropertyAccessExpression(target) || target.name.text !== "prototype")
-    return null;
+export function lowerClassPrototypeAssign(lowerer: Lowerer, call: ts.CallExpression): IrExpr | null {
+  const target = call.arguments[0];
+  if (!target || !ts.isPropertyAccessExpression(target) || target.name.text !== "prototype") return null;
   const info = exactClassOfReceiver(lowerer, target.expression);
   if (!info) return null;
-  if (!ts.isExpressionStatement(call.parent) || call.arguments.nodes.some(ts.isSpreadElement)) {
+  if (!ts.isExpressionStatement(call.parent) || call.arguments.some(ts.isSpreadElement)) {
     lowerer.unsupported("SC1090", call, "class prototype assignment results and spread arguments");
   }
   const loc = locOf(call);
-  const value = classPrototypeData(
-    lowerer,
-    info,
-    loc,
-    info.localClass
-      ? lowerer.lowerExprExpecting(target.expression, {
-          kind: "classval",
-          className: info.def.name,
-        })
-      : undefined,
-  );
-  if (!value)
-    lowerer.unsupported(
-      "SC1090",
-      target,
-      "prototype data on generic, mixin, or runtime-provided classes",
-    );
-  const sources = call.arguments.nodes
-    .slice(1)
-    .map((node) => lowerer.lowerExprExpecting(node, DYN));
-  return {
-    kind: "libCall",
-    fn: "dyn.assignPrototype",
-    args: [
-      value,
-      { kind: "dynArrLit", elems: sources, type: DYN, loc },
-      prototypeProtectedKeys(lowerer, info, target, loc),
-    ],
-    type: DYN,
-    loc,
-  };
+  const value = classPrototypeData(lowerer, info, loc, info.localClass
+    ? lowerer.lowerExprExpecting(target.expression, { kind: "classval", className: info.def.name }) : undefined);
+  if (!value) lowerer.unsupported("SC1090", target, "prototype data on generic, mixin, or runtime-provided classes");
+  const sources = call.arguments.slice(1).map((node) => lowerer.lowerExprExpecting(node, DYN));
+  return { kind: "libCall", fn: "dyn.assignPrototype", args: [value,
+    { kind: "dynArrLit", elems: sources, type: DYN, loc }, prototypeProtectedKeys(lowerer, info, target, loc),
+  ], type: DYN, loc };
 }
 
-function prototypeProtectedKeys(
-  lowerer: Lowerer,
-  info: ClassInfo,
-  target: ts.Node,
-  loc: SrcLoc,
-): IrExpr {
-  const keys: IrExpr[] = ["constructor", "__proto__"].map((name) => ({
-    kind: "strLit",
-    value: name,
-    type: STRING,
-    loc,
-  }));
+function prototypeProtectedKeys(lowerer: Lowerer, info: ClassInfo, target: ts.Node, loc: SrcLoc): IrExpr {
+  const keys: IrExpr[] = ["constructor", "__proto__"].map((name) => ({ kind: "strLit", value: name, type: STRING, loc }));
   for (let owner: ClassInfo | null = info; owner; owner = owner.base) {
     const methodNames = new Set([...owner.methods.keys()]);
-    if (owner.genericMethods)
-      for (const name of [...owner.genericMethods.keys()]) methodNames.add(name);
+    if (owner.genericMethods) for (const name of [...owner.genericMethods.keys()]) methodNames.add(name);
     for (const name of methodNames) {
       if (name.startsWith("#")) continue;
-      // An accessor the program defines through a prototype is observed by
-      // the instances' dispatch (the census marked the property), so the
-      // definition replaces it instead of being refused.
-      if (
-        (name.startsWith("get:") || name.startsWith("set:")) &&
-        lowerer.prototypeMethodAccesses.has(name.slice(4))
-      )
-        continue;
       // Error.toString uses checked native dispatch, including prototype
       // additions. A user-declared method remains protected below.
       if (owner.builtinError && name === "toString") continue;
       if (name.startsWith("sym:")) {
-        keys.push({
-          kind: "libCall",
-          fn: "sym.wellKnown",
-          args: [{ kind: "strLit", value: name.slice(4), type: STRING, loc }],
-          type: SYMBOL_T,
-          loc,
-        });
+        keys.push({ kind: "libCall", fn: "sym.wellKnown", args: [{ kind: "strLit", value: name.slice(4), type: STRING, loc }], type: SYMBOL_T, loc });
       } else if (name.startsWith("%symbol:")) {
         const entries: [ts.Symbol, string][] = owner.symbolMethods ? [...owner.symbolMethods] : [];
         const entry = entries.find(([, field]) => field === name);
-        const declaration = entry ? entry[0].valueDeclaration : undefined;
-        // A CommonJS key-table property holds its key in the table's global.
-        const tableKey =
-          declaration && ts.isPropertyAssignment(declaration)
-            ? lowerer.globalsBySymbol.get(entry![0])
-            : undefined;
-        if (tableKey) {
-          keys.push({ kind: "varRef", localId: tableKey.id, type: tableKey.type, loc });
-          continue;
-        }
-        if (
-          !declaration ||
-          !ts.isVariableDeclaration(declaration) ||
-          !ts.isIdentifier(declaration.name)
-        )
-          lowerer.unsupported(
-            "SC1090",
-            target,
-            "prototype mutation with unresolved symbol methods",
-          );
+        const declaration = entry ? lowerer.checker.valueDeclarationOf(entry[0]) : undefined;
+        if (!declaration || !ts.isVariableDeclaration(declaration) || !ts.isIdentifier(declaration.name)) lowerer.unsupported("SC1090", target, "prototype mutation with unresolved symbol methods");
         keys.push(lowerer.lowerExpr(declaration.name));
-      } else
-        keys.push({ kind: "strLit", value: name.replace(/^(get|set):/, ""), type: STRING, loc });
+      } else keys.push({ kind: "strLit", value: name.replace(/^(get|set):/, ""), type: STRING, loc });
     }
   }
-  return {
-    kind: "dynArrLit",
-    elems: keys.map((key) =>
-      key.type.kind === "dyn" ? key : { kind: "dynFrom", value: key, type: DYN, loc },
-    ),
-    type: DYN,
-    loc,
-  };
+  return { kind: "dynArrLit", elems: keys.map((key) => key.type.kind === "dyn" ? key : { kind: "dynFrom", value: key, type: DYN, loc }), type: DYN, loc };
 }
 
 /** Computed additions share the prototype bag without exposing or replacing
  * native method slots. Preserve reference/RHS evaluation and assignment value. */
-export function lowerClassPrototypeComputedAssignment(
-  lowerer: Lowerer,
-  expr: ts.BinaryExpression,
-): IrExpr | null {
+export function lowerClassPrototypeComputedAssignment(lowerer: Lowerer, expr: ts.BinaryExpression): IrExpr | null {
   const target = expr.left;
-  if (
-    !ts.isElementAccessExpression(target) ||
-    !ts.isPropertyAccessExpression(target.expression) ||
-    target.expression.name.text !== "prototype"
-  )
-    return null;
+  if (!ts.isElementAccessExpression(target) || !ts.isPropertyAccessExpression(target.expression) ||
+      target.expression.name.text !== "prototype") return null;
   const prototypeNode = target.expression;
   const info = exactClassOfReceiver(lowerer, prototypeNode.expression);
   if (!info) return null;
   const loc = locOf(expr);
-  const prototype = classPrototypeData(
-    lowerer,
-    info,
-    loc,
-    info.localClass
-      ? lowerer.lowerExprExpecting(prototypeNode.expression, {
-          kind: "classval",
-          className: info.def.name,
-        })
-      : undefined,
-  );
-  if (!prototype)
-    lowerer.unsupported(
-      "SC1090",
-      target,
-      "prototype data on generic, mixin, or runtime-provided classes",
-    );
+  const prototype = classPrototypeData(lowerer, info, loc, info.localClass
+    ? lowerer.lowerExprExpecting(prototypeNode.expression, { kind: "classval", className: info.def.name }) : undefined);
+  if (!prototype) lowerer.unsupported("SC1090", target, "prototype data on generic, mixin, or runtime-provided classes");
   const receiver = lowerer.declareHiddenLocal("%prototypeReceiver", DYN);
   const key = lowerer.declareHiddenLocal("%prototypeKey", DYN);
   const raw = lowerer.lowerExpr(expr.right);
-  const value =
-    raw.type.kind === "void"
-      ? {
-          kind: "seqExpr" as const,
-          stmts: [{ kind: "exprStmt" as const, expr: raw, loc }],
-          result: dynUndefinedExpr(loc),
-          type: DYN,
-          loc,
-        }
-      : isUnitType(raw.type)
-        ? lowerer.coerceInto(expr.right, raw, DYN)
-        : raw;
+  const value = raw.type.kind === "void" ? { kind: "seqExpr" as const, stmts: [{ kind: "exprStmt" as const, expr: raw, loc }],
+    result: dynUndefinedExpr(loc), type: DYN, loc }
+    : isUnitType(raw.type) ? lowerer.coerceInto(expr.right, raw, DYN) : raw;
   const assigned = lowerer.declareHiddenLocal("%prototypeValue", value.type);
   const result = varRef(assigned.id, value.type, loc);
-  return {
-    kind: "seqExpr",
-    stmts: [
-      { kind: "varDecl", localId: receiver.id, init: prototype, loc },
-      {
-        kind: "varDecl",
-        localId: key.id,
-        init: lowerer.lowerExprExpecting(target.argumentExpression, DYN),
-        loc,
-      },
-      { kind: "varDecl", localId: assigned.id, init: value, loc },
-      {
-        kind: "exprStmt",
-        expr: {
-          kind: "libCall",
-          fn: "dyn.assignPrototype",
-          args: [
-            varRef(receiver.id, DYN, loc),
-            {
-              kind: "dynArrLit",
-              elems: [
-                {
-                  kind: "dynObjLit",
-                  fields: [
-                    {
-                      key: varRef(key.id, DYN, loc),
-                      value: lowerer.coerceInto(expr.right, result, DYN),
-                    },
-                  ],
-                  type: DYN,
-                  loc,
-                },
-              ],
-              type: DYN,
-              loc,
-            },
-            prototypeProtectedKeys(lowerer, info, prototypeNode, loc),
-          ],
-          type: DYN,
-          loc,
-        },
-        loc,
-      },
-    ],
-    result,
-    type: result.type,
-    loc,
-  };
+  return { kind: "seqExpr", stmts: [
+    { kind: "varDecl", localId: receiver.id, init: prototype, loc },
+    { kind: "varDecl", localId: key.id, init: lowerer.lowerExprExpecting(target.argumentExpression, DYN), loc },
+    { kind: "varDecl", localId: assigned.id, init: value, loc },
+    { kind: "exprStmt", expr: { kind: "libCall", fn: "dyn.assignPrototype", args: [varRef(receiver.id, DYN, loc),
+      { kind: "dynArrLit", elems: [{ kind: "dynObjLit", fields: [{ key: varRef(key.id, DYN, loc), value: lowerer.coerceInto(expr.right, result, DYN) }], type: DYN, loc }], type: DYN, loc },
+      prototypeProtectedKeys(lowerer, info, prototypeNode, loc)], type: DYN, loc }, loc },
+  ], result, type: result.type, loc };
 }
 
-export function lowerClassPrototypeDescriptors(
-  lowerer: Lowerer,
-  call: ts.CallExpression,
-  member: string,
-): IrExpr | null {
-  const target = call.arguments.nodes[0];
-  if (
-    member !== "defineProperties" ||
-    call.arguments.nodes.length !== 2 ||
-    call.arguments.nodes.some(ts.isSpreadElement) ||
-    !target ||
-    !ts.isPropertyAccessExpression(target) ||
-    target.name.text !== "prototype"
-  )
-    return null;
+export function lowerClassPrototypeDescriptors(lowerer: Lowerer, call: ts.CallExpression, member: string): IrExpr | null {
+  const target = call.arguments[0];
+  if (member !== "defineProperties" || call.arguments.length !== 2 || call.arguments.some(ts.isSpreadElement) ||
+      !target || !ts.isPropertyAccessExpression(target) || target.name.text !== "prototype") return null;
   const info = exactClassOfReceiver(lowerer, target.expression);
   if (!info) return null;
   const loc = locOf(call);
-  const prototype = classPrototypeData(
-    lowerer,
-    info,
-    loc,
-    info.localClass
-      ? lowerer.lowerExprExpecting(target.expression, {
-          kind: "classval",
-          className: info.def.name,
-        })
-      : undefined,
-  );
-  if (!prototype)
-    lowerer.unsupported(
-      "SC1090",
-      target,
-      "prototype data on generic, mixin, or runtime-provided classes",
-    );
-  return {
-    kind: "libCall",
-    fn: "dyn.definePrototypeProps",
-    args: [
-      prototype,
-      lowerer.lowerExprExpecting(call.arguments.nodes[1]!, DYN),
-      prototypeProtectedKeys(lowerer, info, target, loc),
-    ],
-    type: DYN,
-    loc,
-  };
-}
-
-/** The prototype a class whose heritage was a conditional inherits from: the
- * prototype of the arm the class statement selected (`%g.<C>.heritageArm`),
- * so the prototype chain a dynamic `instanceof` walks runs through that arm,
- * as Node's does. Null when the class extends one fixed class, or when an
- * arm has no prototype object of its own (the typed base's then stands). */
-function selectedArmPrototype(
-  lowerer: Lowerer,
-  info: ClassInfo,
-  loc: SrcLoc,
-  metadataOnly: boolean,
-): IrExpr | null {
-  const recorded = lowerer.computedHeritageArms.get(info.def.name);
-  if (recorded?.condGlobal === undefined) return null;
-  const prototypes = recorded.arms.map((arm) => {
-    const armInfo = lowerer.classes.get(arm);
-    return armInfo ? classPrototypeData(lowerer, armInfo, loc, undefined, metadataOnly) : null;
-  });
-  const [whenTrue, whenFalse] = prototypes;
-  if (!whenTrue || !whenFalse) return null;
-  return {
-    kind: "ternary",
-    cond: varRef(recorded.condGlobal, BOOL, loc),
-    then: whenTrue,
-    else_: whenFalse,
-    type: DYN,
-    loc,
-  };
+  const prototype = classPrototypeData(lowerer, info, loc, info.localClass
+    ? lowerer.lowerExprExpecting(target.expression, { kind: "classval", className: info.def.name }) : undefined);
+  if (!prototype) lowerer.unsupported("SC1090", target, "prototype data on generic, mixin, or runtime-provided classes");
+  return { kind: "libCall", fn: "dyn.definePrototypeProps", args: [prototype,
+    lowerer.lowerExprExpecting(call.arguments[1]!, DYN), prototypeProtectedKeys(lowerer, info, target, loc)], type: DYN, loc };
 }

@@ -1,3 +1,4 @@
+// This file was modified from scriptc (Apache-2.0); see MODIFICATIONS.md.
 import { isBorrowSafeMath } from "./analysis.js";
 import type { IrExpr, IrFunction, IrLibFn, IrStmt } from "./ir.js";
 import { eachNodeOfKinds, type IrNodeIndex } from "./node-index.js";
@@ -167,7 +168,7 @@ function receiverFreeLibCall(e: Extract<IrExpr, { kind: "libCall" }>): boolean {
 
 /** Typed container and string operations. Their runtime paths compare and
  * copy values but never call back into compiled code, as long as no
- * operand is a function or a checked value. */
+ * operand is a function or a checked/engine value. */
 /** Operands of a data intrinsic (receiver first), or null when `e` is not
  * one. A switch over the kinds keeps this inside the self-hosted subset,
  * which has no `in` on IR expression unions. */
@@ -193,12 +194,12 @@ function dataIntrinsicOperands(e: IrExpr): IrExpr[] | null {
 
 function opaqueOperand(e: IrExpr): boolean {
   const kind = e.type.kind;
-  return kind === "func" || kind === "dyn" || kind === "caught";
+  return kind === "func" || kind === "dyn" || kind === "jsval" || kind === "caught";
 }
 
 /** The functions that may observe the ambient receiver stack when entered
  * without a fresh binding: the JS `this` read (libCall dyn.this), async and
- * generator creation (which snapshot it), checked-value operations,
+ * generator creation (which snapshot it), dynamic and engine operations,
  * diagnostics-channel stores, and anything outside the admitted kinds; then
  * every function that can reach one through a direct call, constructor or
  * virtual dispatch (a backward reachability fixpoint, so recursion such as

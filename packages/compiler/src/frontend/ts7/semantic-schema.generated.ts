@@ -1,4 +1,5 @@
-// Generated from typescript@7.1.0-beta, with response shapes from typescript@7.0.2, by scripts/generate-ts7-ast-schema.mjs.
+// This file was modified from scriptc (Apache-2.0); see MODIFICATIONS.md.
+// Generated from typescript@7.0.2 by scripts/generate-ts7-ast-schema.mjs.
 // TypeScript is Copyright Microsoft Corporation, licensed under Apache-2.0.
 // Regenerate when changing the TypeScript pin; do not edit by hand.
 
@@ -114,7 +115,8 @@ export const SemanticObjectFlags = {
   IsClassInstanceClone: 67108864,
   IdenticalBaseTypeCalculated: 134217728,
   IdenticalBaseTypeExists: 268435456,
-  FromTypeNode: 536870912,
+  UnresolvedMembers: 536870912,
+  FromTypeNode: 1073741824,
   IsGenericTypeComputed: 4194304,
   IsGenericObjectType: 8388608,
   IsGenericIndexType: 16777216,
@@ -122,8 +124,6 @@ export const SemanticObjectFlags = {
   ContainsIntersections: 33554432,
   IsUnknownLikeUnionComputed: 67108864,
   IsUnknownLikeUnion: 134217728,
-  IsUniformEnumComputed: 268435456,
-  IsUniformEnum: 536870912,
   IsNeverIntersectionComputed: 33554432,
   IsNeverIntersection: 67108864,
   IsConstrainedTypeVariable: 134217728,
@@ -162,7 +162,7 @@ export const SemanticSymbolFlags = {
   ConstEnumOnlyModule: 268435456,
   ReplaceableByMethod: 536870912,
   GlobalLookup: 1073741824,
-  All: 1073741823,
+  All: 536870912,
   Enum: 384,
   Variable: 3,
   Value: 111551,
@@ -196,6 +196,7 @@ export const SemanticSymbolFlags = {
   ClassMember: 106500,
   ExportSupportsDefaultModifier: 112,
   ExportDoesNotSupportDefaultModifier: -113,
+  Classifiable: 2885600,
   LateBindingContainer: 6256,
 } as const;
 

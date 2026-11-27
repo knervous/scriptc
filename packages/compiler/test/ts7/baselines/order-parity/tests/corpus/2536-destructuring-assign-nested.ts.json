@@ -1,6 +1,0 @@
-{
- "order": [
-  "<repo>/tests/corpus/2536-destructuring-assign-nested.ts"
- ],
- "diags": []
-}

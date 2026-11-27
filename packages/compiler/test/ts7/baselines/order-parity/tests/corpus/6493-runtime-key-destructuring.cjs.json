@@ -1,6 +1,0 @@
-{
- "order": [
-  "<repo>/tests/corpus/6493-runtime-key-destructuring.cjs"
- ],
- "diags": []
-}

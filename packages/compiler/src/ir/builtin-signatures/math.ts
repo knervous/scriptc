@@ -1,3 +1,4 @@
+// This file was modified from scriptc (Apache-2.0); see MODIFICATIONS.md.
 import { arrayOf, F64 } from "../ir.js";
 import { defineLibFnSignatures } from "./shared.js";
 
@@ -20,7 +21,11 @@ export const mathSignatures = defineLibFnSignatures({
    * epsilon boundary). Borrow nothing; never throw. */
   "math.abs": { argTypes: [F64], result: F64 },
   "math.round": { argTypes: [F64], result: F64 },
-
+  /** Math.trunc / Math.ceil — C trunc()/ceil() ARE the JS operations
+   * (NaN/±0/±Infinity pass through bit-exactly; ceil(-0.5) is -0 in IEEE
+   * round-toward-+Infinity exactly as ECMA says). Static like floor —
+   * they are ask-4's wholeness-discharge operators, so the library
+   * inference needs them compiled, not island-served. Never throw. */
   "math.trunc": { argTypes: [F64], result: F64 },
   "math.ceil": { argTypes: [F64], result: F64 },
   "math.sin": { argTypes: [F64], result: F64 },

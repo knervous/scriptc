@@ -1,6 +1,0 @@
-{
- "order": [
-  "<repo>/tests/corpus/4691-publish-constructor-self-alias.ts"
- ],
- "diags": []
-}

@@ -1,6 +1,0 @@
-{
- "order": [
-  "<repo>/tests/corpus/emitter-unhandled-error-payloads-typed.ts"
- ],
- "diags": []
-}

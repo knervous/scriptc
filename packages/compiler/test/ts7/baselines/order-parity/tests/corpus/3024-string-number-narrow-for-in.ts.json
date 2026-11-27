@@ -1,6 +1,0 @@
-{
- "order": [
-  "<repo>/tests/corpus/3024-string-number-narrow-for-in.ts"
- ],
- "diags": []
-}

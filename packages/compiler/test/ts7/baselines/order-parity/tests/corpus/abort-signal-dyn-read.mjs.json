@@ -1,6 +1,0 @@
-{
- "order": [
-  "<repo>/tests/corpus/abort-signal-dyn-read.mjs"
- ],
- "diags": []
-}

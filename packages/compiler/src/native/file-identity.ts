@@ -1,3 +1,4 @@
+// This file was modified from scriptc (Apache-2.0); see MODIFICATIONS.md.
 import { realpathSync, statSync } from "node:fs";
 import { resolve } from "node:path";
 
@@ -8,13 +9,6 @@ export function nativeFileIdentity(path: string): string {
   path = resolve(path);
   const info = statSync(path);
   if (!info.isFile()) throw new Error(`native compiler input is not a file: ${path}`);
-  return JSON.stringify({
-    path,
-    canonical: realpathSync(path),
-    dev: info.dev,
-    ino: info.ino,
-    size: info.size,
-    mtime: info.mtimeMs,
-    ctime: info.ctimeMs,
-  });
+  return JSON.stringify({ path, canonical: realpathSync(path), dev: info.dev, ino: info.ino,
+    size: info.size, mtime: info.mtimeMs, ctime: info.ctimeMs });
 }

@@ -1,6 +1,0 @@
-{
- "order": [
-  "<repo>/tests/diagnostics/blocked-binding-cascade.ts"
- ],
- "diags": []
-}

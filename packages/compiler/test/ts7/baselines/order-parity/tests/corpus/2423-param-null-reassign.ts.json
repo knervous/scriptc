@@ -1,6 +1,0 @@
-{
- "order": [
-  "<repo>/tests/corpus/2423-param-null-reassign.ts"
- ],
- "diags": []
-}

@@ -1,6 +1,0 @@
-{
- "order": [
-  "<repo>/tests/corpus/7395-non-null-element-dereference.ts"
- ],
- "diags": []
-}

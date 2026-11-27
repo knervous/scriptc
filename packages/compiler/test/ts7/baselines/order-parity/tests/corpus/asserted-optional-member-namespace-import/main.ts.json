@@ -1,7 +1,0 @@
-{
- "order": [
-  "<repo>/tests/corpus/asserted-optional-member-namespace-import/data.ts",
-  "<repo>/tests/corpus/asserted-optional-member-namespace-import/main.ts"
- ],
- "diags": []
-}

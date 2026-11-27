@@ -1,0 +1,1 @@
+const h:any=globalThis;const a=[1,2];a.length=3;h.auditHoles(a);

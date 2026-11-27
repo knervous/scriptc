@@ -1,6 +1,0 @@
-{
- "order": [
-  "<repo>/tests/corpus/9411-destructured-builtin-statics.mjs"
- ],
- "diags": []
-}

@@ -19,7 +19,7 @@
  *   inbound trap the host-contract edge: an inbound i64/u64 past
  *                ±(2^53 − 1) cannot ride f64 exactly, so the wrapper
  *                delivers the structured SC4012 trap (profile teaching +
- *                remediation riding it) instead of rounding;
+ *                remediation riding it) instead of silently rounding;
  *                in-range extremes convert exactly.
  *   sidecar      sidecar-declared slots (msg arms, record fields, helper
  *                params/returns): integer_slots emitted as the resolved
@@ -238,17 +238,10 @@ export function at(i: number): number { return crossed[i]!; }
 `;
 
 function corpusSource(c: CorpusCase): string {
-  return c.param === true
-    ? `${PRELUDE}export function f(a: number): void {\n${c.body}\n}\n`
-    : `${PRELUDE}${c.body}\n`;
+  return c.param === true ? `${PRELUDE}export function f(a: number): void {\n${c.body}\n}\n` : `${PRELUDE}${c.body}\n`;
 }
 
-function corpusProfile(
-  c: CorpusCase,
-  emission: Emission,
-  entry: string,
-  sendClass = "i64",
-): object {
+function corpusProfile(c: CorpusCase, emission: Emission, entry: string, sendClass = "i64"): object {
   return {
     profile_format: 1,
     name: "int-corpus",
@@ -266,9 +259,7 @@ function corpusProfile(
       { export: "sendU64", symbol: "kc_send_u64", params: ["u64"], returns: "void" },
       { export: "count", symbol: "kc_count", params: [], returns: "f64" },
       { export: "at", symbol: "kc_at", params: ["f64"], returns: "f64" },
-      ...(c.param === true
-        ? [{ export: "f", symbol: "kc_f", params: ["f64"], returns: "void" }]
-        : []),
+      ...(c.param === true ? [{ export: "f", symbol: "kc_f", params: ["f64"], returns: "void" }] : []),
     ],
   };
 }
@@ -280,11 +271,7 @@ function nodeOracle(c: CorpusCase): number[] {
   const send = (x: number): void => {
     crossed.push(x);
   };
-  const fn = new Function("send", "sendU64", "a", c.body) as (
-    s: unknown,
-    u: unknown,
-    a?: number,
-  ) => void;
+  const fn = new Function("send", "sendU64", "a", c.body) as (s: unknown, u: unknown, a?: number) => void;
   if (c.param === true) {
     for (const a of c.args ?? []) fn(send, send, Number(a));
   } else {
@@ -293,11 +280,7 @@ function nodeOracle(c: CorpusCase): number[] {
   return crossed;
 }
 
-async function buildCase(
-  tag: string,
-  source: string,
-  profile: object,
-): Promise<
+async function buildCase(tag: string, source: string, profile: object): Promise<
   | { ok: true; archive: string; outDir: string; sidecarPath?: string }
   | { ok: false; diagnostics: { code: string; message: string; hint?: string; note?: string }[] }
 > {
@@ -327,29 +310,13 @@ async function buildCase(
   };
 }
 
-function buildProbe(
-  probeSrc: string,
-  archive: string,
-  outDir: string,
-  defines: string[] = [],
-): string {
+function buildProbe(probeSrc: string, archive: string, outDir: string, defines: string[] = []): string {
   const bin = join(outDir, "probe");
-  execFileSync("clang", [
-    "-std=c11",
-    ...defines.map((d) => `-D${d}`),
-    probeSrc,
-    archive,
-    "-lm",
-    "-o",
-    bin,
-  ]);
+  execFileSync("clang", ["-std=c11", ...defines.map((d) => `-D${d}`), probeSrc, archive, "-lm", "-o", bin]);
   return bin;
 }
 
-function runProbe(
-  bin: string,
-  args: string[] = [],
-): { stdout: string; status: number | null; signal: string | null } {
+function runProbe(bin: string, args: string[] = []): { stdout: string; status: number | null; signal: string | null } {
   const r = spawnSync(bin, args, { encoding: "utf8", timeout: 60_000 });
   return { stdout: r.stdout ?? "", status: r.status, signal: r.signal };
 }
@@ -359,11 +326,7 @@ function runProbe(
 describe.each(EMISSIONS)("ask-4 corpus, %s emission", (emission) => {
   for (const c of CORPUS) {
     test(`${c.name} — ${c.expected.toUpperCase()}${c.obligation !== undefined ? ` (${c.obligation})` : ""}`, async () => {
-      const r = await buildCase(
-        `corpus-${c.name}-${emission}`,
-        corpusSource(c),
-        corpusProfile(c, emission, "lib.ts"),
-      );
+      const r = await buildCase(`corpus-${c.name}-${emission}`, corpusSource(c), corpusProfile(c, emission, "lib.ts"));
       if (c.expected === "refuse") {
         expect(r.ok).toBe(false);
         if (r.ok) return;
@@ -377,25 +340,15 @@ describe.each(EMISSIONS)("ask-4 corpus, %s emission", (emission) => {
         expect(d.hint).toBeTruthy();
         return;
       }
-      expect(r.ok, r.ok ? "" : r.diagnostics.map((d) => `${d.code}: ${d.message}`).join("\n")).toBe(
-        true,
-      );
+      expect(r.ok, r.ok ? "" : r.diagnostics.map((d) => `${d.code}: ${d.message}`).join("\n")).toBe(true);
       if (!r.ok) return;
       // The crossing values, pinned against the Node oracle exactly —
       // this process IS Node, running the same case source.
-      const probe = buildProbe(
-        join(fixtureRoot, "int-corpus/probe.c"),
-        r.archive,
-        r.outDir,
-        c.param === true ? ["HAS_F"] : [],
-      );
+      const probe = buildProbe(join(fixtureRoot, "int-corpus/probe.c"), r.archive, r.outDir, c.param === true ? ["HAS_F"] : []);
       const run = runProbe(probe, c.param === true ? (c.args ?? []) : []);
       expect(run.signal).toBeNull();
       expect(run.status).toBe(0);
-      const got = run.stdout
-        .split("\n")
-        .filter((l) => l !== "")
-        .map(Number);
+      const got = run.stdout.split("\n").filter((l) => l !== "").map(Number);
       const want = nodeOracle(c);
       expect(got.length).toBe(want.length);
       got.forEach((v, i) => {
@@ -444,191 +397,19 @@ describe.each(EMISSIONS)("ask-4 corpus, %s emission", (emission) => {
     expect(r.diagnostics[0]!.message).toContain("Infinity");
   });
 
-  /* ── aliased exports share ONE unit's slots ───────────────────────────
-   * Two profile exports may land on one compiled function (alias exports
-   * of the same declaration). That unit has ONE return value and ONE set
-   * of parameter bindings, so a later export's declaration may not replace
-   * an earlier one's proof obligations: the return is proven for the
-   * STRICTER declared class (u64's range sits inside i64's) and a call
-   * site must meet both parameter classes. Otherwise the looser alias
-   * would let an unproven integer cross the stricter alias's ABI. */
-
-  test("an aliased export keeps the stricter return obligation", async () => {
-    const source =
-      `export function delta(flag: boolean): number {\n  return flag ? 1 : -1;\n}\n` +
-      `export { delta as deltaSigned, delta as deltaI64 };\n`;
-    const profile = {
-      profile_format: 1,
-      name: "alias-return",
-      entry: "lib.ts",
-      emission,
-      abi: {
-        prefix: "al_",
-        init_symbol: "al_init",
-        sink_register_symbol: "al_set_panic_sink",
-        collect_symbol: null,
-        result_reset_symbol: null,
-      },
-      exports: [
-        { export: "deltaSigned", symbol: "al_delta_signed", params: ["bool"], returns: "u64" },
-        { export: "deltaI64", symbol: "al_delta_i64", params: ["bool"], returns: "i64" },
-      ],
-    };
-    const r = await buildCase(`alias-return-${emission}`, source, profile);
-    expect(r.ok).toBe(false);
-    if (r.ok) return;
-    expect(r.diagnostics.map((d) => d.code)).toEqual(["SC4023"]);
-    // The u64 alias declared first; the later i64 alias must not take over
-    // the unit's return slot and hide the negative branch.
-    expect(r.diagnostics[0]!.message).toContain("'exports.deltaSigned.return'");
-    expect(r.diagnostics[0]!.message).toContain("range failed");
-  });
-
-  test("an aliased export keeps the stricter parameter obligation", async () => {
-    const source =
-      `function take(x: number): void {\n  if (x > 1) return;\n}\n` +
-      `export function run(flag: boolean): void {\n  take(flag ? 1 : -1);\n}\n` +
-      `export { take as takeU, take as takeI };\n`;
-    const profile = {
-      profile_format: 1,
-      name: "alias-param",
-      entry: "lib.ts",
-      emission,
-      abi: {
-        prefix: "ap_",
-        init_symbol: "ap_init",
-        sink_register_symbol: "ap_set_panic_sink",
-        collect_symbol: null,
-        result_reset_symbol: null,
-      },
-      exports: [
-        { export: "takeU", symbol: "ap_take_u", params: ["u64"], returns: "void" },
-        { export: "takeI", symbol: "ap_take_i", params: ["i64"], returns: "void" },
-        { export: "run", symbol: "ap_run", params: ["bool"], returns: "void" },
-      ],
-    };
-    const r = await buildCase(`alias-param-${emission}`, source, profile);
-    expect(r.ok).toBe(false);
-    if (r.ok) return;
-    expect(r.diagnostics.map((d) => d.code)).toEqual(["SC4023"]);
-    // The call inside `run` crosses both declared parameter classes, so it
-    // has to discharge the u64 one the earlier alias declared.
-    expect(r.diagnostics[0]!.message).toContain("'exports.takeU.params[0]'");
-    expect(r.diagnostics[0]!.message).toContain("range failed");
-  });
-
-  test("aliases whose declarations agree still compile", async () => {
-    // The merge narrows nothing a single declaration proves: a non-negative
-    // whole return discharges both classes, so the aliases coalesce instead
-    // of refusing.
-    const source =
-      `export function count(): number {\n  return 0;\n}\n` +
-      `export { count as countI, count as countU };\n`;
-    const profile = {
-      profile_format: 1,
-      name: "alias-agree",
-      entry: "lib.ts",
-      emission,
-      abi: {
-        prefix: "ag_",
-        init_symbol: "ag_init",
-        sink_register_symbol: "ag_set_panic_sink",
-        collect_symbol: null,
-        result_reset_symbol: null,
-      },
-      exports: [
-        { export: "countI", symbol: "ag_count_i", params: [], returns: "i64" },
-        { export: "countU", symbol: "ag_count_u", params: [], returns: "u64" },
-      ],
-    };
-    const r = await buildCase(`alias-agree-${emission}`, source, profile);
-    expect(r.ok, r.ok ? "" : r.diagnostics.map((d) => `${d.code}: ${d.message}`).join("\n")).toBe(
-      true,
-    );
-  });
-
-  test("a plain f64 alias cannot be proven from a sibling integer entry", async () => {
-    // The unit's parameter binding receives whatever EACH alias's wrapper
-    // passes: through echoF64 any double at all, including fractions and
-    // NaN. The integer alias's tighter class proves nothing about those
-    // arrivals, so a pass-through body cannot discharge the shared integer
-    // return obligation for both entries.
-    const source =
-      `export function echo(x: number): number {\n  return x;\n}\n` +
-      `export { echo as echoF64, echo as echoI64 };\n`;
-    const profile = {
-      profile_format: 1,
-      name: "alias-f64",
-      entry: "lib.ts",
-      emission,
-      abi: {
-        prefix: "af_",
-        init_symbol: "af_init",
-        sink_register_symbol: "af_set_panic_sink",
-        collect_symbol: null,
-        result_reset_symbol: null,
-      },
-      exports: [
-        { export: "echoF64", symbol: "af_echo_f64", params: ["f64"], returns: "i64" },
-        { export: "echoI64", symbol: "af_echo_i64", params: ["i64"], returns: "i64" },
-      ],
-    };
-    const r = await buildCase(`alias-f64-${emission}`, source, profile);
-    expect(r.ok).toBe(false);
-    if (r.ok) return;
-    expect(r.diagnostics.map((d) => d.code)).toEqual(["SC4022"]);
-    expect(r.diagnostics[0]!.message).toContain("'exports.echoF64.return'");
-    expect(r.diagnostics[0]!.message).toContain("wholeness failed");
-    expect(r.diagnostics[0]!.message).toContain("NaN");
-  });
-
-  test("an f64 alias only limits the proof, it does not refuse the profile", async () => {
-    // Same aliases over a body whose result is whole whatever arrives: the
-    // unrestricted f64 arrival is bounded by the body, so the integer
-    // return still proves and both entries compile.
-    const source =
-      `export function sign(x: number): number {\n  return x > 0 ? 1 : 0;\n}\n` +
-      `export { sign as signF64, sign as signI64 };\n`;
-    const profile = {
-      profile_format: 1,
-      name: "alias-f64-proved",
-      entry: "lib.ts",
-      emission,
-      abi: {
-        prefix: "afp_",
-        init_symbol: "afp_init",
-        sink_register_symbol: "afp_set_panic_sink",
-        collect_symbol: null,
-        result_reset_symbol: null,
-      },
-      exports: [
-        { export: "signF64", symbol: "afp_sign_f64", params: ["f64"], returns: "i64" },
-        { export: "signI64", symbol: "afp_sign_i64", params: ["i64"], returns: "i64" },
-      ],
-    };
-    const r = await buildCase(`alias-f64-proved-${emission}`, source, profile);
-    expect(r.ok, r.ok ? "" : r.diagnostics.map((d) => `${d.code}: ${d.message}`).join("\n")).toBe(
-      true,
-    );
-  });
-
   /* ── outbound integer returns: real int64_t/uint64_t crossings ─────── */
 
   test("declared integer returns cross as exact int64_t/uint64_t", async () => {
     const dir = join(fixtureRoot, "int-returns");
     const outDir = join(cacheDir, `int-returns-${emission}`);
     mkdirSync(outDir, { recursive: true });
-    const profile = JSON.parse(readFileSync(join(dir, "profile.json"), "utf8")) as {
-      entry: string;
-      emission: string;
-    };
+    const profile = JSON.parse(readFileSync(join(dir, "profile.json"), "utf8")) as { entry: string; emission: string };
     profile.emission = emission;
     profile.entry = join(dir, profile.entry);
     const profilePath = join(outDir, "profile.json");
     writeFileSync(profilePath, JSON.stringify(profile));
     const result = await compileLibrary({ profilePath, outDir });
-    if (!result.ok)
-      throw new Error(result.diagnostics.map((d) => `${d.code}: ${d.message}`).join("\n"));
+    if (!result.ok) throw new Error(result.diagnostics.map((d) => `${d.code}: ${d.message}`).join("\n"));
     const probe = buildProbe(join(dir, "probe.c"), result.archivePath, outDir);
     const run = runProbe(probe);
     expect(run.signal).toBeNull();
@@ -644,17 +425,13 @@ describe.each(EMISSIONS)("ask-4 corpus, %s emission", (emission) => {
     const dir = join(fixtureRoot, "int-trap");
     const outDir = join(cacheDir, `int-trap-${emission}`);
     mkdirSync(outDir, { recursive: true });
-    const profile = JSON.parse(readFileSync(join(dir, "profile.json"), "utf8")) as {
-      entry: string;
-      emission: string;
-    };
+    const profile = JSON.parse(readFileSync(join(dir, "profile.json"), "utf8")) as { entry: string; emission: string };
     profile.emission = emission;
     profile.entry = join(dir, profile.entry);
     const profilePath = join(outDir, "profile.json");
     writeFileSync(profilePath, JSON.stringify(profile));
     const result = await compileLibrary({ profilePath, outDir });
-    if (!result.ok)
-      throw new Error(result.diagnostics.map((d) => `${d.code}: ${d.message}`).join("\n"));
+    if (!result.ok) throw new Error(result.diagnostics.map((d) => `${d.code}: ${d.message}`).join("\n"));
     const probe = buildProbe(join(dir, "probe.c"), result.archivePath, outDir);
 
     const ok = runProbe(probe, ["ok"]);
@@ -670,7 +447,7 @@ describe.each(EMISSIONS)("ask-4 corpus, %s emission", (emission) => {
       expect(run.status).toBe(0);
       // The structured SC4012 message: the profile's teaching as the
       // text, the code, the trapping export's symbol, the remediation —
-      // and the host survives (no value was rounded).
+      // and the host survives (nothing was silently rounded).
       expect(run.stdout).toBe(
         `sink[1]:
 text=[this core's integer channel carries at most 2^53 - 1]
@@ -748,9 +525,7 @@ export function grow(a: number): void {
   expect(result.ok).toBe(false);
   if (result.ok) return;
   expect(result.diagnostics.map((d) => d.code).sort()).toEqual(["SC4021", "SC4022", "SC4023"]);
-  const rendered = renderDiagnostics(result.diagnostics, result.sourceTexts, {
-    color: false,
-  }).replaceAll(outDir + "/", "");
+  const rendered = renderDiagnostics(result.diagnostics, result.sourceTexts, { color: false }).replaceAll(outDir + "/", "");
   await expect(rendered).toMatchFileSnapshot("__snapshots__/library-int-refusals.txt");
 });
 
@@ -814,9 +589,7 @@ describe("ask-4 sidecar-declared slots", () => {
 
   test("integer_slots attest the declared classes; declared slots spell i64", async () => {
     const r = await buildCase("sidecar-ok", SIDECAR_ENTRY, sidecarProfile(DECLARED));
-    expect(r.ok, r.ok ? "" : r.diagnostics.map((d) => `${d.code}: ${d.message}`).join("\n")).toBe(
-      true,
-    );
+    expect(r.ok, r.ok ? "" : r.diagnostics.map((d) => `${d.code}: ${d.message}`).join("\n")).toBe(true);
     if (!r.ok) return;
     const doc = JSON.parse(readFileSync(r.sidecarPath!, "utf8")) as {
       integer_slots: { slot: string; class: string }[];
@@ -832,10 +605,7 @@ describe("ask-4 sidecar-declared slots", () => {
       { slot: "Model.total", class: "i64" },
       { slot: "helpers.clampIdx.return", class: "i64" },
     ]);
-    expect(doc.msg.arms.find((a) => a.name === "count")!.payload).toEqual({
-      kind: "number",
-      class: "i64",
-    });
+    expect(doc.msg.arms.find((a) => a.name === "count")!.payload).toEqual({ kind: "number", class: "i64" });
     const model = doc.types.structs.find((s) => s.name === "Model")!;
     expect(model.fields.find((f) => f.name === "total")!.type).toEqual({ kind: "i64" });
     expect(model.fields.find((f) => f.name === "label")!.type).toEqual({ kind: "bytes" });
@@ -851,24 +621,15 @@ describe("ask-4 sidecar-declared slots", () => {
     // refinement, not a type-table concept). The regression pinned here:
     // u64 declarations used to flatten to i64 in the attestation itself,
     // misstating the discharged proof's domain.
-    const r = await buildCase(
-      "sidecar-u64-attest",
-      SIDECAR_ENTRY,
-      sidecarProfile([{ slot: "Model.total", class: "u64" }]),
-    );
-    expect(r.ok, r.ok ? "" : r.diagnostics.map((d) => `${d.code}: ${d.message}`).join("\n")).toBe(
-      true,
-    );
+    const r = await buildCase("sidecar-u64-attest", SIDECAR_ENTRY, sidecarProfile([{ slot: "Model.total", class: "u64" }]));
+    expect(r.ok, r.ok ? "" : r.diagnostics.map((d) => `${d.code}: ${d.message}`).join("\n")).toBe(true);
     if (!r.ok) return;
     const doc = JSON.parse(readFileSync(r.sidecarPath!, "utf8")) as {
       integer_slots: { slot: string; class: string }[];
       types: { structs: { name: string; fields: { name: string; type: { kind: string } }[] }[] };
     };
     expect(doc.integer_slots).toEqual([{ slot: "Model.total", class: "u64" }]);
-    expect(
-      doc.types.structs.find((s) => s.name === "Model")!.fields.find((f) => f.name === "total")!
-        .type,
-    ).toEqual({ kind: "i64" });
+    expect(doc.types.structs.find((s) => s.name === "Model")!.fields.find((f) => f.name === "total")!.type).toEqual({ kind: "i64" });
     expect(validateSidecar(doc)).toEqual([]);
   });
 
@@ -888,14 +649,8 @@ export function normalize(m: Model, id: number | null): number | null { return i
       { slot: "helpers.normalize.params[0]", class: "u64" },
       { slot: "helpers.normalize.return", class: "u64" },
     ];
-    const r = await buildCase(
-      "sidecar-optional-int",
-      source,
-      sidecarProfile(slots, { exports: [] }),
-    );
-    expect(r.ok, r.ok ? "" : r.diagnostics.map((d) => `${d.code}: ${d.message}`).join("\n")).toBe(
-      true,
-    );
+    const r = await buildCase("sidecar-optional-int", source, sidecarProfile(slots, { exports: [] }));
+    expect(r.ok, r.ok ? "" : r.diagnostics.map((d) => `${d.code}: ${d.message}`).join("\n")).toBe(true);
     if (!r.ok) return;
     const doc = JSON.parse(readFileSync(r.sidecarPath!, "utf8")) as {
       integer_slots: { slot: string; class: string }[];
@@ -956,11 +711,12 @@ export function normalize(m: Model, x: number | null): number | null {
     const r = await buildCase(
       "sidecar-optional-int-unit-branch",
       source,
-      sidecarProfile([{ slot: "helpers.normalize.return", class: "u64" }], { exports: [] }),
+      sidecarProfile(
+        [{ slot: "helpers.normalize.return", class: "u64" }],
+        { exports: [] },
+      ),
     );
-    expect(r.ok, r.ok ? "" : r.diagnostics.map((d) => `${d.code}: ${d.message}`).join("\n")).toBe(
-      true,
-    );
+    expect(r.ok, r.ok ? "" : r.diagnostics.map((d) => `${d.code}: ${d.message}`).join("\n")).toBe(true);
     if (!r.ok) return;
     const doc = JSON.parse(readFileSync(r.sidecarPath!, "utf8")) as unknown;
     expect(validateSidecar(doc)).toEqual([]);
@@ -988,9 +744,7 @@ export function update(m: Model, msg: Msg): Model { return m; }
       source,
       sidecarProfile(slots, { exports: [] }),
     );
-    expect(r.ok, r.ok ? "" : r.diagnostics.map((d) => `${d.code}: ${d.message}`).join("\n")).toBe(
-      true,
-    );
+    expect(r.ok, r.ok ? "" : r.diagnostics.map((d) => `${d.code}: ${d.message}`).join("\n")).toBe(true);
     if (!r.ok) return;
     const doc = JSON.parse(readFileSync(r.sidecarPath!, "utf8")) as {
       integer_slots: { slot: string; class: string }[];
@@ -998,10 +752,7 @@ export function update(m: Model, msg: Msg): Model { return m; }
     };
     expect(doc.integer_slots).toEqual(slots);
     for (const name of ["A", "B"]) {
-      expect(
-        doc.types.structs.find((s) => s.name === name)!.fields.find((f) => f.name === "value")!
-          .type,
-      ).toEqual({ kind: "i64" });
+      expect(doc.types.structs.find((s) => s.name === name)!.fields.find((f) => f.name === "value")!.type).toEqual({ kind: "i64" });
     }
     expect(validateSidecar(doc)).toEqual([]);
   });
@@ -1168,9 +919,7 @@ export function update(m: Model, msg: Msg): Model { return m; }
       source,
       sidecarProfile(slots, { exports: [] }),
     );
-    expect(r.ok, r.ok ? "" : r.diagnostics.map((d) => `${d.code}: ${d.message}`).join("\n")).toBe(
-      true,
-    );
+    expect(r.ok, r.ok ? "" : r.diagnostics.map((d) => `${d.code}: ${d.message}`).join("\n")).toBe(true);
     if (!r.ok) return;
     const doc = JSON.parse(readFileSync(r.sidecarPath!, "utf8")) as {
       integer_slots: { slot: string; class: string }[];
@@ -1246,20 +995,17 @@ export function init(): Model { throw new Error("unreachable") }
 export function update(m: Model, msg: Msg): Model { return m }
 `,
     },
-  ])(
-    "integer pattern construction preserves the SC4009 refusal for $name",
-    async ({ name, evidence, source }) => {
-      const r = await buildCase(
-        `sidecar-int-invalid-shape-${name.replaceAll(" ", "-")}`,
-        source,
-        sidecarProfile([{ slot: "Model.value", class: "u64" }], { exports: [] }),
-      );
-      expect(r.ok).toBe(false);
-      if (r.ok) return;
-      expect(r.diagnostics.map((d) => d.code)).toEqual(["SC4009"]);
-      expect(r.diagnostics[0]!.message).toContain(evidence);
-    },
-  );
+  ])("integer pattern construction preserves the SC4009 refusal for $name", async ({ name, evidence, source }) => {
+    const r = await buildCase(
+      `sidecar-int-invalid-shape-${name.replaceAll(" ", "-")}`,
+      source,
+      sidecarProfile([{ slot: "Model.value", class: "u64" }], { exports: [] }),
+    );
+    expect(r.ok).toBe(false);
+    if (r.ok) return;
+    expect(r.diagnostics.map((d) => d.code)).toEqual(["SC4009"]);
+    expect(r.diagnostics[0]!.message).toContain(evidence);
+  });
 
   test("same-shaped tagged-union slots with the same class coalesce and retain every path", async () => {
     const source = `export interface Model { value: number; }
@@ -1343,11 +1089,7 @@ export function update(m: Model, msg: Msg): Model { return m; }
       "export function update(m: Model, msg: Msg): Model { return m; }",
       "export function update(m: Model, msg: Msg): Model { return { total: m.total * 0.5, label: m.label }; }",
     );
-    const r = await buildCase(
-      "sidecar-refuse-model-update",
-      broken,
-      sidecarProfile([{ slot: "Model.total", class: "i64" }]),
-    );
+    const r = await buildCase("sidecar-refuse-model-update", broken, sidecarProfile([{ slot: "Model.total", class: "i64" }]));
     expect(r.ok).toBe(false);
     if (r.ok) return;
     expect(r.diagnostics.map((d) => d.code)).toEqual(["SC4022"]);
@@ -1365,11 +1107,7 @@ export function update(m: Model, msg: Msg): Model { return m; }
       "export function update(m: Model, msg: Msg): Model { return m; }",
       "export function update(m: Model, msg: Msg): Model { return { total: m.total + 1, label: m.label }; }",
     );
-    const r = await buildCase(
-      "sidecar-refuse-model-counter",
-      broken,
-      sidecarProfile([{ slot: "Model.total", class: "i64" }]),
-    );
+    const r = await buildCase("sidecar-refuse-model-counter", broken, sidecarProfile([{ slot: "Model.total", class: "i64" }]));
     expect(r.ok).toBe(false);
     if (r.ok) return;
     expect(r.diagnostics.map((d) => d.code)).toEqual(["SC4023"]);
@@ -1386,28 +1124,29 @@ export function guardedStep(v: number): number {
 }
 `;
     const inputs = [Number.MIN_SAFE_INTEGER, -1, 999, 1000, Number.MAX_SAFE_INTEGER];
-    const nodeOutput = inputs.map((v) => String(v < 1000 ? v + 1 : v)).join("\n") + "\n";
+    const nodeOutput = inputs
+      .map((v) => String(v < 1000 ? v + 1 : v))
+      .join("\n") + "\n";
 
     for (const emission of EMISSIONS) {
       const r = await buildCase(
         `sidecar-prove-model-field-guard-${emission}`,
         guarded,
-        sidecarProfile([{ slot: "Model.total", class: "i64" }], {
-          emission,
-          exports: [
-            { export: "guardedStep", symbol: "ks_guarded_step", params: ["i64"], returns: "f64" },
-          ],
-        }),
+        sidecarProfile(
+          [{ slot: "Model.total", class: "i64" }],
+          {
+            emission,
+            exports: [
+              { export: "guardedStep", symbol: "ks_guarded_step", params: ["i64"], returns: "f64" },
+            ],
+          },
+        ),
       );
-      expect(r.ok, r.ok ? "" : r.diagnostics.map((d) => `${d.code}: ${d.message}`).join("\n")).toBe(
-        true,
-      );
+      expect(r.ok, r.ok ? "" : r.diagnostics.map((d) => `${d.code}: ${d.message}`).join("\n")).toBe(true);
       if (!r.ok) continue;
 
       const probeSrc = join(r.outDir, "guarded-field-probe.c");
-      writeFileSync(
-        probeSrc,
-        `#include <inttypes.h>
+      writeFileSync(probeSrc, `#include <inttypes.h>
 #include <stdint.h>
 #include <stdio.h>
 
@@ -1425,8 +1164,7 @@ int main(void) {
   }
   return 0;
 }
-`,
-      );
+`);
       const run = runProbe(buildProbe(probeSrc, r.archive, r.outDir));
       expect(run.signal).toBeNull();
       expect(run.status).toBe(0);
@@ -1447,9 +1185,7 @@ int main(void) {
       guarded,
       sidecarProfile([{ slot: "Model.total", class: "i64" }]),
     );
-    expect(r.ok, r.ok ? "" : r.diagnostics.map((d) => `${d.code}: ${d.message}`).join("\n")).toBe(
-      true,
-    );
+    expect(r.ok, r.ok ? "" : r.diagnostics.map((d) => `${d.code}: ${d.message}`).join("\n")).toBe(true);
   });
 
   test("a call after a field guard kills the refinement with the same range refusal", async () => {
@@ -1505,18 +1241,10 @@ export function update(m: Model, msg: Msg): Model {
       "export function update(m: Model, msg: Msg): Model { return m; }",
       "export function update(m: Model, msg: Msg): Model { return { total: (m.total + 1) % 1000000, label: m.label }; }",
     );
-    const r = await buildCase(
-      "sidecar-prove-model",
-      guarded,
-      sidecarProfile([{ slot: "Model.total", class: "u64" }]),
-    );
-    expect(r.ok, r.ok ? "" : r.diagnostics.map((d) => `${d.code}: ${d.message}`).join("\n")).toBe(
-      true,
-    );
+    const r = await buildCase("sidecar-prove-model", guarded, sidecarProfile([{ slot: "Model.total", class: "u64" }]));
+    expect(r.ok, r.ok ? "" : r.diagnostics.map((d) => `${d.code}: ${d.message}`).join("\n")).toBe(true);
     if (!r.ok) return;
-    const doc = JSON.parse(readFileSync(r.sidecarPath!, "utf8")) as {
-      integer_slots: { slot: string; class: string }[];
-    };
+    const doc = JSON.parse(readFileSync(r.sidecarPath!, "utf8")) as { integer_slots: { slot: string; class: string }[] };
     expect(doc.integer_slots).toEqual([{ slot: "Model.total", class: "u64" }]);
   });
 
@@ -1548,9 +1276,7 @@ export function update(m: Model, msg: Msg): Model {
       source,
       sidecarProfile([{ slot: "Model.width", class: "u64" }], { exports: [] }),
     );
-    expect(r.ok, r.ok ? "" : r.diagnostics.map((d) => `${d.code}: ${d.message}`).join("\n")).toBe(
-      true,
-    );
+    expect(r.ok, r.ok ? "" : r.diagnostics.map((d) => `${d.code}: ${d.message}`).join("\n")).toBe(true);
   });
 
   test("a discriminant read preserves a prior model-field refinement", async () => {
@@ -1574,9 +1300,7 @@ export function acceptWidth(m: Model, width: number): Model { return m; }
       source,
       sidecarProfile([{ slot: "helpers.acceptWidth.params[0]", class: "u64" }], { exports: [] }),
     );
-    expect(r.ok, r.ok ? "" : r.diagnostics.map((d) => `${d.code}: ${d.message}`).join("\n")).toBe(
-      true,
-    );
+    expect(r.ok, r.ok ? "" : r.diagnostics.map((d) => `${d.code}: ${d.message}`).join("\n")).toBe(true);
   });
 
   test("an unproven write into a synthesized named-union payload field refuses", async () => {
@@ -1593,9 +1317,7 @@ export function update(m: Model, msg: Msg): Model { return m; }
     const r = await buildCase(
       "sidecar-refuse-synthesized-union-record-slot",
       source,
-      sidecarProfile([{ slot: "TextInputEvent_set_composition.cursor", class: "u64" }], {
-        exports: [],
-      }),
+      sidecarProfile([{ slot: "TextInputEvent_set_composition.cursor", class: "u64" }], { exports: [] }),
     );
     expect(r.ok).toBe(false);
     if (r.ok) return;
@@ -1814,11 +1536,7 @@ export function update(m: Model, msg: Msg): Model {
   });
 
   test("a declared path resolving to no slot refuses at projection", async () => {
-    const r = await buildCase(
-      "sidecar-refuse-nopath",
-      SIDECAR_ENTRY,
-      sidecarProfile([{ slot: "Msg.nope", class: "i64" }]),
-    );
+    const r = await buildCase("sidecar-refuse-nopath", SIDECAR_ENTRY, sidecarProfile([{ slot: "Msg.nope", class: "i64" }]));
     expect(r.ok).toBe(false);
     if (r.ok) return;
     expect(r.diagnostics.map((d) => d.code)).toEqual(["SC4009"]);
@@ -1827,11 +1545,7 @@ export function update(m: Model, msg: Msg): Model {
   });
 
   test("a declared path naming a non-number slot refuses at projection", async () => {
-    const r = await buildCase(
-      "sidecar-refuse-nonnum",
-      SIDECAR_ENTRY,
-      sidecarProfile([{ slot: "Model.label", class: "u64" }]),
-    );
+    const r = await buildCase("sidecar-refuse-nonnum", SIDECAR_ENTRY, sidecarProfile([{ slot: "Model.label", class: "u64" }]));
     expect(r.ok).toBe(false);
     if (r.ok) return;
     expect(r.diagnostics.map((d) => d.code)).toEqual(["SC4009"]);
@@ -1844,11 +1558,7 @@ export function update(m: Model, msg: Msg): Model {
       "sidecar-refuse-teach",
       broken,
       sidecarProfile(DECLARED, {
-        determinism: {
-          teachings: {
-            SC4022: "counters in this core are integral by contract; truncate before posting",
-          },
-        },
+        determinism: { teachings: { SC4022: "counters in this core are integral by contract; truncate before posting" } },
       }),
     );
     expect(r.ok).toBe(false);

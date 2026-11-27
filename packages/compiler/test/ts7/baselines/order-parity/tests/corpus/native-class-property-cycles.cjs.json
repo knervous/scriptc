@@ -1,6 +1,0 @@
-{
- "order": [
-  "<repo>/tests/corpus/native-class-property-cycles.cjs"
- ],
- "diags": []
-}

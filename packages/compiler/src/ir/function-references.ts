@@ -1,5 +1,71 @@
+// This file was modified from scriptc (Apache-2.0); see MODIFICATIONS.md.
+/** Dropping the lifted functions nothing reaches from a lowered module (ported from upstream scriptc bc72046ebe).
+ *
+ * Lowering lifts functions it later stops using: the stage loops and callbacks of an array chain that pipeline fusion
+ * replaces with one loop, a callback lowered once per attempt, narrowing helpers a later rewrite no longer calls. The
+ * WasmGC emitter never emits them (its reachability pass), but validation, serialization and the emitter's own
+ * whole-module scans still walked them.
+ *
+ * The fork's reach rule is deliberately wider than the emitter's, so it can only keep more: a function is reached when
+ * ANY string anywhere in a kept function (body, params, captures, jsEntry, ...) or in the module's metadata (classes,
+ * globals, records, unions, lib exports, FFI imports, ...) spells its name, which covers calls, closures, retag helpers,
+ * class prototype helpers, `Error.captureStackTrace` literals and every by-name lookup an IR node can carry; through the
+ * names a `new` or a class value reaches by convention (implicitReferences); and from the module's entry, the names the
+ * backend roots with no IR node naming them (backendRoots, native host or not) and the caller's extra roots (link
+ * exports). Functions outside `removable` are all kept and all reach, and so are class members, which dispatch reaches
+ * by the `%<class>.<member>` convention. */
 import type { IrExpr, IrFunction, IrModule } from "./ir.js";
 import { everyStmtList } from "./traverse.js";
+import { backendRoots, implicitReferences } from "./implicit-references.js";
+
+/** Whether `name` follows the `%<class>.<member>` convention of class methods, accessors and constructors for one of
+ * `classNames`. */
+export function isClassMemberName(name: string, classNames: ReadonlySet<string>): boolean {
+  if (!name.startsWith("%")) return false;
+  for (let dot = name.indexOf("."); dot !== -1; dot = name.indexOf(".", dot + 1)) {
+    if (classNames.has(name.slice(1, dot))) return true;
+  }
+  return false;
+}
+
+/** `mod` without the functions of `removable` that nothing reaches (see the file comment). Returns `mod` itself when
+ * every removable function is reached. */
+export function withoutUnreachedFunctions(mod: IrModule, removable: ReadonlySet<string>, roots: readonly string[] = []): IrModule {
+  const classNames = new Set<string>();
+  for (const cls of mod.classes ?? []) classNames.add(cls.name);
+  const candidates = new Map<string, IrFunction>();
+  for (const fn of mod.functions)
+    if (removable.has(fn.name) && fn.name !== mod.entry && !isClassMemberName(fn.name, classNames)) candidates.set(fn.name, fn);
+  if (candidates.size === 0) return mod;
+  const reached = new Set<string>();
+  const pending: IrFunction[] = [];
+  const reach = (name: string): void => {
+    if (reached.has(name)) return;
+    const fn = candidates.get(name);
+    if (fn === undefined) return;
+    reached.add(name);
+    pending.push(fn);
+  };
+  // A worklist, not recursion over functions; the walk within one tree recurses (IR nesting is bounded by source
+  // nesting, as in the emitter's own scan).
+  const walk = (value: unknown): void => {
+    if (typeof value === "string") { reach(value); return; }
+    if (value === null || typeof value !== "object") return;
+    if (Array.isArray(value)) { for (let i = 0; i < value.length; i++) walk(value[i]); return; }
+    const node = value as Record<string, unknown>;
+    if (node["kind"] === "new" || node["kind"] === "classRef")
+      for (const implicit of implicitReferences(node as { kind?: unknown; className?: unknown })) reach(implicit.name);
+    for (const key in node) if (key !== "loc") walk(node[key]);
+  };
+  reach(mod.entry);
+  for (const name of backendRoots({ hostHandles: true })) reach(name);
+  for (const name of roots) reach(name);
+  for (const key in mod) if (key !== "functions") walk((mod as unknown as Record<string, unknown>)[key]);
+  for (const fn of mod.functions) if (!candidates.has(fn.name)) walk(fn);
+  for (let fn = pending.pop(); fn !== undefined; fn = pending.pop()) walk(fn);
+  if (reached.size === candidates.size) return mod;
+  return { ...mod, functions: mod.functions.filter((fn) => !candidates.has(fn.name) || reached.has(fn.name)) };
+}
 
 /** The function an expression names as a value rather than as a direct
  * call's callee: a closure's code, the union→union retag helper an
@@ -18,7 +84,7 @@ export function exprFunctionReference(expr: IrExpr): string | undefined {
 export const FUNCTION_REFERENCE_KINDS = ["closure", "orDefault", "viewOf", "viewSource"] as const;
 
 /** Functions the module's metadata names: the entry, library exports,
- * closures' jsval entries, the class prototype helpers the runtime calls
+ * closures' jsword entries, the class prototype helpers the runtime calls
  * and the record links' compose helpers the record walkers call. Class
  * methods and constructors follow the `%<class>.<method>` convention
  * instead of being named here; callers that need them derive them from
@@ -27,7 +93,7 @@ export function moduleFunctionReferences(mod: IrModule): string[] {
   return metadataReferences(mod, true);
 }
 
-/** moduleFunctionReferences, with or without the closures' jsval entries.
+/** moduleFunctionReferences, with or without the closures' jsword entries.
  * A function names its entry for itself, so a walk that follows functions
  * (withoutUnreachedFunctions) reaches an entry when it reaches its closure. */
 function metadataReferences(mod: IrModule, jsEntries: boolean): string[] {
@@ -62,67 +128,3 @@ export function errorReaderName(property: string): string {
  * expression calls it. */
 export const CLASS_NORMALIZER = "%dyn.class.normalize";
 
-/** Whether `name` follows the `%<class>.<member>` convention of class
- * methods, accessors and constructors for one of `classNames`. */
-export function isClassMemberName(name: string, classNames: ReadonlySet<string>): boolean {
-  if (!name.startsWith("%")) return false;
-  for (let dot = name.indexOf("."); dot !== -1; dot = name.indexOf(".", dot + 1)) {
-    if (classNames.has(name.slice(1, dot))) return true;
-  }
-  return false;
-}
-
-/** `mod` without the functions of `removable` that nothing reaches. A
- * function is reached through a call, a function reference
- * (exprFunctionReference), a closure's jsval entry, the module's metadata
- * (moduleFunctionReferences), the names the emitter looks up
- * (errorReaderName, CLASS_NORMALIZER), or a string literal that spells its
- * name (`Error.captureStackTrace` names the function whose frames it skips
- * that way). Functions outside `removable` are all kept and all reach, and
- * so are class members, which dispatch reaches by the `%<class>.<member>`
- * convention: a caller passes the functions lowering generated, whose only
- * uses are the ones above. Returns `mod` itself when every removable
- * function is reached. */
-export function withoutUnreachedFunctions(mod: IrModule, removable: ReadonlySet<string>): IrModule {
-  const classNames = new Set<string>();
-  for (const cls of mod.classes ?? []) classNames.add(cls.name);
-  const candidates = new Map<string, IrFunction>();
-  for (const fn of mod.functions)
-    if (removable.has(fn.name) && !isClassMemberName(fn.name, classNames))
-      candidates.set(fn.name, fn);
-  if (candidates.size === 0) return mod;
-  const reached = new Set<string>();
-  const pending: IrFunction[] = [];
-  const reach = (name: string): void => {
-    if (reached.has(name)) return;
-    const fn = candidates.get(name);
-    if (fn === undefined) return;
-    reached.add(name);
-    pending.push(fn);
-  };
-  const scan = (fn: IrFunction): void => {
-    if (fn.jsEntry !== undefined) reach(fn.jsEntry);
-    everyStmtList(fn.body, {
-      expr: (expr) => {
-        if (expr.kind === "call") reach(expr.callee);
-        else if (expr.kind === "strLit") reach(expr.value);
-        else {
-          const referenced = exprFunctionReference(expr);
-          if (referenced !== undefined) reach(referenced);
-        }
-        return true;
-      },
-      stmt: () => true,
-    });
-  };
-  for (const name of metadataReferences(mod, false)) reach(name);
-  for (const property of ERROR_READER_PROPERTIES) reach(errorReaderName(property));
-  reach(CLASS_NORMALIZER);
-  for (const fn of mod.functions) if (!candidates.has(fn.name)) scan(fn);
-  for (let fn = pending.pop(); fn !== undefined; fn = pending.pop()) scan(fn);
-  if (reached.size === candidates.size) return mod;
-  return {
-    ...mod,
-    functions: mod.functions.filter((fn) => !candidates.has(fn.name) || reached.has(fn.name)),
-  };
-}

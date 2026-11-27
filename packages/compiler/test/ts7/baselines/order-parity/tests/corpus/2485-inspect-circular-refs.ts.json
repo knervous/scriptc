@@ -1,6 +1,0 @@
-{
- "order": [
-  "<repo>/tests/corpus/2485-inspect-circular-refs.ts"
- ],
- "diags": []
-}

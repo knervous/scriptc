@@ -1,6 +1,0 @@
-{
- "order": [
-  "<repo>/tests/corpus/6996-typed-array-index-temps.ts"
- ],
- "diags": []
-}

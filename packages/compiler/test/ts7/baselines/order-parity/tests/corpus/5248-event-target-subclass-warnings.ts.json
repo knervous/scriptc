@@ -1,6 +1,0 @@
-{
- "order": [
-  "<repo>/tests/corpus/5248-event-target-subclass-warnings.ts"
- ],
- "diags": []
-}

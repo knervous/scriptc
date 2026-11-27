@@ -1,6 +1,0 @@
-{
- "order": [
-  "<repo>/tests/corpus/2649-top-level-await-pending.ts"
- ],
- "diags": []
-}

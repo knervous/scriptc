@@ -1,12 +1,14 @@
+// This file was modified from scriptc (Apache-2.0); see MODIFICATIONS.md.
 import { BOOL, DYN, F64, STRING, VOID } from "../ir.js";
 import { defineLibFnSignatures } from "./shared.js";
 
 /** The record builtin call slots. */
 export const recordSignatures = defineLibFnSignatures({
-  /** Object.freeze of a record whose shape is freezable (frozen-records.ts):
-   * sets the frozen bit in its rc word (scr_record_freeze). The receiver is
-   * any record type. */
-  "record.freeze": { argTypes: [null], result: VOID },
+  "record.freeze": { argTypes: [null], result: DYN },
+  /* Upstream's void "record.freeze" shares its name with this fork's form
+   * below, which answers the record (Object.freeze's result) and which this
+   * fork's native-dyn emitter handles; upstream's frontend form never
+   * reaches this IR. */
   /** Whether a record is frozen: its rc word's frozen bit, set by
    * record.freeze and dyn.freeze of a capsule. Emitted inline. The receiver
    * is any record type. */
@@ -76,4 +78,7 @@ export const recordSignatures = defineLibFnSignatures({
    * placeholders), kept when they hold an undeclared key or another order.
    * The first is a record type, the second dyn (borrowed). Never throws. */
   "record.sourceNote": { argTypes: [null, DYN], result: VOID },
+"record.hasSrc": { argTypes: [null], result: BOOL },
+"record.carry": { argTypes: [null], result: DYN },
+"record.inherit": { argTypes: [null, null], result: DYN },
 });

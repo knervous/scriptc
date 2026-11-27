@@ -1,0 +1,1 @@
+export function run() { var o = { a: 1, nested: [1, 2] }; var before = Object.isFrozen(o); Object.freeze(o); try { o.a = 2; } catch (e) {} return before + ":" + Object.isFrozen(o) + ":" + o.a + ":" + Object.isFrozen(o.nested); }

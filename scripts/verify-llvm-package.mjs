@@ -1,14 +1,7 @@
 #!/usr/bin/env node
+// This file was modified from scriptc (Apache-2.0); see MODIFICATIONS.md.
 import { execFileSync } from "node:child_process";
-import {
-  accessSync,
-  constants,
-  mkdtempSync,
-  readFileSync,
-  rmSync,
-  statSync,
-  writeFileSync,
-} from "node:fs";
+import { accessSync, constants, mkdtempSync, readFileSync, rmSync, statSync, writeFileSync } from "node:fs";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
 import { validateLlvmHelperExports } from "./llvm-package-symbols.mjs";
@@ -42,22 +35,16 @@ try {
   const packedSize = statSync(tarball).size;
   const sizeFailures = [
     ...(installedSize > installedBudget
-      ? [
-          `stripped helper is ${installedSize} bytes, exceeding the ${installedBudget}-byte installed-size budget`,
-        ]
+      ? [`stripped helper is ${installedSize} bytes, exceeding the ${installedBudget}-byte installed-size budget`]
       : []),
     ...(packedSize > packedBudget
-      ? [
-          `helper tarball is ${packedSize} bytes, exceeding the ${packedBudget}-byte compressed-size budget`,
-        ]
+      ? [`helper tarball is ${packedSize} bytes, exceeding the ${packedBudget}-byte compressed-size budget`]
       : []),
   ];
   if (sizeFailures.length > 0) throw new Error(sizeFailures.join("; "));
-  const version = JSON.parse(
-    execFileSync(binary, ["version", "--format=json"], {
-      encoding: "utf8",
-    }),
-  );
+  const version = JSON.parse(execFileSync(binary, ["version", "--format=json"], {
+    encoding: "utf8",
+  }));
   if (
     version.protocol_version !== "1" ||
     version.scriptc_package_version !== manifest.version ||
@@ -65,28 +52,20 @@ try {
     version.default_target !== "arm64-apple-macosx14.0.0" ||
     !Array.isArray(version.supported_targets) ||
     !version.supported_targets.includes(version.default_target)
-  )
-    throw new Error(`packed helper identity mismatch: ${JSON.stringify(version)}`);
+  ) throw new Error(`packed helper identity mismatch: ${JSON.stringify(version)}`);
   const dependencies = execFileSync("otool", ["-L", binary], { encoding: "utf8" });
-  const nonSystemDependencies = dependencies
-    .trim()
-    .split("\n")
-    .slice(1)
+  const nonSystemDependencies = dependencies.trim().split("\n").slice(1)
     .map((line) => line.trim().split(" (compatibility version", 1)[0])
-    .filter(
-      (path) =>
-        path !== undefined && !path.startsWith("/usr/lib/") && !path.startsWith("/System/Library/"),
-    );
+    .filter((path) => path !== undefined &&
+      !path.startsWith("/usr/lib/") && !path.startsWith("/System/Library/"));
   if (nonSystemDependencies.length > 0) {
     throw new Error(
       `packed helper has non-system runtime dependencies: ${nonSystemDependencies.join(", ")}\n` +
-        dependencies,
+      dependencies,
     );
   }
   const exportedSymbols = execFileSync("nm", ["-gU", binary], { encoding: "utf8" })
-    .trim()
-    .split("\n")
-    .filter(Boolean)
+    .trim().split("\n").filter(Boolean)
     .map((line) => line.trim().split(/\s+/).at(-1));
   const exportValidation = validateLlvmHelperExports(exportedSymbols);
   if (!exportValidation.hasMain || exportValidation.unexpected.length > 0) {
@@ -102,39 +81,14 @@ try {
   const probeObject = join(work, "probe.o");
   writeFileSync(probeInput, "define i32 @answer() { ret i32 42 }\n");
   execFileSync(binary, [
-    "emit",
-    "--input",
-    probeInput,
-    "--output",
-    probeObject,
-    "--filetype",
-    "obj",
-    "--target",
-    version.default_target,
-    "--opt-level",
-    "2",
-    "--relocation-model",
-    "pic",
-    "--diagnostic-format",
-    "json",
-    "--source-path",
-    "/src/probe.ts",
+    "emit", "--input", probeInput, "--output", probeObject,
+    "--filetype", "obj", "--target", version.default_target,
+    "--opt-level", "2", "--relocation-model", "pic",
+    "--diagnostic-format", "json", "--source-path", "/src/probe.ts",
   ]);
   const objectLoadCommands = execFileSync("otool", ["-l", probeObject], { encoding: "utf8" });
   if (!/LC_BUILD_VERSION[\s\S]*?platform 1[\s\S]*?minos 14\.0(?:\s|$)/.test(objectLoadCommands)) {
     throw new Error("packed helper must emit objects with the macOS 14.0 deployment target");
-  }
-  // The comptime evaluator ships beside the helper, and both compilers start it.
-  if (manifest.bin?.["scriptc-comptime"] !== "bin/scriptc-comptime") {
-    throw new Error("helper manifest must expose the comptime evaluator as an npm bin");
-  }
-  const evaluator = join(root, "bin", "scriptc-comptime");
-  accessSync(evaluator, constants.X_OK);
-  const evaluatorProbe = join(work, "probe.js");
-  writeFileSync(evaluatorProbe, "typeof process + String(6 * 7);\n");
-  const evaluated = execFileSync(evaluator, [evaluatorProbe, "2000", "64"], { encoding: "utf8" });
-  if (evaluated.trim() !== '["string","undefined42"]') {
-    throw new Error(`packed comptime evaluator answered ${JSON.stringify(evaluated)}`);
   }
   const attributes = execFileSync("xattr", [binary], { encoding: "utf8" });
   if (attributes.split("\n").includes("com.apple.quarantine")) {
@@ -143,7 +97,7 @@ try {
   execFileSync("codesign", ["--verify", "--strict", binary], { stdio: "inherit" });
   process.stdout.write(
     `verified ${manifest.name}@${manifest.version}: ${installedSize} bytes installed, ` +
-      `${packedSize} bytes packed\n`,
+    `${packedSize} bytes packed\n`,
   );
 } finally {
   rmSync(work, { recursive: true, force: true });

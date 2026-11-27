@@ -1,3 +1,4 @@
+// This file was modified from scriptc (Apache-2.0); see MODIFICATIONS.md.
 import { createVendorArchives } from "../vendor-archives.js";
 import { runtimeSrcDir, runtimeFingerprint } from "./runtime-inputs.js";
 import { targetPlatform, isZigDriver } from "./driver.js";
@@ -6,6 +7,7 @@ import { resolvedToolIdentity } from "./tool-identity.js";
 export const {
   vendorEngineDir,
   vendorTlsDir,
+  vendorCurlDir,
   vendorBrotliDir,
   brotliArchivePath,
   ensureBrotliArchive,
@@ -19,17 +21,22 @@ export const {
   vendorCacheTargetFlavor,
   vendorCacheBuildIdentity,
   currentVendorCacheBuildIdentity,
+  engineArchivePath,
   stageVendorInputs,
+  ensureEngineArchive,
   lreObjectPaths,
   ensureLreObjects,
   vendorZlibDir,
   zlibObjectPaths,
   ensureZlibObjects,
+  curlStubDirPath,
+  ensureCurlStub,
   vendorZstdDir,
   zstdObjectPaths,
   ensureZstdObjects,
   tlsArchivePath,
   ensureTlsArchive,
+  QJS_ENGINE_SOURCES,
   vendorMlkemDir,
   mlkemArchivePath,
   ensureMlkemArchive,

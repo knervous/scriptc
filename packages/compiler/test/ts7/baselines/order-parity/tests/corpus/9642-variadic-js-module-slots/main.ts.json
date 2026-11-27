@@ -1,7 +1,0 @@
-{
- "order": [
-  "<repo>/tests/corpus/9642-variadic-js-module-slots/variadic.mjs",
-  "<repo>/tests/corpus/9642-variadic-js-module-slots/main.ts"
- ],
- "diags": []
-}

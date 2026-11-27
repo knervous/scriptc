@@ -1,6 +1,0 @@
-{
- "order": [
-  "<repo>/tests/corpus/7403-bigint-of-typed-arrays.mjs"
- ],
- "diags": []
-}

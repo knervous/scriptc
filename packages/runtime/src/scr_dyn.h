@@ -1,3 +1,4 @@
+// This file was modified from scriptc (Apache-2.0); see MODIFICATIONS.md.
 /* scriptc runtime — dynamic values: the checked-dynamic tree, native handles,
  * dyn promises, the ambient receiver and listener adapters (scr_json.c,
  * scr_dyn_handle.c, scr_async_dyn.c), and the message readers of typed
@@ -102,13 +103,34 @@ typedef enum {
    * the cycle collector (the dyn→closure stance): a cycle THROUGH a
    * dyn-boxed promise is merely never collected. */
   SCR_DYN_PROMISE,
+  /* An ISLAND (engine-held) value — the jsval→dyn crossing. Never
+   * produced by the parser — it enters the checked-dynamic tree through the gated
+   * constructor scr_dyn_from_jsval (scr_island.c): an 'any'-typed value
+   * flowing into an 'unknown'/'object'/JS-residue slot. Boxes by
+   * REFERENCE (a retained ScrJsval cell). The constructor SCALAR-
+   * NORMALIZES: engine numbers/strings/booleans/null/undefined convert
+   * to the native dyn kinds at wrap time, so JSVAL nodes only ever hold
+   * engine objects, arrays, and functions (plus the symbol/bigint edge —
+   * kinds the checked-dynamic tree cannot represent at all). Identity is the CELL's
+   * engine value: strict equality routes to the engine's === (two wraps
+   * of one engine value compare equal), and scr_jsval_from_dyn unwraps
+   * the SAME cell back (+1) — the boundary is identity-preserving for
+   * engine-born values. typeof/truthiness/String() route to the engine
+   * per use (scr_dyn_jsval_ops); every dyn walk without an armed route
+   * (JSON, structuredClone, deepStrictEqual, inspect, keyed access,
+   * calls, iteration) throws the LOUD "not supported yet" ladder — never
+   * a silent wrong answer. The dyn→cell edge is NOT visible to the cycle
+   * collector (the dyn→closure stance): a cycle dyn → cell → engine
+   * object → host closure → dyn is merely never collected (the
+   * documented cross-boundary-cycle divergence). */
+  SCR_DYN_JSVAL,
   /* A compiler-owned typed reference. Program class instances use this for
    * ordinary `unknown` storage; native Web streams also use it when their
    * contract must expose the exact input reference again. The capsule
    * retains the original value so an exact checked cast preserves identity;
    * `materialize` supplies the ordinary own-field/data view to generic dyn
    * consumers. LLVM hardcodes these kind numbers; append new kinds. */
-  SCR_DYN_TYPED_REF = 12, /* tag 11 is retired; preserve the native ABI */
+  SCR_DYN_TYPED_REF,
   /* Native Proxy over a checked plain object; keep new tags at the end. */
   SCR_DYN_PROXY,
   SCR_DYN_BIGINT, /* exact native integer, retained by the box */
@@ -352,6 +374,10 @@ typedef struct ScrDynTypedCast {
   bool borrowed;
   struct ScrDynTypedCast *next;
 } ScrDynTypedCast;
+typedef struct ScrJsval ScrJsval; /* opaque island cell (C11 repeat; the
+                                   * always-linked dyn core never touches
+                                   * its engine value — only the gated ops
+                                   * installed by scr_dyn_from_jsval do) */
 
 /* The compiler-emitted call glue carried by a SCR_DYN_FUNC box: checks the
  * dyn arguments against the boxed closure's declared parameter types (a
@@ -702,7 +728,11 @@ struct ScrDyn {
      * emitted converters guarantee it (direct box for promise<dyn>,
      * adapter promise otherwise). */
     ScrPromise *promise;
-
+    /* SCR_DYN_JSVAL: the retained island cell (engine objects/arrays/
+     * functions only — the constructor scalar-normalizes; see the kind's
+     * comment). Released through the installed ops so this always-linked
+     * core never references the gated island unit. */
+    struct { ScrJsval *cell; } jsval;
     struct { ScrDyn *target; ScrDyn *handler; } proxy; /* both owned */
   } v;
   /* Keep the checked value payload at its established offset: generated
@@ -1027,6 +1057,7 @@ static inline const ScrDynTypedArrayOps *scr_dyn_typed_ref_array_ops(const ScrDy
              ? NULL
              : d->v.typed_ref.array;
 }
+
 
 /* BORROWED member lookup on a SCR_DYN_OBJ; NULL when the key is absent. */
 ScrDyn *scr_dyn_obj_get(const ScrDyn *d, const char *key, size_t key_len);
@@ -1646,6 +1677,9 @@ void *scr_dyn_record_view(ScrDyn *d, const ScrRecordViewSource *sources, size_t 
                           const char *key, size_t key_len, void *(*alloc)(void));
 ScrDyn *scr_dyn_class_view_unavailable(void *ptr);
 ScrDyn *scr_dyn_typed_ref_materialize(const ScrDyn *d); /* +1 */
+/* The view a type test reads (NULL for a class instance, which fits only its own type); +1. Never throws for a
+ * class instance. */
+ScrDyn *scr_dyn_typed_ref_match_view(const ScrDyn *d);
 ScrDyn *scr_dyn_typed_ref_peek(const ScrDyn *d); /* +1 */
 /* What string conversion renders for a capsule (+1): its materialized
  * view, or, for an EventTarget or Event subclass without its own
@@ -1914,6 +1948,7 @@ void scr_dyn_arr_push_spread(ScrDyn *arr, const ScrDyn *src, const char *what);
  * compile-time source spelling), else the runtime kind wording. Borrows
  * both; NULL with the exception pending on the throw. */
 ScrDyn *scr_dyn_iter_pack(const ScrDyn *src, const ScrStr *msg);
+ScrDyn *scr_dyn_jsval_iter_n(const ScrDyn *src, double count);
 /* A rest element's pack (`const [a, ...rest] = d`): scr_dyn_iter_pack's
  * kinds pack as there, and other iterables step through the iterator
  * protocol to the end. +1, or NULL with the error pending. */
@@ -3013,11 +3048,115 @@ void scr_dyn_promise_resolve_with(ScrPromise *target, ScrDyn *value);
  * qualifies; every other kind does not. */
 ScrDyn *scr_dyn_thenable_function(const ScrDyn *value, const ScrDyn *reader);
 
+/* ── island values in the checked-dynamic tree (SCR_DYN_JSVAL) ─────────────────────────
+ * Engine routing ops for JSVAL nodes, installed by the gated constructor
+ * (scr_dyn_from_jsval, scr_island.c — the scr_dyn_alloc_promise hook
+ * story: JSVAL nodes exist only after the constructor ran, so the ops
+ * are always installed when a dispatch arm meets the kind, and a
+ * dynamic-free link never references engine symbols). Contracts mirror
+ * the scr_jsval_* entries they route to. */
+typedef struct ScrDynJsvalOps {
+  void (*release)(ScrJsval *cell);
+  ScrStr *(*type_of)(ScrJsval *cell); /* engine typeof; +1, never throws */
+  bool (*truthy)(ScrJsval *cell);     /* engine ToBoolean; never throws */
+  /* String(v) in the engine (the full ToString protocol — user toString
+   * runs, its throw bridges): +1, or NULL with the exception pending. */
+  ScrStr *(*to_str)(ScrJsval *cell);
+  bool (*strict_eq)(ScrJsval *a, ScrJsval *b); /* engine ===; never throws */
+  bool (*is_array)(ScrJsval *cell);   /* Array.isArray, engine-side */
+  bool (*is_error)(ScrJsval *cell);   /* native Error instance, engine-side */
+  /* ── the routed operation set (lane dyn-routing-ops) ────────────────
+   * Each routes to the engine at the moment of use and converts at the
+   * boundary: dyn ARGUMENTS cross through scr_jsval_from_dyn (wrapped
+   * cells unwrap by reference, dyn data deep-copies, dyn FUNC boxes
+   * cross through the generic host-function shim), engine RESULTS come
+   * back through scr_dyn_from_jsval (scalar-normalizing). Fallible ops
+   * bridge the ENGINE's exception catchably and answer NULL/false/-1. */
+  ScrDyn *(*key_get)(ScrJsval *cell, const ScrStr *k); /* o[k]; +1 or NULL pending */
+  bool (*key_set)(ScrJsval *cell, const ScrStr *k, const ScrDyn *v); /* false = pending */
+  ScrDyn *(*call)(ScrJsval *cell, ScrDyn *const *args, size_t argc); /* f(...); +1 or NULL pending */
+  /* o.m(...) — the ENGINE's own prototypes run (JS-exact flatMap/map/
+   * forEach/...). A missing or non-callable member throws Node's
+   * "<what> is not a function" (the call site's spelling — V8's text,
+   * front-run before the engine's terser claim). */
+  ScrDyn *(*invoke)(ScrJsval *cell, const char *method, ScrDyn *const *args, size_t argc, const char *what);
+  bool (*is_nullish)(ScrJsval *cell); /* engine undefined/null; never throws
+                                       * (always false today — the wrap
+                                       * constructor scalar-normalizes) */
+  /* Object.keys/values/entries (mode 0/1/2) as a NATIVE dyn array (+1):
+   * keys are dyn strings, values wrap per element, entries are native
+   * dyn pairs. NULL with the engine's exception pending on refusal. */
+  ScrDyn *(*obj_walk)(ScrJsval *cell, int mode);
+  int (*has_own)(ScrJsval *cell, const ScrStr *k); /* 0/1; -1 = pending */
+  /* Object.assign(target, src) with the ENGINE target: src converts per
+   * member semantics (a wrapped src spreads by reference; dyn data
+   * enters as the usual deep copy). false = pending. */
+  bool (*assign)(ScrJsval *cell, const ScrDyn *src);
+  /* JSON.stringify text of the engine value (+1) — the engine's own
+   * stringify (toJSON protocols, cycle TypeErrors). NULL + pending when
+   * not JSON-representable. */
+  ScrStr *(*to_json)(ScrJsval *cell);
+  /* Drain the ENGINE's own iterator protocol into a fresh dyn array
+   * (elements wrap back scalar-normalized) — the for-of/destructuring/
+   * spread arm over a wrapped value. The guard's TypeError wording on a
+   * non-iterable: spread true takes V8's spread-call text; otherwise the
+   * compile-time spelling `spell` verbatim when non-NULL (the named-
+   * source form), else the kind wording. An iterating getter/next throw
+   * bridges with the ENGINE's message. +1, or NULL with the exception
+   * pending. */
+  ScrDyn *(*iter_drain)(ScrJsval *cell, bool spread, const ScrStr *spell);
+  ScrDyn *(*iterator)(ScrJsval *cell, const ScrStr *spell, bool array_from);
+  ScrDyn *(*iter_n)(ScrJsval *cell, double count);
+  bool (*type_probe)(ScrJsval *cell, const ScrStr *probe); /* internal brand; no property access */
+  /* `k in o` over the island value: 1/0, -1 with the exception pending (a primitive's TypeError, a proxy trap). */
+  int (*has)(ScrJsval *cell, const ScrStr *k);
+  /* A WeakMap/WeakSet key's identity: 1 with *identity set when the engine reports the object's death (it calls
+   * scr_weak_dispose_hook with that identity before the identity can name another object); 1 with *program set (and
+   * *identity NULL) for a compiled value held by reference, keyed as itself; -1 for an object whose lifetime the
+   * engine does not report. NULL when the engine reports none. */
+  int (*weak_key)(ScrJsval *cell, void **identity, const ScrDyn **program);
+  /* An engine typed array's elements as fresh native bytes of its own kind (+1): a typed-array constructor's or
+   * set()'s source. NULL, nothing pending, when the value is not one (or the op is NULL). */
+  ScrBytes *(*bytes_copy)(ScrJsval *cell);
+} ScrDynJsvalOps;
+
+/* The allocator view the gated constructor uses (installs the ops);
+ * ownership of `cell` MOVES in (the caller retains first). */
+ScrDyn *scr_dyn_alloc_jsval(ScrJsval *cell, const ScrDynJsvalOps *ops);
+/* The installed ops (traps on a missing install — impossible unless a
+ * JSVAL node was forged without the constructor). */
+const ScrDynJsvalOps *scr_dyn_jsval_ops(void);
+/* dynTest arms that need the ENGINE's answer on a JSVAL node, or the
+ * materialized answer for a live typed-reference capsule. Each answers
+ * false for every other kind (callers test unconditionally — the emitted
+ * narrowing tests stay branch-free). Never throw. */
+bool scr_dyn_isl_typeof_is(const ScrDyn *d, const char *name);
+bool scr_dyn_isl_is_array(const ScrDyn *d);
+bool scr_dyn_isl_is_error(const ScrDyn *d);
+/* The JSVAL honesty ladder: when d is a JSVAL node, THROWS the catchable
+ * "<what> on an island value held in 'unknown' is not supported yet"
+ * Error and returns false; every other kind returns false untouched.
+ * Callers gate un-armed operations with it — never a silent wrong
+ * answer (the retired fence-box bug). */
+bool scr_dyn_isl_fence(const ScrDyn *d, const char *what);
+/* The emitted keyed READ's JSVAL arm (sc_dyn_key_get): routes o[k] to the
+ * engine through the installed ops and wraps the result back (+1, scalars
+ * normalized) — the retired `.length -> fence` row. d MUST be a JSVAL
+ * node; NULL with the engine's exception bridged catchably. */
+ScrDyn *scr_dyn_isl_key_get(const ScrDyn *d, const ScrStr *k);
+/* An island array as a dyn array a checked cast walks (+1), NULL when d is no island array. */
+ScrDyn *scr_dyn_isl_array_view(const ScrDyn *d);
+/* The `??`/optional-chain nullish test over a dyn value: UNDEF/NULL
+ * native, JSVAL through the engine's own test (defensively — the wrap
+ * constructor scalar-normalizes engine null/undefined away), every other
+ * kind false. Never throws. */
 /* Native predicates for typed reference capsules and boxed errors. */
 bool scr_dyn_ref_typeof_is(const ScrDyn *d, const char *name);
 bool scr_dyn_ref_is_array(const ScrDyn *d);
 bool scr_dyn_ref_is_error(const ScrDyn *d);
 bool scr_dyn_is_nullish(const ScrDyn *d);
+/* scr_dyn_isl_tostr_buf (the display walkers' JSVAL arm) is declared
+ * with the ScrJsonBuf surface below. */
 
 /* ── the ambient receiver (JS `this` inside listener/callback bodies) ──
  * Node calls a handle's listeners with `this` bound to the emitting

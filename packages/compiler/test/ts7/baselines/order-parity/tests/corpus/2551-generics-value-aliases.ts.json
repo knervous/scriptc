@@ -1,6 +1,0 @@
-{
- "order": [
-  "<repo>/tests/corpus/2551-generics-value-aliases.ts"
- ],
- "diags": []
-}

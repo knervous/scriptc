@@ -1,0 +1,1 @@
+const h:any=globalThis;const p=Promise.reject('x');h.auditEnqueue(()=>p.catch(()=>console.log('caught')));

@@ -1,6 +1,0 @@
-{
- "order": [
-  "<repo>/tests/corpus/program-lifetime-field-refs.ts"
- ],
- "diags": []
-}

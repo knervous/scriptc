@@ -1,6 +1,0 @@
-{
- "order": [
-  "<repo>/tests/corpus/logical-and-over-closure-assigned-binding.ts"
- ],
- "diags": []
-}

@@ -1,6 +1,0 @@
-{
- "order": [
-  "<repo>/tests/corpus/js-null-proto-array-proto-assignment.js"
- ],
- "diags": []
-}

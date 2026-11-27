@@ -1,6 +1,0 @@
-{
- "order": [
-  "<repo>/tests/corpus/dgram-signal-close-removes-listener.cjs"
- ],
- "diags": []
-}

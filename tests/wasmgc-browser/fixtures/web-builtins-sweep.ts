@@ -1,0 +1,15 @@
+console.log(btoa("hello"), atob("aGVsbG8="));
+console.log(new Date(0).toISOString());
+console.log((3.456).toFixed(0), (2.5).toFixed(0), (1e21).toFixed(0));
+console.log(String.raw`a\nb${1}`);
+const u = new URL("https://user:pw@example.com:8080/p/a?x=1#h");
+console.log(u.protocol, u.host, u.hostname, u.port, u.pathname, u.search, u.hash, u.href, u.origin, u.username, u.password);
+const sp = new URLSearchParams("a=1&b=2&a=3");
+console.log(sp.get("a"), sp.getAll("a").join(), sp.has("b"), sp.toString());
+sp.append("c", "4"); sp.set("a", "9"); sp.delete("b"); sp.sort();
+console.log(sp.toString());
+console.log(URL.canParse("nope"), URL.canParse("http://x.y"));
+console.log(Math.sin(1), Math.cbrt(27), Math.log2(8), Math.atan2(1, 2), Math.expm1(1), Math.tanh(0.5));
+console.log(structuredClone({ a: [1, 2, { b: 3 }] }).a.length);
+console.log(new Intl.NumberFormat("en-US").format(1234567.891));
+console.log(new Date(Date.UTC(2020, 1, 3)).toISOString(), new Date("2020-02-03T04:05:06Z").getTime());

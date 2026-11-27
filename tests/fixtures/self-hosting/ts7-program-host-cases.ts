@@ -1,6 +1,6 @@
 import { writeFileSync } from "node:fs";
 import { basename, join } from "node:path";
-import { FrontendInputTracker, invalidateTrackedPath, trackedRealpath, trackedReadFile } from "../../../packages/compiler/src/frontend/input-tracker.js";
+import { FrontendInputTracker, trackedRealpath, trackedReadFile } from "../../../packages/compiler/src/frontend/input-tracker.js";
 import { findConfigFile, getPreEmitDiagnostics, sys, type Ts7Host, type Ts7HostOptions } from "../../../packages/compiler/src/frontend/ts7/program-host.js";
 import { ModuleDetectionKind, ModuleKind, ModuleResolutionKind, ScriptTarget } from "../../../packages/compiler/src/frontend/ts7/enums.js";
 import { isVariableStatement, isIdentifier } from "../../../packages/compiler/src/frontend/ts7/ast-guards.generated.js";
@@ -53,17 +53,13 @@ export function runProgramHost(createHost: (options: Ts7HostOptions) => Ts7Host,
       check(program.getSourceFile(shadow)!.text === "export const shadow = 7;\n", "shadow BOM stripping");
       check(program.getSourceFile(hidden) === undefined, "hidden file");
       check(program.getSourceFileNames().some((file) => basename(file) === "dep.ts"), "module resolution");
-      const implementations = program.getImplementationSourceFiles();
-      check(implementations.length > 0 && implementations.every((file) => !file.isDeclarationFile), "implementation source selection");
-      check(implementations === program.getImplementationSourceFiles(), "implementation source cache");
-      check(implementations.some((file) => file === source), "implementation source identity");
       check(program.getSourceFiles() === program.getSourceFiles(), "source file cache");
       const checker = program.getTypeChecker();
       check(checker === program.getTypeChecker(), "checker cache");
-      const statement = source.statements.nodes[1]!;
+      const statement = source.statements[1]!;
       check(isVariableStatement(statement), "variable statement");
       if (isVariableStatement(statement)) {
-        const name = statement.declarationList.declarations.nodes[0]!.name;
+        const name = statement.declarationList.declarations[0]!.name;
         check(name !== undefined && isIdentifier(name), "variable identifier");
         if (name !== undefined && isIdentifier(name)) {
           const type = checker.getTypeAtLocation(name);
@@ -101,9 +97,6 @@ export function runProgramHost(createHost: (options: Ts7HostOptions) => Ts7Host,
     try { program.getSourceFiles(); } catch { refused = true; }
     check(refused, "disposed source cache");
     refused = false;
-    try { program.getImplementationSourceFiles(); } catch { refused = true; }
-    check(refused, "disposed implementation source cache");
-    refused = false;
     try { program.getTypeChecker(); } catch { refused = true; }
     check(refused, "disposed checker cache");
     check(host.getTimingInfo().totals.sourceFilesFetched > 0, "host timing");
@@ -122,15 +115,8 @@ export function runProgramHost(createHost: (options: Ts7HostOptions) => Ts7Host,
       check(trackedReadFile(entry) !== null, "stable duplicate read");
     });
     check(paths.snapshot().stable, "duplicate probes stay stable");
-    const changed = "export const changed = true;\n";
-    writeFileSync(entry, changed);
-    // A tracker keeps its first answer for a file that had been unchanged for
-    // the settle time when it was read, and asks the disk again for one read
-    // sooner. How long this run took to get here decides which, so the write
-    // is declared, as a compile declares its own: the next read asks the disk
-    // either way.
-    const reread = paths.run(() => { invalidateTrackedPath(entry); return trackedReadFile(entry); });
-    check(reread === changed, "declared write is read again");
+    writeFileSync(entry, "export const changed = true;\n");
+    paths.run(() => { trackedReadFile(entry); });
     check(!paths.snapshot().stable, "changed probes are unstable");
   } finally { host.close(); host.close(); }
   let refused = false;

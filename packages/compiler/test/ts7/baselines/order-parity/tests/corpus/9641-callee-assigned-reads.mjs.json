@@ -1,6 +1,0 @@
-{
- "order": [
-  "<repo>/tests/corpus/9641-callee-assigned-reads.mjs"
- ],
- "diags": []
-}

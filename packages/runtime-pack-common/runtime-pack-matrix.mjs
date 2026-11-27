@@ -1,3 +1,4 @@
+// This file was modified from scriptc (Apache-2.0); see MODIFICATIONS.md.
 import { withWorkerRuntimeVariants } from "./worker-matrix.mjs";
 import { withLibraryRuntimeFlavors } from "./library-matrix.mjs";
 
@@ -178,6 +179,7 @@ export const OPTIONAL_RUNTIME_SOURCES = [
   // Blob and File box their reads as dyn promises through scr_async_dyn.c.
   ["scr_blob.c", "dynAsync"],
   ["scr_zlib.c", "zlib"],
+  ["scr_zlib_island.c", all("zlib", "dynamic")],
   ["scr_brotli.c", all("zlib", "brotli")],
   ["scr_zstd.c", all("zlib", "zstd")],
   // Intl over ICU (scr_intl.c): the default-locale number/date formats and
@@ -352,6 +354,10 @@ export const OPTIONAL_RUNTIME_SOURCES = [
   ["scr_webcrypto_aes.c", all("cipher", "webcrypto")],
   ["scr_abort.c", "abortSignalOnly"],
   ["scr_fetch.c", "nativeFetch"],
+  ["scr_island.c", "dynamic"],
+  ["scr_web.c", "dynamic"],
+  ["scr_inspect_island.c", all("dynamic", "inspect")],
+  ["scr_net_island.c", "netIslandEffective"],
   // Node islands: libnode loaded on first use (explicit @scriptc/node calls),
   // over the SCR_NODE_ISLANDS build of scr_async.c.
   ["scr_node_island.c", "nodeIsland"],
@@ -432,6 +438,16 @@ function withJsObjectModel(variants) {
 }
 
 export function variantsFor(source) {
+  const dynamicOnly = new Set([
+    "scr_zlib_island.c",
+    "scr_island.c",
+    "scr_web.c",
+    "scr_inspect_island.c",
+    "scr_net_island.c",
+  ]);
+  if (dynamicOnly.has(source)) {
+    return [{ id: "dynamic", when: { dynamic: true }, defines: ["SCR_DYNAMIC"] }];
+  }
   const variants = [{ id: "default", when: {}, defines: [] }];
   // scr_json.c builds one object per flavor (and workers mode): its paths
   // for Node island handles and handle classes call through tables that
@@ -483,6 +499,14 @@ export function variantsFor(source) {
     // TextDecoder legacy one when it has both. Every other program keeps the
     // default object, byte for byte.
     withJsObjectModel(variants);
+  }
+  variants.push({ id: "dynamic", when: { dynamic: true }, defines: ["SCR_DYNAMIC"] });
+  if (source === "scr_bytes.c") {
+    variants.push({
+      id: "dynamic-text-decoder-legacy",
+      when: { dynamic: true, textDecoderLegacy: true },
+      defines: ["SCR_DYNAMIC", "SCR_TEXT_DECODER_LEGACY"],
+    });
   }
   // util.isDeepStrictEqual's ArrayBuffer and SharedArrayBuffer arm asks the
   // mutable-buffers registry whether either side is detached, and Node throws
@@ -850,7 +874,8 @@ export function createRuntimePackMatrix({
   libraryOnly = false,
 }) {
   const vendorArchives = [
-    { id: "libregexp", predicate: "regex" },
+    { id: "quickjs", predicate: "dynamic" },
+    { id: "libregexp", predicate: { all: ["regex"], not: ["dynamic"] } },
     { id: "zlib", predicate: "zlibEffective" },
     { id: "brotli", predicate: all("zlib", "brotli") },
     { id: "zstd", predicate: all("zlib", "zstd") },

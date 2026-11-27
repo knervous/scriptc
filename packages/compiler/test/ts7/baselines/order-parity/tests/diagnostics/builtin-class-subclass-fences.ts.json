@@ -1,6 +1,0 @@
-{
- "order": [
-  "<repo>/tests/diagnostics/builtin-class-subclass-fences.ts"
- ],
- "diags": []
-}

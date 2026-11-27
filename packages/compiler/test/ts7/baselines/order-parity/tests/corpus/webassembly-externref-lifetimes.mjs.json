@@ -1,6 +1,0 @@
-{
- "order": [
-  "<repo>/tests/corpus/webassembly-externref-lifetimes.mjs"
- ],
- "diags": []
-}

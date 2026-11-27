@@ -1,6 +1,0 @@
-{
- "order": [
-  "<repo>/tests/corpus/3076-nullish-record-defaults.ts"
- ],
- "diags": []
-}

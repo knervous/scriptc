@@ -1,3 +1,4 @@
+// This file was modified from scriptc (Apache-2.0); see MODIFICATIONS.md.
 import { preservesDynTest } from "./checked-value-lifetimes.js";
 import { isStableReceiverOperand } from "../../ir/analysis.js";
 import {
@@ -153,8 +154,8 @@ function expressionPreservesEdges(
         e.fn === "dyn.classHash" ||
         e.fn === "dyn.classCase" ||
         e.fn === "dyn.classValueHash" ||
-        // jsval conversions (ir/jsval.ts) answer as the dyn forms they
-        // replace: moving a value between dyn and jsval reads it, and a
+        // jsword conversions (ir/jsword.ts) answer as the dyn forms they
+        // replace: moving a value between dyn and jsword reads it, and a
         // number, boolean or string crosses like its dynFrom box.
         e.fn === "js.fromDyn" ||
         e.fn === "js.toDyn" ||

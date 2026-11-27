@@ -1,6 +1,0 @@
-{
- "order": [
-  "<repo>/tests/corpus/2968-numeric-array-borrow.ts"
- ],
- "diags": []
-}

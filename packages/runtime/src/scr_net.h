@@ -1,9 +1,11 @@
+// This file was modified from scriptc (Apache-2.0); see MODIFICATIONS.md.
 /* scriptc runtime — node:net (scr_net.c) and the socket transport hooks.
  * Included by scr_runtime.h, which says where new declarations go. */
 #ifndef SCR_NET_H
 #define SCR_NET_H
 
 #include "scr_bytes.h"
+void scr_zlib_island_install(void);
 
 /* ── node:net (scr_net.c — compiled and linked ONLY when the program
  * uses the net surface, like scr_events.c; see native-toolchain.ts) ─────────────────
@@ -318,7 +320,11 @@ double scr_net_listen_port_dyn(const ScrDyn *v, const ScrStr *fence);
  * lookup(hostname, options, answer-closure) synchronously; answer_fn is
  * the emitted per-shape thunk that decodes the answer down to
  * scr_net_lookup_answer. Dials the answered addresses in order. */
-
+/* Blocking first-answer hostname resolution for the CLIENT bridges (the
+ * native fetch, the island's http/https client) — the dns.lookup
+ * precedent: getaddrinfo at call time. +1: the resolved IP, or a retain
+ * of `host` (already an IP literal / localhost / unresolvable — the dial
+ * then delivers Node's exact getaddrinfo ENOTFOUND cause). */
 ScrStr *scr_net_blocking_lookup(ScrStr *host /*borrowed*/);
 ScrNetSocket *scr_net_connect_lookup(double port, ScrStr *host /*borrowed*/,
                                       ScrClosure *lookup /*moves*/, void *answer_fn,
@@ -624,4 +630,7 @@ typedef struct ScrNetDynhTlsHooks {
 } ScrNetDynhTlsHooks;
 void scr_net_set_dynh_tls(const ScrNetDynhTlsHooks *hooks);
 
+/* The fork's frontend: net.connect/createConnection over a RUNTIME option bag (computed keys): Node-order
+ * validation, then the compiler-rendered fence; always leaves an exception pending. Borrowed. */
+void scr_net_connect_opts_chk(const ScrDyn *opts, const ScrStr *fence);
 #endif /* SCR_NET_H */

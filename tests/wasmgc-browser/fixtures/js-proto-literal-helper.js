@@ -1,0 +1,1 @@
+export function run() { const p = { hi() { return "hi"; } }; const o = { __proto__: p, a: 1 }, n = { __proto__: 5, b: 2 }; return [o.hi(), Object.keys(o).join(","), Object.getPrototypeOf(o) === p, Object.getPrototypeOf(n) === Object.prototype, Object.keys(n).join(",")].join(" "); }

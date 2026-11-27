@@ -1,6 +1,80 @@
-/* Native Fetch, AbortSignal, Headers, and ReadableStream implementations.
- * Requests use the native socket, TLS, and event-loop runtime. */
-/* Fetch's bad-port table applies to the initial request and each redirect. */
+// This file was modified from scriptc (Apache-2.0); see MODIFICATIONS.md.
+/* fetch over scriptc's OWN net stack — the static tier below is entirely
+ * engine-free, while the dynamic tier exposes the same transport through
+ * the island's full web API. Both use the
+ * scr_platform poller + scr_net sockets, scr_http's HTTP/1.1 client
+ * parser, scr_tls (vendored mbedTLS) for https, and zlib for response
+ * decompression. No libcurl anywhere: the architecture is Node's own
+ * (libuv sockets + OpenSSL + undici; ours: poller + mbedTLS + this
+ * unit), which is what lets fetch compile for every target the socket
+ * units reach — win32 included, where no system-libcurl contract
+ * exists. The curl implementation this replaces stays compilable for
+ * one release as the reference (scr_fetch_curl.c, selected by
+ * SCRIPTC_FETCH_CURL=1 at build time; same install symbol, same island
+ * surface, same fixture suite).
+ *
+ * Architecture (the JS half is UNCHANGED from the curl bridge):
+ * - The JS half (fetch_glue below) defines globalThis.fetch over two host
+ *   functions: host.start(req, cbs) begins a transfer and host.abort(id)
+ *   cancels one (response-body cancel). fetch() returns a REAL island
+ *   promise; the Response's body is an island ReadableStream fed by
+ *   C→engine callbacks as data arrives.
+ * - The C half is a fetch-layer client over scr_http's client machinery:
+ *   one ScrHttpClientReq per hop, minted runtime closures (caps[0] boxes
+ *   the transfer) as its response/data/end/error listeners, callbacks
+ *   firing from the net unit's dispatch station — the loop's own poller
+ *   sleeps on socket readiness, so this unit registers NO poll hook with
+ *   the island (the curl bridge needed one to sleep on curl's fds).
+ *   AbortSignal.timeout stays punctual through the loop's island-timer
+ *   deadline hook (scr_loop_set_island_deadline — armed island timers cap
+ *   the idle sleep exactly the way the curl poll capped its own).
+ * - fetch SEMANTICS, matched to Node/undici: HTTP errors RESOLVE (only
+ *   network failure rejects, with TypeError "fetch failed" — Node's exact
+ *   message); redirects are followed IN THIS UNIT (20 hops, fetch's
+ *   limit; 303 — and 301/302 for POST — rewrite to GET and drop the body
+ *   and its content-* headers, the fetch spec's rules; authorization is
+ *   stripped on cross-origin hops; response.url = the final URL without
+ *   its fragment, response.redirected set; a redirect hop's own body
+ *   never reaches the island). The request head carries undici's exact
+ *   default header set in undici's order (host, connection, the user
+ *   headers, accept, accept-language, sec-fetch-mode, user-agent,
+ *   accept-encoding — captured from Node 24 on the wire); gzip/zlib
+ *   response bodies arrive decompressed (accept-encoding advertises
+ *   "gzip, deflate", and content-encoding: gzip/x-gzip/deflate inflates
+ *   through zlib's 15+32 auto-detect — raw-deflate servers and br/zstd
+ *   are out of the slice, honestly: br/zstd are never offered).
+ * - DNS: scr_net dials IP literals only (Node's shape for its slice), so
+ *   this unit resolves hostnames with getaddrinfo AT HOP START — the
+ *   dns.lookup precedent (scr_dgram.c): synchronous resolution, first
+ *   answer wins; failures ride the socket's deferred
+ *   "getaddrinfo ENOTFOUND host" error so the rejection's cause is
+ *   Node's exact shape. TLS handshakes verify/SNI against the URL
+ *   HOSTNAME while the socket dials the resolved IP.
+ * - Proxies, matched to Node: undici's global fetch IGNORES http_proxy/
+ *   https_proxy unless NODE_USE_ENV_PROXY=1 opts in (Node 24's
+ *   EnvHttpProxyAgent). Opted in, http:// targets relay through the
+ *   proxy as absolute-URI requests (the classic forward-proxy wire form;
+ *   undici tunnels CONNECT, but the fixture proxy counts either form
+ *   identically), no_proxy exclusions honored. https-over-proxy
+ *   (CONNECT) is out of the slice, so an opted-in HTTPS proxy rejects
+ *   instead of silently bypassing the configured policy.
+ * - AbortSignal is wired in both tiers: an already-aborted signal rejects
+ *   with its reason before any transfer starts and aborting a live
+ *   transfer destroys the hop's connection. The dynamic tier uses the
+ *   island's Web/timer glue; the static tier below uses native signal
+ *   handles and the runtime's unref'd timer heap.
+ * - Error causes, Node's shapes: connect ECONNREFUSED ip:port /
+ *   getaddrinfo ENOTFOUND host pass through from the net layer with
+ *   their codes; a server that dies before the response head maps to
+ *   undici's cause exactly — "other side closed", code UND_ERR_SOCKET
+ *   (the curl bridge could only offer curl's own string there).
+ * - Ownership: each transfer is refcounted — the live registry holds +1
+ *   and every minted listener closure's box holds +1; settling releases
+ *   the engine callback object and the hop client, and teardown
+ *   (registered with the island) frees whatever is still live before the
+ *   engine goes down, so the island audit stays zero. */
+/* Fetch's bad-port table. Keep the static and dynamic transports on one
+ * source of truth: both start a fresh hop after every followed redirect. */
 #define SCR_FETCH_BAD_PORTS \
   1, 7, 9, 11, 13, 15, 17, 19, 20, 21, 22, 23, 25, 37, 42, 43, 53, 69, \
   77, 79, 87, 95, 101, 102, 103, 104, 109, 110, 111, 113, 115, 117, 119, \
@@ -8,6 +82,8 @@
   526, 530, 531, 532, 540, 548, 554, 556, 563, 587, 601, 636, 989, 990,   \
   993, 995, 1719, 1720, 1723, 2049, 3659, 4045, 5060, 5061, 6000, 6566,   \
   6665, 6666, 6667, 6668, 6669, 6679, 6697, 10080
+
+#ifndef SCR_DYNAMIC
 
 #include "scr_runtime.h"
 #include "scr_abort_signal.h"
@@ -30,6 +106,15 @@ int scr_dyn_abort_unit_linked = 1;
 #else
 static void sf_signal_install(void);
 #endif
+
+/*
+ * The static tier is a small native Web-platform island of its own:
+ * AbortSignal, Response, ReadableStream, its default reader, and its
+ * controller are SCR_DYN_HANDLE values. That preserves identity and
+ * permits normal typed member syntax while every operation still lands
+ * in C. Response promises resolve at the response HEAD; body chunks flow
+ * into the same native stream consumed by reader.read() or json().
+ */
 
 typedef struct SfTransfer SfTransfer;
 typedef struct SfStream SfStream;
@@ -267,14 +352,15 @@ struct SfTransfer {
 };
 
 /* the transfers in flight: +1 each, most recent first */
-static SfTransfer *sf_live;
+static SCR_TL SfTransfer *sf_live;
 #endif
 /* Weak registries: owners unlink themselves on destruction. They let the
  * fetch teardown sever opaque native→dyn edges before final cycle collection,
  * including otherwise-untraceable callback/reason→handle backedges. */
-static SfSignal *sf_reason_signals;
+static SCR_TL SfSignal *sf_callback_signals;
+static SCR_TL SfSignal *sf_reason_signals;
 #ifndef SCR_FETCH_SIGNAL_ONLY
-static SfStream *sf_callback_streams;
+static SCR_TL SfStream *sf_callback_streams;
 #endif
 
 static void sf_oom(void) {
@@ -878,11 +964,24 @@ static bool sf_signal_set(void *ptr, const char *key, size_t len,
  * that links this unit without the table — a library built from a fetch-using
  * module — resolves the reference weakly to NULL and reports release to no
  * one. */
+#ifdef SCR_THREAD_INSTANCES
+/* A thread-instanced runtime keeps the pointer thread-local, and a weak
+ * thread-local reference cannot resolve to NULL on COFF (the TLS offset's
+ * SECREL relocation refuses an absent symbol): the pointer is read through
+ * scr_json.c's accessor, a weak function reference instead. */
+const ScrDynHandlePropsHooks *scr_dyn_handle_props_hooks_now(void) __attribute__((weak));
+static void sf_notify_released(const void *handle) {
+  const ScrDynHandlePropsHooks *hooks = scr_dyn_handle_props_hooks_now ? scr_dyn_handle_props_hooks_now() : NULL;
+  if (hooks && hooks->released) hooks->released(handle);
+}
+#else
 extern SCR_TL const ScrDynHandlePropsHooks *scr_dyn_handle_props_hooks __attribute__((weak));
 static void sf_notify_released(const void *handle) {
-  if (scr_dyn_handle_props_hooks && scr_dyn_handle_props_hooks->released)
+  /* An unresolved weak reference has address 0: test it before reading. */
+  if (&scr_dyn_handle_props_hooks && scr_dyn_handle_props_hooks && scr_dyn_handle_props_hooks->released)
     scr_dyn_handle_props_hooks->released(handle);
 }
+#endif
 
 static void sf_stream_track_callbacks(SfStream *s) {
   if (s->callbacks_tracked || (!s->pull_cb && !s->cancel_cb)) return;
@@ -2623,14 +2722,23 @@ ScrDyn *scr_fetch_stream_from(ScrDyn *iterable) {
         "Cannot read properties of undefined (reading 'Symbol(Symbol.asyncIterator)')");
     return NULL;
   }
-  if (iterable->kind != SCR_DYN_ARR && iterable->kind != SCR_DYN_BYTES && iterable->kind != SCR_DYN_STR) {
+  if (iterable->kind != SCR_DYN_ARR &&
+       iterable->kind != SCR_DYN_BYTES &&
+       iterable->kind != SCR_DYN_STR &&
+       iterable->kind != SCR_DYN_JSVAL) {
     /* Reuse the checked-dynamic iterable error wording. */
     ScrDyn *packed = scr_dyn_iter_pack(iterable, NULL);
     scr_dyn_release(packed);
     return NULL;
   }
   ScrDyn *source = iterable;
-
+  if (iterable->kind == SCR_DYN_JSVAL) {
+    /* Static builds do not normally carry engine values. If one reaches
+     * this fallback, validate/drain it through the engine once; native
+     * arrays/bytes/strings retain their live container below. */
+    source = scr_dyn_iter_pack(iterable, NULL);
+    if (!source) return NULL;
+  }
   SfStream *s = sf_stream_new_native();
   s->from_dyn = scr_dyn_retain(source);
   sf_stream_schedule_initial_pull(s);
@@ -2733,14 +2841,21 @@ static ScrDyn *sf_stream_invoke(void *ptr, ScrDyn *self, const char *method,
     ScrDyn *options = argc ? args[0] : NULL;
     ScrDyn *materialized = NULL;
     ScrDyn *mode = NULL;
+    bool owned_mode = false;
     if (options && options->kind == SCR_DYN_TYPED_REF) {
       materialized = scr_dyn_typed_ref_materialize(options);
       options = materialized;
     }
     if (options && options->kind == SCR_DYN_OBJ) {
       mode = scr_dyn_obj_get(options, "mode", 4);
+    } else if (options && options->kind == SCR_DYN_JSVAL) {
+      ScrStr *key = scr_str_new("mode", 4);
+      mode = scr_dyn_isl_key_get(options, key);
+      scr_str_release(key);
+      owned_mode = mode != NULL;
     }
     bool byob = mode && mode->kind != SCR_DYN_UNDEF;
+    if (owned_mode) scr_dyn_release(mode);
     scr_dyn_release(materialized);
     if (scr_exc_pending()) return NULL;
     if (byob) {
@@ -4849,11 +4964,11 @@ static ScrUrl *sf_url_parse_quiet(ScrStr *text) {
   return url;
 }
 
-static bool sf_proxy_enabled;
-static char *sf_http_proxy;
-static char *sf_https_proxy;
-static char *sf_all_proxy;
-static char *sf_no_proxy;
+static SCR_TL bool sf_proxy_enabled;
+static SCR_TL char *sf_http_proxy;
+static SCR_TL char *sf_https_proxy;
+static SCR_TL char *sf_all_proxy;
+static SCR_TL char *sf_no_proxy;
 
 static char *sf_env_copy(const char *lower, const char *upper) {
   const char *value = scr_getenv(lower);
@@ -5746,10 +5861,6 @@ static void sf_stream_request_flush(SfStream *s) {
     scr_bytes_release(bytes);
     sf_chunk_release(c);
   }
-  /* A response body reused as an upload may have paused its source socket
-   * before fetch attached this consumer. Draining its queue creates demand
-   * just as a reader.read() does, so let the source transport deliver more. */
-  sf_response_resume_if_ready(s);
   if (s->error) {
     sf_transfer_stream_error(t, s->error);
   } else if (s->close_requested) {
@@ -6329,6 +6440,149 @@ static bool sf_redirect(SfTransfer *t, int status,
   return true;
 }
 
+/* ── host transport ──────────────────────────────────────────────────
+ * An embedding application may carry every request itself (the native host
+ * island: the Rust host's network layer, with its HTTP cache, cookie jar and
+ * the page origin's document root). The transfer then never reaches the
+ * socket units: start() takes the request, and the host answers on the loop
+ * thread with sf_host_settle (the final response after redirects, its body
+ * read in full and decoded) or sf_host_fail, which scr_fetch_install hands it. The Response,
+ * Headers, body stream and AbortSignal are this unit's own either way. The
+ * host follows redirects itself, so only the default redirect mode is taken;
+ * a streamed request body is refused (both reject with fetch's TypeError). */
+static SCR_TL const ScrFetchHostTransport *sf_host_transport;
+
+static void sf_lines_append(char **buf, size_t *len, size_t *cap,
+                            const char *data, size_t n) {
+  if (*len + n + 1 > *cap) {
+    size_t next = *cap ? *cap * 2 : 256;
+    while (next < *len + n + 1) next *= 2;
+    char *grown = realloc(*buf, next);
+    if (!grown) sf_oom();
+    *buf = grown;
+    *cap = next;
+  }
+  memcpy(*buf + *len, data, n);
+  *len += n;
+}
+
+static bool sf_start_host_hop(SfTransfer *t) {
+  if (t->redirect_mode != SF_REDIRECT_FOLLOW) {
+    sf_reject(t, "fetch failed");
+    return false;
+  }
+  const uint8_t *body = NULL;
+  size_t body_len = 0;
+  if (t->body && t->body->kind == SCR_DYN_STR) {
+    body = (const uint8_t *)t->body->v.str->data;
+    body_len = t->body->v.str->len;
+  } else if (t->body && t->body->kind == SCR_DYN_BYTES) {
+    body = t->body->v.bytes->data;
+    body_len = t->body->v.bytes->len * scr_bytes_elem_size(t->body->v.bytes->elem);
+  } else if (t->body) {
+    sf_reject(t, "fetch failed");
+    return false;
+  }
+  /* The user's headers, one "name: value" line each. */
+  char *lines = NULL;
+  size_t lines_len = 0, lines_cap = 0;
+  size_t pairs = (size_t)scr_arr_len(t->headers);
+  for (size_t i = 0; i + 1 < pairs; i += 2) {
+    ScrStr *name = scr_arr_get_ref(t->headers, (double)i);
+    ScrStr *value = scr_arr_get_ref(t->headers, (double)(i + 1));
+    sf_lines_append(&lines, &lines_len, &lines_cap, name->data, name->len);
+    sf_lines_append(&lines, &lines_len, &lines_cap, ": ", 2);
+    sf_lines_append(&lines, &lines_len, &lines_cap, value->data, value->len);
+    sf_lines_append(&lines, &lines_len, &lines_cap, "\n", 1);
+    scr_str_release(name);
+    scr_str_release(value);
+  }
+  ScrStr *url = sf_url_serialize(t->url);
+  /* The host's reference until it settles or fails the transfer. */
+  sf_retain(t);
+  sf_host_transport->start(t, t->method->data, t->method->len, url->data,
+                           url->len, lines ? lines : "", lines_len, body,
+                           body_len);
+  scr_str_release(url);
+  free(lines);
+  return true;
+}
+
+static void sf_host_settle(void *token, int status, const char *status_text,
+                           size_t status_text_len, const char *url,
+                           size_t url_len, const char *headers,
+                           size_t headers_len, const uint8_t *body,
+                           size_t body_len) {
+  SfTransfer *t = token;
+  if (!t->done) {
+    bool null_body = sf_response_has_null_body(t, status);
+    t->response_null_body = null_body;
+    ScrArr *raw_pairs = scr_arr_new(SCR_ELEM_STR, 16);
+    for (size_t at = 0; at < headers_len;) {
+      const char *line = headers + at;
+      const char *end = memchr(line, '\n', headers_len - at);
+      size_t n = end ? (size_t)(end - line) : headers_len - at;
+      at += n + 1;
+      const char *colon = memchr(line, ':', n);
+      if (!colon || colon == line) continue;
+      const char *value = colon + 1;
+      size_t value_len = n - (size_t)(value - line);
+      while (value_len && (*value == ' ' || *value == '\t')) { value++; value_len--; }
+      while (value_len && (value[value_len - 1] == ' ' || value[value_len - 1] == '\r')) value_len--;
+      scr_arr_push_ref(raw_pairs, scr_str_new(line, (size_t)(colon - line)));
+      scr_arr_push_ref(raw_pairs, scr_str_new(value, value_len));
+    }
+    ScrStr *requested = sf_url_serialize(t->url);
+    /* response.url carries no fragment (the fetch spec's serialization). */
+    const char *hash = url_len ? memchr(url, '#', url_len) : NULL;
+    size_t final_len = hash ? (size_t)(hash - url) : url_len;
+    ScrStr *final_url = final_len ? scr_str_new(url, final_len) : scr_str_retain(requested);
+    SfStream *stream = sf_stream_new_native();
+    stream->response_owner = t;
+    t->response_stream = sf_stream_retain(stream);
+    SfResponse *response = calloc(1, sizeof *response);
+    if (!response) sf_oom();
+    response->rc = 1;
+    response->body = sf_stream_retain(stream);
+    response->headers = sf_headers_new_response(raw_pairs);
+    response->url = final_url;
+    response->status_text = scr_str_new(status_text, status_text_len);
+    response->status = status;
+    response->redirected = t->redirected ||
+        final_url->len != requested->len ||
+        memcmp(final_url->data, requested->data, requested->len) != 0;
+    response->null_body = null_body;
+    scr_str_release(requested);
+    ScrDyn *boxed = scr_dyn_new_handle(response, SCR_DYNH_FETCH_RESPONSE);
+    sf_response_release(response);
+    t->response_sent = true;
+    ScrPromise *promise = t->promise;
+    t->promise = NULL;
+    scr_promise_fulfill_ref(promise, boxed, &scr_dyn_retain_v,
+                            &scr_dyn_release_v, NULL);
+    scr_promise_release(promise);
+    if (!t->done && !null_body && body_len > 0 && !stream->discarded) {
+      ScrBytes *chunk = scr_bytes_from_data(body, body_len);
+      sf_stream_enqueue_bytes(stream, chunk);
+      scr_bytes_release(chunk);
+    }
+    if (!t->done) {
+      sf_stream_close(stream);
+      sf_settle(t);
+    }
+    sf_stream_release(stream);
+  }
+  sf_release(t);
+}
+
+static void sf_host_fail(void *token, const char *message, size_t len) {
+  SfTransfer *t = token;
+  /* Node's own message for any network failure; the host's reason is a trace. */
+  if (getenv("SCRIPTC_FETCH_TRACE")) fprintf(stderr, "fetch: %.*s\n", (int)len, message);
+  if (!t->done) sf_reject(t, "fetch failed");
+  sf_release(t);
+}
+
 /* A CONNECT tunnel for one request: the head sent to the proxy, and the
  * target's TLS client context when the target is https. */
 typedef struct {
@@ -6381,6 +6635,7 @@ static void sf_tunnel_wrap(ScrNetSocket *sock, void *ctx) {
 
 static bool sf_start_hop(SfTransfer *t) {
   ScrUrl *url = t->url;
+  if (sf_host_transport) return sf_start_host_hop(t);
   bool https = sf_eq_ci(url->scheme, "https");
   int default_port = https ? 443 : 80;
   int port = sf_port(url, default_port);
@@ -6615,7 +6870,7 @@ static bool sf_response_init_object_like(const ScrDyn *init) {
   case SCR_DYN_HANDLE:
   case SCR_DYN_PROMISE:
   case SCR_DYN_TYPED_REF:
-
+  case SCR_DYN_JSVAL:
     return true;
   default:
     return false;
@@ -7345,7 +7600,7 @@ static ScrDyn *sf_fetch_function_call(ScrClosure *closure, ScrDyn *const *args, 
   ScrPromise *p = scr_fetch_input(argc ? args[0] : scr_dyn_undefined(), argc > 1 ? args[1] : scr_dyn_undefined());
   ScrDyn *result = scr_dyn_new_promise(p); scr_promise_release(p); return result;
 }
-static ScrDyn *sf_fetch_function_value;
+static SCR_TL ScrDyn *sf_fetch_function_value;
 static void sf_fetch_function_cleanup(void) {
   ScrDyn *value = sf_fetch_function_value;
   sf_fetch_function_value = NULL;
@@ -8075,6 +8330,9 @@ void scr_fetch_install(void) {
   static SCR_TL bool installed;
   if (installed) return;
   installed = true;
+  /* The embedding application's transport, when it offers one. */
+  if (scr_host_fetch_transport)
+    sf_host_transport = scr_host_fetch_transport(&sf_host_settle, &sf_host_fail);
   scr_tls_ca_install();
   scr_global_fetch_install(scr_fetch_function);
   sf_proxy_snapshot();
@@ -8128,5 +8386,1706 @@ static void sf_signal_install(void) {
 }
 
 #endif /* SCR_FETCH_SIGNAL_ONLY */
+
+#else /* SCR_DYNAMIC */
+
+#include "scr_runtime.h"
+#include "scr_url_internal.h"
+
+#include <stdio.h>
+#include <stdlib.h>
+#include <string.h>
+
+#include <zlib.h>
+
+#include "quickjs.h"
+
+static void fx_oom(void) {
+  fputs("scriptc: out of memory\n", stderr);
+  abort();
+}
+
+/* ── small string helpers (ScrStr names are not NUL-guaranteed at the
+ * lengths we compare, so everything is len-aware, ASCII-case-folded) ── */
+
+static bool fx_eq_ci(const char *a, size_t alen, const char *b) {
+  size_t blen = strlen(b);
+  if (alen != blen) return false;
+  for (size_t i = 0; i < alen; i++) {
+    char c = a[i];
+    if (c >= 'A' && c <= 'Z') c = (char)(c - 'A' + 'a');
+    if (c != b[i]) return false;
+  }
+  return true;
+}
+
+/* HTTP field values and reason phrases are ByteStrings: each wire octet
+ * becomes the same U+00XX code point in JavaScript. QuickJS string creation
+ * consumes UTF-8, so expand Latin-1 before crossing into the engine. */
+static ScrStr *fx_latin1_to_utf8(const ScrStr *raw) {
+  size_t extra = 0;
+  for (size_t i = 0; i < raw->len; i++) {
+    if ((unsigned char)raw->data[i] >= 0x80) extra++;
+  }
+  if (extra == 0) return scr_str_retain((ScrStr *)raw);
+  char *utf8 = malloc(raw->len + extra);
+  if (!utf8) fx_oom();
+  size_t at = 0;
+  for (size_t i = 0; i < raw->len; i++) {
+    unsigned char byte = (unsigned char)raw->data[i];
+    if (byte < 0x80) {
+      utf8[at++] = (char)byte;
+    } else {
+      utf8[at++] = (char)(0xc0 | (byte >> 6));
+      utf8[at++] = (char)(0x80 | (byte & 0x3f));
+    }
+  }
+  ScrStr *out = scr_str_new(utf8, at);
+  free(utf8);
+  return out;
+}
+
+static bool fx_str_is(const ScrStr *s, const char *lit) { return fx_eq_ci(s->data, s->len, lit); }
+
+static ScrStr *fx_location_to_utf8(const ScrStr *raw) {
+  ScrBytes *bytes = scr_bytes_new(SCR_BYTES_U8, (double)raw->len);
+  if (raw->len > 0) memcpy(bytes->data, raw->data, raw->len);
+  ScrStr *encoding = scr_str_new("utf8", 4);
+  ScrStr *out = scr_bytes_to_str(bytes, encoding);
+  scr_str_release(encoding);
+  scr_bytes_release(bytes);
+  return out;
+}
+
+/* Does the flat [name, value, ...] pairs array carry `name`? */
+static bool fx_pairs_have(ScrArr *pairs, const char *name) {
+  size_t n = (size_t)scr_arr_len(pairs);
+  bool found = false;
+  for (size_t i = 0; i + 1 < n && !found; i += 2) {
+    ScrStr *nm = (ScrStr *)scr_arr_get_ref(pairs, (double)i);
+    found = fx_eq_ci(nm->data, nm->len, name);
+    scr_str_release(nm);
+  }
+  return found;
+}
+
+static void fx_pairs_push(ScrArr *pairs, const char *name, const char *value, size_t vlen) {
+  scr_arr_push_ref(pairs, scr_str_new(name, strlen(name)));
+  scr_arr_push_ref(pairs, scr_str_new(value, vlen));
+}
+
+static bool fx_content_length(ScrArr *headers, bool *present_out,
+                              size_t *length_out) {
+  bool present = false;
+  size_t length = 0;
+  size_t n = (size_t)scr_arr_len(headers);
+  for (size_t i = 0; i + 1 < n; i += 2) {
+    ScrStr *name = scr_arr_get_ref(headers, (double)i);
+    ScrStr *value = scr_arr_get_ref(headers, (double)(i + 1));
+    if (!fx_eq_ci(name->data, name->len, "content-length")) {
+      scr_str_release(name);
+      scr_str_release(value);
+      continue;
+    }
+    if (present) {
+      scr_str_release(name);
+      scr_str_release(value);
+      return false;
+    }
+    size_t start = 0;
+    size_t end = value->len;
+    while (start < end &&
+           (value->data[start] == ' ' || value->data[start] == '\t')) {
+      start++;
+    }
+    while (end > start &&
+           (value->data[end - 1] == ' ' ||
+            value->data[end - 1] == '\t')) {
+      end--;
+    }
+    bool valid = start < end;
+    size_t parsed = 0;
+    for (size_t j = start; j < end && valid; j++) {
+      unsigned char c = (unsigned char)value->data[j];
+      if (c < '0' || c > '9') {
+        valid = false;
+        break;
+      }
+      size_t digit = (size_t)(c - '0');
+      if (parsed > (SIZE_MAX - digit) / 10) {
+        valid = false;
+        break;
+      }
+      parsed = parsed * 10 + digit;
+    }
+    scr_str_release(name);
+    scr_str_release(value);
+    if (!valid) return false;
+    present = true;
+    length = parsed;
+  }
+  *present_out = present;
+  *length_out = length;
+  return true;
+}
+
+/* ── transfers ───────────────────────────────────────────────────────── */
+
+enum {
+  FX_REDIRECT_FOLLOW,
+  FX_REDIRECT_ERROR,
+  FX_REDIRECT_MANUAL,
+};
+
+typedef struct FxTransfer {
+  size_t rc; /* the live registry's +1 plus one per minted listener box */
+  int id;
+  JSContext *ctx;
+  JSValue cbs; /* { onResponse, onData, onEnd, onError } — owned while live */
+  bool cbs_live;
+  /* the request, as it evolves across redirect hops */
+  ScrStr *method;  /* owned */
+  ScrArr *headers; /* flat [name, value, ...] user pairs — owned */
+  ScrBytes *body;  /* owned, NULL = none */
+  ScrUrl *url;     /* the CURRENT hop's URL — owned */
+  int redirect_mode;
+  int hops;
+  bool redirected;
+  bool request_streaming;
+  bool use_env_proxy;
+  bool request_ended;
+  bool request_has_content_length;
+  size_t request_content_length;
+  size_t request_body_sent;
+  /* the live hop */
+  ScrHttpClientReq *client; /* +1, NULL between/after hops */
+  bool responded; /* onResponse fired (the final response) */
+  bool cancelled; /* island aborted/cancelled: die silently */
+  bool done;      /* settled: no callback ever fires again */
+  /* response decompression */
+  bool inflating;
+  bool inflate_member_end;
+  z_stream zs;
+  struct FxTransfer *next;
+} FxTransfer;
+
+static SCR_TL FxTransfer *fx_live = NULL; /* registry: +1 each */
+static SCR_TL size_t fx_nlive = 0;
+static SCR_TL int fx_next_id = 1;
+
+static FxTransfer *fx_retain(FxTransfer *t) {
+  t->rc++;
+  return t;
+}
+
+static void fx_release(FxTransfer *t) {
+  if (--t->rc > 0) return;
+  scr_str_release(t->method);
+  scr_arr_release(t->headers);
+  if (t->body) scr_bytes_release(t->body);
+  if (t->url) scr_url_release(t->url);
+  if (t->client) scr_http_client_release(t->client);
+  if (t->inflating) inflateEnd(&t->zs);
+  if (t->cbs_live) JS_FreeValue(t->ctx, t->cbs);
+  free(t);
+}
+
+static void *fx_retain_v(void *p) { return fx_retain((FxTransfer *)p); }
+static void fx_release_v(void *p) { fx_release((FxTransfer *)p); }
+
+/* Settle: the transfer is over (delivered, failed, or aborted) — drop the
+ * hop client, free the engine callbacks, and leave the registry. Idempotent. */
+static void fx_settle(FxTransfer *t) {
+  if (t->done) return;
+  t->done = true;
+  if (t->client) {
+    scr_http_client_release(t->client);
+    t->client = NULL;
+  }
+  if (t->cbs_live) {
+    JS_FreeValue(t->ctx, t->cbs);
+    t->cbs = JS_UNDEFINED;
+    t->cbs_live = false;
+  }
+  for (FxTransfer **link = &fx_live; *link; link = &(*link)->next) {
+    if (*link == t) {
+      *link = t->next;
+      fx_nlive--;
+      fx_release(t); /* the registry's +1 */
+      return;
+    }
+  }
+}
+
+/* Calls one callback off the cbs object, swallowing (but reporting) any
+ * engine exception — the callbacks are our own glue and must not throw.
+ * Entered from the net dispatch station (the main stack): re-anchor the
+ * engine's stack-overflow check first, the every-island-entry rule. */
+static void fx_call(FxTransfer *t, const char *name, int argc, JSValueConst *argv) {
+  if (!t->cbs_live) return;
+  scr_island_host_enter();
+  JSContext *ctx = t->ctx;
+  JSValue fn = JS_GetPropertyStr(ctx, t->cbs, name);
+  JSValue r = JS_Call(ctx, fn, JS_UNDEFINED, argc, argv);
+  JS_FreeValue(ctx, fn);
+  if (JS_IsException(r)) {
+    JSValue e = JS_GetException(ctx);
+    const char *msg = JS_ToCString(ctx, e);
+    fprintf(stderr, "scriptc: fetch internal callback '%s' threw: %s\n", name,
+            msg ? msg : "?");
+    if (msg) JS_FreeCString(ctx, msg);
+    JS_FreeValue(ctx, e);
+    return;
+  }
+  JS_FreeValue(ctx, r);
+}
+
+/* Network failure → onError(detail, code) → the glue's TypeError "fetch
+ * failed" with the classified cause. Settles the transfer. */
+static void fx_error(FxTransfer *t, const char *detail, const char *code) {
+  if (t->done || t->cancelled) {
+    fx_settle(t);
+    return;
+  }
+  JSContext *ctx = t->ctx;
+  JSValue args[2];
+  args[0] = JS_NewString(ctx, detail);
+  args[1] = code ? JS_NewString(ctx, code) : JS_UNDEFINED;
+  fx_call(t, "onError", 2, (JSValueConst *)args);
+  JS_FreeValue(ctx, args[0]);
+  JS_FreeValue(ctx, args[1]);
+  fx_settle(t);
+}
+
+static void fx_request_length_mismatch(FxTransfer *t) {
+  if (t->client) scr_http_client_destroy(t->client);
+  fx_error(t, "Request body length does not match content-length header",
+           "UND_ERR_REQ_CONTENT_LENGTH_MISMATCH");
+}
+
+/* ── minted listener closures (caps[0] boxes the transfer) ───────────── */
+
+static ScrClosure *fx_closure(FxTransfer *t, void *fn) {
+  /* fn doubles as the closure's own entry: zero-payload lists (req 'end')
+   * call cb->fn(cb) directly, payload lists call the fn stored beside the
+   * registration — both routes land on the same handler here. */
+  ScrClosure *cb = scr_closure_new(fn, 1);
+  ScrBox *box = scr_box_new_obj(&fx_retain_v, &fx_release_v, NULL);
+  scr_box_set_ref(box, fx_retain(t));
+  cb->caps[0] = box;
+  return cb;
+}
+
+/* +1 — release after use. */
+static FxTransfer *fx_from(ScrClosure *cb) { return (FxTransfer *)scr_box_get_ref(cb->caps[0]); }
+
+/* ── URL helpers ─────────────────────────────────────────────────────── */
+
+/* scheme://[userinfo@]host[:port]path[?query][#fragment] — response.url
+ * and the proxy's absolute-URI form exclude the fragment (Node). */
+static ScrStr *fx_url_serialize(const ScrUrl *u, bool with_fragment) {
+  size_t cap = u->scheme->len + u->userinfo->len + u->host->len + u->port->len +
+               u->path->len + u->query->len + u->fragment->len + 8;
+  char *buf = malloc(cap);
+  if (!buf) fx_oom();
+  size_t n = 0;
+  memcpy(buf + n, u->scheme->data, u->scheme->len);
+  n += u->scheme->len;
+  buf[n++] = ':';
+  if (u->has_authority) {
+    buf[n++] = '/';
+    buf[n++] = '/';
+    if (u->userinfo->len > 0) {
+      memcpy(buf + n, u->userinfo->data, u->userinfo->len);
+      n += u->userinfo->len;
+      buf[n++] = '@';
+    }
+    memcpy(buf + n, u->host->data, u->host->len);
+    n += u->host->len;
+    if (u->port->len > 0) {
+      buf[n++] = ':';
+      memcpy(buf + n, u->port->data, u->port->len);
+      n += u->port->len;
+    }
+  }
+  if (u->path->len > 0) {
+    memcpy(buf + n, u->path->data, u->path->len);
+    n += u->path->len;
+  } else {
+    buf[n++] = '/';
+  }
+  memcpy(buf + n, u->query->data, u->query->len);
+  n += u->query->len;
+  if (with_fragment) {
+    memcpy(buf + n, u->fragment->data, u->fragment->len);
+    n += u->fragment->len;
+  }
+  ScrStr *out = scr_str_new(buf, n);
+  free(buf);
+  return out;
+}
+
+/* Parse an absolute URL, answering NULL (static exception CLEARED) instead
+ * of throwing — this unit runs inside engine host calls and the net
+ * dispatch, where a pending static exception belongs to nobody. */
+static ScrUrl *fx_url_parse(ScrStr *s) {
+  ScrUrl *u = scr_url_new(s);
+  if (!u) scr_exc_clear();
+  return u;
+}
+
+/* Resolve a Location header against the current hop's URL. Handles the
+ * absolute form plus the relative shapes real servers send (//authority,
+ * /rooted, ?query, plain relative); everything reparses through the
+ * WHATWG parser so dot segments and encoding normalize consistently. */
+static bool fx_same_scheme_relative(const ScrUrl *base,
+                                    const ScrStr *loc) {
+  if (loc->len <= base->scheme->len ||
+      loc->data[base->scheme->len] != ':') {
+    return false;
+  }
+  for (size_t i = 0; i < base->scheme->len; i++) {
+    char a = loc->data[i];
+    char b = base->scheme->data[i];
+    if (a >= 'A' && a <= 'Z') a = (char)(a - 'A' + 'a');
+    if (b >= 'A' && b <= 'Z') b = (char)(b - 'A' + 'a');
+    if (a != b) return false;
+  }
+  size_t tail = base->scheme->len + 1;
+  return loc->len - tail < 2 ||
+         !((loc->data[tail] == '/' || loc->data[tail] == '\\') &&
+           (loc->data[tail + 1] == '/' ||
+            loc->data[tail + 1] == '\\'));
+}
+
+static ScrUrl *fx_resolve(const ScrUrl *base, const ScrStr *loc) {
+  bool same_scheme_relative = fx_same_scheme_relative(base, loc);
+  const char *ref_data =
+      loc->data + (same_scheme_relative ? base->scheme->len + 1 : 0);
+  size_t ref_len =
+      loc->len - (same_scheme_relative ? base->scheme->len + 1 : 0);
+  if (!same_scheme_relative) {
+    ScrStr *abs_try = scr_str_new(loc->data, loc->len);
+    ScrUrl *u = fx_url_parse(abs_try);
+    scr_str_release(abs_try);
+    if (u) return u;
+  }
+
+  /*
+   * Empty and fragment-only references preserve the complete base path
+   * and query. The request serializer omits the fragment, but resolving it
+   * first keeps the redirect on the current resource rather than its parent.
+   */
+  if (ref_len == 0 || ref_data[0] == '#') {
+    ScrStr *base_text = fx_url_serialize(base, false);
+    size_t len = base_text->len + ref_len;
+    char *joined = malloc(len);
+    if (!joined) fx_oom();
+    memcpy(joined, base_text->data, base_text->len);
+    memcpy(joined + base_text->len, ref_data, ref_len);
+    ScrStr *text = scr_str_new(joined, len);
+    free(joined);
+    scr_str_release(base_text);
+    ScrUrl *out = fx_url_parse(text);
+    scr_str_release(text);
+    return out;
+  }
+
+  /* relative: assemble scheme://authority + resolved path/query */
+  size_t cap = base->scheme->len + base->userinfo->len + base->host->len + base->port->len +
+               base->path->len + base->query->len + ref_len + 16;
+  char *buf = malloc(cap);
+  if (!buf) fx_oom();
+  size_t n = 0;
+  memcpy(buf + n, base->scheme->data, base->scheme->len);
+  n += base->scheme->len;
+  buf[n++] = ':';
+  if (ref_len >= 2 &&
+      (ref_data[0] == '/' || ref_data[0] == '\\') &&
+      (ref_data[1] == '/' || ref_data[1] == '\\')) {
+    memcpy(buf + n, ref_data, ref_len);
+    n += ref_len;
+  } else {
+    buf[n++] = '/';
+    buf[n++] = '/';
+    if (base->userinfo->len > 0) {
+      memcpy(buf + n, base->userinfo->data, base->userinfo->len);
+      n += base->userinfo->len;
+      buf[n++] = '@';
+    }
+    memcpy(buf + n, base->host->data, base->host->len);
+    n += base->host->len;
+    if (base->port->len > 0) {
+      buf[n++] = ':';
+      memcpy(buf + n, base->port->data, base->port->len);
+      n += base->port->len;
+    }
+    if (ref_len > 0 && (ref_data[0] == '/' || ref_data[0] == '\\')) {
+      memcpy(buf + n, ref_data, ref_len);
+      n += ref_len;
+    } else if (ref_len > 0 && ref_data[0] == '?') {
+      memcpy(buf + n, base->path->data, base->path->len);
+      n += base->path->len;
+      memcpy(buf + n, ref_data, ref_len);
+      n += ref_len;
+    } else {
+      /* plain relative: replace everything after the path's last '/' */
+      size_t keep = 0;
+      for (size_t i = 0; i < base->path->len; i++) {
+        if (base->path->data[i] == '/') keep = i + 1;
+      }
+      memcpy(buf + n, base->path->data, keep);
+      n += keep;
+      if (keep == 0) buf[n++] = '/';
+      memcpy(buf + n, ref_data, ref_len);
+      n += ref_len;
+    }
+  }
+  ScrStr *s = scr_str_new(buf, n);
+  free(buf);
+  ScrUrl *out = fx_url_parse(s);
+  scr_str_release(s);
+  return out;
+}
+
+/* The URL host with IPv6 brackets stripped (the dial/SNI form). +1. */
+static ScrStr *fx_bare_host(const ScrStr *host) {
+  if (host->len >= 2 && host->data[0] == '[' && host->data[host->len - 1] == ']') {
+    return scr_str_new(host->data + 1, host->len - 2);
+  }
+  return scr_str_retain((ScrStr *)host);
+}
+
+static int fx_url_port(const ScrUrl *u, int deflt) {
+  if (u->port->len == 0) return deflt;
+  int p = 0;
+  for (size_t i = 0; i < u->port->len; i++) p = p * 10 + (u->port->data[i] - '0');
+  return p;
+}
+
+static bool fx_bad_port(int port) {
+  static const int ports[] = {SCR_FETCH_BAD_PORTS};
+  for (size_t i = 0; i < sizeof ports / sizeof ports[0]; i++) {
+    if (port == ports[i]) return true;
+  }
+  return false;
+}
+
+/* ── env proxy (NODE_USE_ENV_PROXY=1, undici's EnvHttpProxyAgent) ────── */
+
+static SCR_TL bool fx_proxy_enabled;
+static SCR_TL char *fx_http_proxy;
+static SCR_TL char *fx_https_proxy;
+static SCR_TL char *fx_all_proxy;
+static SCR_TL char *fx_no_proxy;
+
+static char *fx_env_copy(const char *lower, const char *upper) {
+  const char *v = scr_getenv(lower);
+  if (v == NULL || v[0] == '\0') v = scr_getenv(upper);
+  if (v == NULL || v[0] == '\0') return NULL;
+  size_t len = strlen(v);
+  char *copy = malloc(len + 1);
+  if (!copy) fx_oom();
+  memcpy(copy, v, len + 1);
+  return copy;
+}
+
+static void fx_proxy_snapshot(void) {
+  const char *optin = scr_getenv("NODE_USE_ENV_PROXY");
+  fx_proxy_enabled = optin != NULL && strcmp(optin, "1") == 0;
+  /* Snapshot even without Node's global opt-in: Vercel's dispatcher is a
+   * request-local proxy activation over the same startup environment. */
+  fx_http_proxy = fx_env_copy("http_proxy", "HTTP_PROXY");
+  fx_https_proxy = fx_env_copy("https_proxy", "HTTPS_PROXY");
+  fx_all_proxy = fx_env_copy("all_proxy", "ALL_PROXY");
+  fx_no_proxy = fx_env_copy("no_proxy", "NO_PROXY");
+}
+
+static void fx_proxy_snapshot_free(void) {
+  free(fx_http_proxy);
+  free(fx_https_proxy);
+  free(fx_all_proxy);
+  free(fx_no_proxy);
+  fx_http_proxy = fx_https_proxy = fx_all_proxy = fx_no_proxy = NULL;
+}
+
+static int fx_hex_value(char c) {
+  if (c >= '0' && c <= '9') return c - '0';
+  if (c >= 'a' && c <= 'f') return c - 'a' + 10;
+  if (c >= 'A' && c <= 'F') return c - 'A' + 10;
+  return -1;
+}
+
+static ScrStr *fx_proxy_authorization(const ScrStr *userinfo) {
+  char *plain = malloc(userinfo->len + 1);
+  if (!plain) fx_oom();
+  size_t plain_len = 0;
+  bool has_separator = false;
+  for (size_t i = 0; i < userinfo->len;) {
+    char c = userinfo->data[i];
+    if (c == '%' && i + 2 < userinfo->len) {
+      int hi = fx_hex_value(userinfo->data[i + 1]);
+      int lo = fx_hex_value(userinfo->data[i + 2]);
+      if (hi >= 0 && lo >= 0) {
+        plain[plain_len++] = (char)((hi << 4) | lo);
+        i += 3;
+        continue;
+      }
+    }
+    if (c == ':') has_separator = true;
+    plain[plain_len++] = c;
+    i++;
+  }
+  if (!has_separator) plain[plain_len++] = ':';
+
+  static const char b64[] =
+      "ABCDEFGHIJKLMNOPQRSTUVWXYZabcdefghijklmnopqrstuvwxyz0123456789+/";
+  size_t encoded_len = ((plain_len + 2) / 3) * 4;
+  char *header = malloc(6 + encoded_len);
+  if (!header) fx_oom();
+  memcpy(header, "Basic ", 6);
+  size_t out = 6;
+  for (size_t i = 0; i < plain_len; i += 3) {
+    unsigned b0 = (unsigned char)plain[i];
+    unsigned b1 = i + 1 < plain_len ? (unsigned char)plain[i + 1] : 0;
+    unsigned b2 = i + 2 < plain_len ? (unsigned char)plain[i + 2] : 0;
+    unsigned triple = (b0 << 16) | (b1 << 8) | b2;
+    header[out++] = b64[(triple >> 18) & 63];
+    header[out++] = b64[(triple >> 12) & 63];
+    header[out++] = i + 1 < plain_len ? b64[(triple >> 6) & 63] : '=';
+    header[out++] = i + 2 < plain_len ? b64[triple & 63] : '=';
+  }
+  free(plain);
+  ScrStr *result = scr_str_new(header, out);
+  free(header);
+  return result;
+}
+
+/* no_proxy: comma/space-separated host suffixes; "*" excludes everything;
+ * a leading dot or "*." is stripped; entries match the host exactly or at
+ * a dot boundary. Port qualifiers (host:port) require the port to match. */
+static bool fx_no_proxy_match(const char *list, const ScrStr *host, int port) {
+  const char *p = list;
+  while (*p) {
+    while (*p == ',' || *p == ' ' || *p == '\t') p++;
+    const char *start = p;
+    while (*p && *p != ',' && *p != ' ' && *p != '\t') p++;
+    size_t len = (size_t)(p - start);
+    if (len == 0) continue;
+    if (len == 1 && start[0] == '*') return true;
+    /* split a :port qualifier */
+    size_t hlen = len;
+    long eport = -1;
+    if (start[0] == '[') {
+      size_t close = 1;
+      while (close < len && start[close] != ']') close++;
+      if (close < len && close + 1 < len && start[close + 1] == ':') {
+        hlen = close + 1;
+        eport = strtol(start + close + 2, NULL, 10);
+      }
+    } else {
+      for (size_t i = 0; i < len; i++) {
+        if (start[i] == ':') {
+          hlen = i;
+          eport = strtol(start + i + 1, NULL, 10);
+          break;
+        }
+      }
+    }
+    if (hlen >= 2 && start[0] == '*' && start[1] == '.') {
+      start += 2;
+      hlen -= 2;
+    } else if (hlen > 0 && start[0] == '.') {
+      start++;
+      hlen--;
+    }
+    if (hlen == 0) continue;
+    if (eport >= 0 && eport != port) continue;
+    if (host->len == hlen) {
+      bool eq = true;
+      for (size_t i = 0; i < hlen && eq; i++) {
+        char a = host->data[i], b = start[i];
+        if (a >= 'A' && a <= 'Z') a = (char)(a - 'A' + 'a');
+        if (b >= 'A' && b <= 'Z') b = (char)(b - 'A' + 'a');
+        eq = a == b;
+      }
+      if (eq) return true;
+    } else if (host->len > hlen && host->data[host->len - hlen - 1] == '.') {
+      bool eq = true;
+      for (size_t i = 0; i < hlen && eq; i++) {
+        char a = host->data[host->len - hlen + i], b = start[i];
+        if (a >= 'A' && a <= 'Z') a = (char)(a - 'A' + 'a');
+        if (b >= 'A' && b <= 'Z') b = (char)(b - 'A' + 'a');
+        eq = a == b;
+      }
+      if (eq) return true;
+    }
+  }
+  return false;
+}
+
+/* The proxy for this hop's target, parsed (+1), or NULL for direct. */
+static ScrUrl *fx_proxy_for(const ScrUrl *target, bool https, int target_port,
+                            bool enabled, bool *invalid) {
+  *invalid = false;
+  if (!enabled) return NULL;
+  const char *proxy = https ? fx_https_proxy : fx_http_proxy;
+  if (proxy == NULL) proxy = fx_all_proxy;
+  if (proxy == NULL) return NULL;
+  if (fx_no_proxy != NULL &&
+      fx_no_proxy_match(fx_no_proxy, target->host, target_port)) {
+    return NULL;
+  }
+  ScrStr *ps = scr_str_new(proxy, strlen(proxy));
+  ScrUrl *u = fx_url_parse(ps);
+  scr_str_release(ps);
+  *invalid = u == NULL;
+  return u;
+}
+
+/* ── DNS (the dns.lookup precedent: getaddrinfo at hop start) ────────── */
+
+/* The address to DIAL for `host` (+1): brackets strip, then the shared
+ * blocking lookup (scr_net.c) — IP literals and localhost pass through,
+ * hostnames resolve first-answer, and resolution failure answers the
+ * HOSTNAME unchanged so the dial's deferred "getaddrinfo ENOTFOUND host"
+ * error is Node's exact cause. */
+static ScrStr *fx_dial_host(const ScrStr *host) {
+  ScrStr *bare = fx_bare_host(host);
+  ScrStr *out = scr_net_blocking_lookup(bare);
+  scr_str_release(bare);
+  return out;
+}
+
+/* ── the hop ─────────────────────────────────────────────────────────── */
+
+static void fx_on_response(ScrClosure *cb, ScrHttpReq *res /*+1*/);
+static void fx_on_client_error(ScrClosure *cb, ScrStr *msg /*borrowed*/);
+static void fx_on_upgrade(
+    ScrClosure *cb, ScrHttpReq *res, ScrNetSocket *socket,
+    ScrBytes *head);
+
+static void fx_start_hop(FxTransfer *t) {
+  if (!t->request_streaming && t->request_has_content_length) {
+    size_t body_len = t->body ? t->body->len : 0;
+    if (body_len != t->request_content_length) {
+      fx_request_length_mismatch(t);
+      return;
+    }
+  }
+  ScrUrl *u = t->url;
+  bool https = fx_str_is(u->scheme, "https");
+  int default_port = https ? 443 : 80;
+  int port = fx_url_port(u, default_port);
+  if (fx_bad_port(port)) {
+    fx_error(t, "fetch failed", NULL);
+    return;
+  }
+  bool invalid_proxy = false;
+  ScrUrl *proxy = fx_proxy_for(
+      u, https, port, fx_proxy_enabled || t->use_env_proxy, &invalid_proxy);
+  bool proxy_http = proxy && fx_str_is(proxy->scheme, "http");
+  bool proxy_https = proxy && fx_str_is(proxy->scheme, "https");
+  if (invalid_proxy || (proxy && !proxy_http && !proxy_https) ||
+      (https && proxy)) {
+    if (proxy) scr_url_release(proxy);
+    fx_error(t, "fetch failed", NULL);
+    return;
+  }
+
+  /* undici's request head, in undici's order: host, connection, the user
+   * headers, then the fetch defaults for whatever the user left unset. */
+  size_t nuser = (size_t)scr_arr_len(t->headers);
+  ScrArr *pairs = scr_arr_new(SCR_ELEM_STR, nuser + 16);
+  char authority[300];
+  int alen;
+  if (port != default_port) {
+    alen = snprintf(authority, sizeof authority, "%.*s:%d", (int)u->host->len, u->host->data, port);
+  } else {
+    alen = snprintf(authority, sizeof authority, "%.*s", (int)u->host->len, u->host->data);
+  }
+  fx_pairs_push(pairs, "host", authority, (size_t)alen);
+  if (!fx_pairs_have(t->headers, "connection")) {
+    fx_pairs_push(pairs, "connection", "keep-alive", 10);
+  }
+  for (size_t i = 0; i + 1 < nuser; i += 2) {
+    ScrStr *name = scr_arr_get_ref(t->headers, (double)i);
+    ScrStr *value = scr_arr_get_ref(t->headers, (double)(i + 1));
+    if (fx_eq_ci(name->data, name->len, "host")) {
+      scr_str_release(name);
+      scr_str_release(value);
+      continue;
+    }
+    scr_arr_push_ref(pairs, name);
+    scr_arr_push_ref(pairs, value);
+  }
+  if (proxy && proxy->userinfo->len > 0 &&
+      !fx_pairs_have(t->headers, "proxy-authorization")) {
+    ScrStr *authorization = fx_proxy_authorization(proxy->userinfo);
+    fx_pairs_push(pairs, "proxy-authorization",
+                  authorization->data, authorization->len);
+    scr_str_release(authorization);
+  }
+  if (!fx_pairs_have(t->headers, "accept")) fx_pairs_push(pairs, "accept", "*/*", 3);
+  if (!fx_pairs_have(t->headers, "accept-language")) fx_pairs_push(pairs, "accept-language", "*", 1);
+  if (!fx_pairs_have(t->headers, "sec-fetch-mode")) fx_pairs_push(pairs, "sec-fetch-mode", "cors", 4);
+  if (!fx_pairs_have(t->headers, "user-agent")) fx_pairs_push(pairs, "user-agent", "node", 4);
+  if (!fx_pairs_have(t->headers, "accept-encoding")) {
+    fx_pairs_push(pairs, "accept-encoding", "gzip, deflate", 13);
+  }
+
+  /* the request-target and the wire to dial */
+  ScrStr *path;
+  ScrStr *dial;
+  int dial_port;
+  if (proxy != NULL) {
+    path = fx_url_serialize(u, false); /* absolute-URI through the proxy */
+    dial = fx_dial_host(proxy->host);
+    dial_port = fx_url_port(proxy, proxy_https ? 443 : 80);
+  } else {
+    if (u->query->len > 0) {
+      size_t plen = (u->path->len > 0 ? u->path->len : 1) + u->query->len;
+      char *pb = malloc(plen);
+      if (!pb) fx_oom();
+      size_t n = 0;
+      if (u->path->len > 0) {
+        memcpy(pb, u->path->data, u->path->len);
+        n = u->path->len;
+      } else {
+        pb[n++] = '/';
+      }
+      memcpy(pb + n, u->query->data, u->query->len);
+      n += u->query->len;
+      path = scr_str_new(pb, n);
+      free(pb);
+    } else {
+      path = u->path->len > 0 ? scr_str_retain(u->path) : scr_str_new("/", 1);
+    }
+    dial = fx_dial_host(u->host);
+    dial_port = port;
+  }
+
+  ScrHttpClientReq *c;
+  if (https || proxy_https) {
+    ScrStr *sni =
+        fx_bare_host(https ? u->host : proxy->host);
+    void *cli = scr_tls_fetch_client_ctx(sni, true);
+    scr_str_release(sni);
+    c = scr_http_request_ex(dial, dial_port, path, t->method, 0, pairs, false, NULL, NULL,
+                             443, &scr_tls_fetch_client_wrap, cli);
+  } else {
+    c = scr_http_request_ex(dial, dial_port, path, t->method, 0, pairs, false, NULL, NULL,
+                             80, NULL, NULL);
+  }
+  scr_str_release(dial);
+  scr_str_release(path);
+  scr_arr_release(pairs);
+  if (proxy) scr_url_release(proxy);
+
+  t->client = c; /* the constructor's +1 */
+  t->request_ended = false;
+  scr_http_client_on_response(c, fx_closure(t, (void *)&fx_on_response), &fx_on_response, true);
+  scr_http_client_on_upgrade(c, fx_closure(t, (void *)&fx_on_upgrade), &fx_on_upgrade, true);
+  scr_http_client_on_error(c, fx_closure(t, (void *)&fx_on_client_error), &fx_on_client_error, false);
+  if (t->body != NULL) {
+    scr_http_client_end_bytes(c, t->body);
+    t->request_ended = true;
+  } else if (!t->request_streaming) {
+    scr_http_client_end(c);
+    t->request_ended = true;
+  }
+}
+
+/* ── redirects ───────────────────────────────────────────────────────── */
+
+static void fx_strip_header(ScrArr **headers, const char *name) {
+  ScrArr *old = *headers;
+  size_t n = (size_t)scr_arr_len(old);
+  ScrArr *out = scr_arr_new(SCR_ELEM_STR, n);
+  for (size_t i = 0; i + 1 < n; i += 2) {
+    ScrStr *nm = (ScrStr *)scr_arr_get_ref(old, (double)i);
+    if (fx_eq_ci(nm->data, nm->len, name)) {
+      scr_str_release(nm);
+      continue;
+    }
+    scr_arr_push_ref(out, nm);
+    scr_arr_push_ref(out, scr_arr_get_ref(old, (double)(i + 1)));
+  }
+  scr_arr_release(old);
+  *headers = out;
+}
+
+/* Follows one redirect hop: rewrites the request per the fetch spec and
+ * dials the next URL. Consumes nothing; the caller drops res/client. */
+static bool fx_redirect(FxTransfer *t, int status, const ScrStr *loc) {
+  if (t->hops >= 20) {
+    fx_error(t, "redirect count exceeded", NULL);
+    return false;
+  }
+  ScrUrl *next = fx_resolve(t->url, loc);
+  if (next == NULL ||
+      !(fx_str_is(next->scheme, "http") || fx_str_is(next->scheme, "https")) ||
+      next->userinfo->len > 0) {
+    if (next) scr_url_release(next);
+    fx_error(t, "invalid redirect URL", NULL);
+    return false;
+  }
+  /* 303 rewrites everything but GET/HEAD to GET; 301/302 rewrite POST —
+   * the body and its content-* headers drop with the rewrite. */
+  bool is_get = fx_str_is(t->method, "GET");
+  bool is_head = fx_str_is(t->method, "HEAD");
+  if (t->request_streaming && status != 303) {
+    scr_url_release(next);
+    fx_error(t, "fetch failed", NULL);
+    return false;
+  }
+  if ((status == 303 && !is_get && !is_head) ||
+      ((status == 301 || status == 302) && fx_str_is(t->method, "POST"))) {
+    scr_str_release(t->method);
+    t->method = scr_str_new("GET", 3);
+    t->request_streaming = false;
+    if (t->body) {
+      scr_bytes_release(t->body);
+      t->body = NULL;
+    }
+    fx_strip_header(&t->headers, "content-type");
+    fx_strip_header(&t->headers, "content-length");
+    fx_strip_header(&t->headers, "content-encoding");
+    fx_strip_header(&t->headers, "content-language");
+    fx_strip_header(&t->headers, "content-location");
+    t->request_has_content_length = false;
+    t->request_content_length = 0;
+    t->request_body_sent = 0;
+  }
+  /* cross-origin hop: credentials do not follow (the fetch spec's
+   * authorization rule; cookies are not modeled as ambient state). */
+  bool same_origin = t->url->host->len == next->host->len &&
+                     memcmp(t->url->host->data, next->host->data, next->host->len) == 0 &&
+                     fx_url_port(t->url, 0) == fx_url_port(next, 0) &&
+                     t->url->scheme->len == next->scheme->len &&
+                     memcmp(t->url->scheme->data, next->scheme->data, next->scheme->len) == 0;
+  if (!same_origin) {
+    fx_strip_header(&t->headers, "authorization");
+    fx_strip_header(&t->headers, "proxy-authorization");
+    fx_strip_header(&t->headers, "cookie");
+  }
+  scr_url_release(t->url);
+  t->url = next;
+  t->hops++;
+  t->redirected = true;
+  return true;
+}
+
+/* ── response delivery ───────────────────────────────────────────────── */
+
+static void fx_emit_chunk(FxTransfer *t, const uint8_t *data, size_t len) {
+  if (len == 0) return;
+  JSValue chunk = JS_NewUint8ArrayCopy(t->ctx, data, len);
+  fx_call(t, "onData", 1, (JSValueConst *)&chunk);
+  JS_FreeValue(t->ctx, chunk);
+}
+
+static void fx_on_data(ScrClosure *cb, ScrBytes *chunk /*borrowed*/) {
+  FxTransfer *t = fx_from(cb);
+  if (t == NULL) return;
+  if (t->done || t->cancelled || !t->responded) {
+    fx_release(t);
+    return;
+  }
+  if (!t->inflating) {
+    fx_emit_chunk(t, chunk->data, chunk->len);
+    fx_release(t);
+    return;
+  }
+  t->zs.next_in = (Bytef *)chunk->data;
+  t->zs.avail_in = (uInt)chunk->len;
+  bool drain_internal = false;
+  unsigned char out[16384];
+  while (!t->done && (t->zs.avail_in > 0 || drain_internal)) {
+    if (t->inflate_member_end) {
+      if (t->zs.avail_in == 0) break;
+      if (inflateReset(&t->zs) != Z_OK) {
+        ScrHttpClientReq *c = t->client;
+        if (c) scr_http_client_destroy(c);
+        fx_error(t, "invalid compressed body", NULL);
+        break;
+      }
+      t->inflate_member_end = false;
+    }
+    t->zs.next_out = out;
+    t->zs.avail_out = sizeof out;
+    int r = inflate(&t->zs, Z_NO_FLUSH);
+    size_t produced = sizeof out - t->zs.avail_out;
+    drain_internal = false;
+    if (produced > 0) fx_emit_chunk(t, out, produced);
+    if (r == Z_STREAM_END) {
+      /* RFC 1952 permits concatenated gzip members. */
+      t->inflate_member_end = true;
+      if (t->zs.avail_in == 0) break;
+      continue;
+    }
+    if (r != Z_OK && r != Z_BUF_ERROR) {
+      /* corrupt encoding: the body errors (the glue turns a post-resolve
+       * onError into controller.error — undici's terminated shape) */
+      const char *detail = t->zs.msg ? t->zs.msg : "invalid compressed body";
+      ScrHttpClientReq *c = t->client;
+      if (c) scr_http_client_destroy(c);
+      fx_error(t, detail, NULL);
+      break;
+    }
+    if (r == Z_BUF_ERROR && produced == 0) break; /* need more input */
+    if (t->zs.avail_in == 0) {
+      if (r == Z_OK && t->zs.avail_out == 0) {
+        drain_internal = true;
+        continue;
+      }
+      break;
+    }
+  }
+  fx_release(t);
+}
+
+static void fx_on_end(ScrClosure *cb) {
+  FxTransfer *t = fx_from(cb);
+  if (t == NULL) return;
+  if (t->done || t->cancelled) {
+    fx_release(t);
+    return;
+  }
+  fx_call(t, "onEnd", 0, NULL);
+  fx_settle(t);
+  fx_release(t);
+}
+
+/* Mid-body death ('aborted' on the response): the body errors. */
+static void fx_on_res_error(ScrClosure *cb, ScrStr *msg /*borrowed*/) {
+  FxTransfer *t = fx_from(cb);
+  if (t == NULL) return;
+  if (t->done || t->cancelled) {
+    fx_release(t);
+    return;
+  }
+  fx_error(t, msg->len > 0 ? msg->data : "aborted", NULL);
+  fx_release(t);
+}
+
+static void fx_on_response(ScrClosure *cb, ScrHttpReq *res /*+1*/) {
+  FxTransfer *t = fx_from(cb);
+  if (t == NULL) {
+    scr_http_req_release(res);
+    return;
+  }
+  if (t->done || t->cancelled) {
+    scr_http_req_release(res);
+    fx_release(t);
+    return;
+  }
+  int status = (int)scr_http_req_status(res);
+
+  /* a redirect hop? (Location present, a redirect status) */
+  if (status == 301 || status == 302 || status == 303 || status == 307 || status == 308) {
+    ScrStr *locname = scr_str_new("location", 8);
+    ScrStr *loc = scr_http_req_header(res, locname);
+    scr_str_release(locname);
+    if (loc != NULL) {
+      if (t->redirect_mode == FX_REDIRECT_MANUAL) {
+        scr_str_release(loc);
+      } else {
+        /* drop this hop's connection (its body never reaches the island) */
+        ScrHttpClientReq *old = t->client;
+        t->client = NULL;
+        if (old) {
+          scr_http_client_destroy(old);
+          scr_http_client_release(old);
+        }
+        if (t->redirect_mode == FX_REDIRECT_ERROR) {
+          fx_error(t, "fetch failed", NULL);
+          scr_str_release(loc);
+          scr_http_req_release(res);
+          fx_release(t);
+          return;
+        }
+        ScrStr *decoded_loc = fx_location_to_utf8(loc);
+        bool go = fx_redirect(t, status, decoded_loc);
+        scr_str_release(decoded_loc);
+        scr_str_release(loc);
+        if (go) fx_start_hop(t);
+        scr_http_req_release(res);
+        fx_release(t);
+        return;
+      }
+    }
+    /* a FINAL 3xx (no Location) resolves with its own body, like Node —
+     * the curl bridge documented this corner away; this unit delivers it */
+  }
+
+  t->responded = true;
+
+  /* content-encoding: gzip/x-gzip/deflate inflate transparently (zlib's
+   * 15+32 auto-detects the gzip and zlib framings) */
+  {
+    ScrStr *cename = scr_str_new("content-encoding", 16);
+    ScrStr *ce = scr_http_req_header(res, cename);
+    scr_str_release(cename);
+    if (ce != NULL) {
+      if (fx_str_is(ce, "gzip") || fx_str_is(ce, "x-gzip") || fx_str_is(ce, "deflate")) {
+        memset(&t->zs, 0, sizeof t->zs);
+        if (inflateInit2(&t->zs, 15 + 32) == Z_OK) t->inflating = true;
+      }
+      scr_str_release(ce);
+    }
+  }
+
+  JSContext *ctx = t->ctx;
+  ScrArr *raw = scr_http_req_raw_headers(res);
+  size_t nraw = (size_t)scr_arr_len(raw);
+  JSValue hdrs = JS_NewArray(ctx);
+  for (size_t i = 0; i < nraw; i++) {
+    ScrStr *s = (ScrStr *)scr_arr_get_ref(raw, (double)i);
+    ScrStr *utf8 = fx_latin1_to_utf8(s);
+    JS_SetPropertyUint32(
+        ctx, hdrs, (uint32_t)i,
+        JS_NewStringLen(ctx, utf8->data, utf8->len));
+    scr_str_release(utf8);
+    scr_str_release(s);
+  }
+  scr_arr_release(raw);
+  ScrStr *stext = scr_http_req_status_message(res);
+  ScrStr *stext_utf8 =
+      stext ? fx_latin1_to_utf8(stext) : scr_str_new("", 0);
+  ScrStr *final_url = fx_url_serialize(t->url, false);
+  JSValue argv[5] = {
+      JS_NewInt32(ctx, status),
+      JS_NewStringLen(ctx, stext_utf8->data, stext_utf8->len),
+      hdrs,
+      JS_NewStringLen(ctx, final_url->data, final_url->len),
+      JS_NewBool(ctx, t->redirected),
+  };
+  if (stext) scr_str_release(stext);
+  scr_str_release(stext_utf8);
+  scr_str_release(final_url);
+  fx_call(t, "onResponse", 5, argv);
+  for (int i = 0; i < 5; i++) JS_FreeValue(ctx, argv[i]);
+
+  /* body listeners (registered inside the 'response' emit — the parser
+   * delivers body bytes only after this returns, ended bodies fire 'end'
+   * right behind us) */
+  scr_http_req_on_data(res, fx_closure(t, (void *)&fx_on_data), &fx_on_data, false);
+  scr_http_req_on_end(res, fx_closure(t, (void *)&fx_on_end), false);
+  scr_http_req_on_error(res, fx_closure(t, (void *)&fx_on_res_error), &fx_on_res_error, false);
+
+  scr_http_req_release(res);
+  fx_release(t);
+}
+
+/* Pre-response failure on the hop client: classify into Node's causes. */
+static void fx_on_client_error(ScrClosure *cb, ScrStr *msg /*borrowed*/) {
+  FxTransfer *t = fx_from(cb);
+  if (t == NULL) return;
+  if (t->done || t->cancelled || t->responded) {
+    fx_release(t);
+    return;
+  }
+  const char *detail = msg->data;
+  const char *code = NULL;
+  char codebuf[32];
+  if (msg->len > 8 && memcmp(detail, "connect E", 9) == 0) {
+    /* "connect ECONNREFUSED ip:port" and family: the code is the token */
+    const char *s = detail + 8;
+    size_t n = 0;
+    while (s[n] != '\0' && s[n] != ' ' && n < sizeof codebuf - 1) n++;
+    memcpy(codebuf, s, n);
+    codebuf[n] = '\0';
+    code = codebuf;
+  } else if (msg->len > 12 && memcmp(detail, "getaddrinfo E", 13) == 0) {
+    const char *s = detail + 12;
+    size_t n = 0;
+    while (s[n] != '\0' && s[n] != ' ' && n < sizeof codebuf - 1) n++;
+    memcpy(codebuf, s, n);
+    codebuf[n] = '\0';
+    code = codebuf;
+  } else if (fx_eq_ci(detail, msg->len, "socket hang up")) {
+    /* undici's cause for a server that died before the response head */
+    detail = "other side closed";
+    code = "UND_ERR_SOCKET";
+  }
+  fx_error(t, detail, code);
+  fx_release(t);
+}
+
+static void fx_on_upgrade(
+    ScrClosure *cb, ScrHttpReq *res, ScrNetSocket *socket,
+    ScrBytes *head) {
+  FxTransfer *t = fx_from(cb);
+  scr_http_req_release(res);
+  scr_bytes_release(head);
+  scr_net_sock_destroy(socket);
+  scr_net_sock_release(socket);
+  if (t == NULL) return;
+  if (!t->done && !t->cancelled) {
+    fx_error(t, "unexpected server response", NULL);
+  } else {
+    fx_settle(t);
+  }
+  fx_release(t);
+}
+
+/* ── host functions (called by the fetch glue, inside the engine) ────── */
+
+/* host.start({url, method, headers: [n,v,...], body, streaming, redirectMode},
+ * cbs) → transfer id. Fixed bodies are copied out of the engine before the
+ * net stack sees them; streams arrive later through host.write/end. An
+ * unparsable URL throws the engine TypeError the promise executor turns into
+ * Node's rejection shape. */
+static JSValue fx_host_start(JSContext *ctx, JSValueConst this_val, int argc,
+                             JSValueConst *argv) {
+  (void)this_val;
+  (void)argc;
+  JSValueConst req = argv[0];
+
+  JSValue urlv = JS_GetPropertyStr(ctx, req, "url");
+  const char *url = JS_ToCString(ctx, urlv);
+  JS_FreeValue(ctx, urlv);
+  if (!url) return JS_EXCEPTION;
+  ScrStr *urlstr = scr_str_new(url, strlen(url));
+  ScrUrl *u = fx_url_parse(urlstr);
+  scr_str_release(urlstr);
+  if (u == NULL) {
+    JSValue e = JS_ThrowTypeError(ctx, "Failed to parse URL from %s", url);
+    JS_FreeCString(ctx, url);
+    return e;
+  }
+  JS_FreeCString(ctx, url);
+  if (!(fx_str_is(u->scheme, "http") || fx_str_is(u->scheme, "https"))) {
+    scr_url_release(u);
+    return JS_ThrowTypeError(ctx, "fetch failed");
+  }
+
+  FxTransfer *t = calloc(1, sizeof *t);
+  if (!t) fx_oom();
+  t->rc = 1; /* the registry's */
+  t->ctx = ctx;
+  t->id = fx_next_id++;
+  t->cbs = JS_DupValue(ctx, argv[1]);
+  t->cbs_live = true;
+  t->url = u;
+
+  JSValue redirectv = JS_GetPropertyStr(ctx, req, "redirectMode");
+  JS_ToInt32(ctx, &t->redirect_mode, redirectv);
+  JS_FreeValue(ctx, redirectv);
+
+  JSValue streamingv = JS_GetPropertyStr(ctx, req, "streaming");
+  t->request_streaming = JS_ToBool(ctx, streamingv) > 0;
+  JS_FreeValue(ctx, streamingv);
+
+  JSValue envproxyv = JS_GetPropertyStr(ctx, req, "useEnvProxy");
+  t->use_env_proxy = JS_ToBool(ctx, envproxyv) > 0;
+  JS_FreeValue(ctx, envproxyv);
+
+  JSValue methodv = JS_GetPropertyStr(ctx, req, "method");
+  const char *method = JS_ToCString(ctx, methodv);
+  JS_FreeValue(ctx, methodv);
+  t->method = scr_str_new(method ? method : "GET", method ? strlen(method) : 3);
+  if (method) JS_FreeCString(ctx, method);
+
+  JSValue hdrs = JS_GetPropertyStr(ctx, req, "headers");
+  JSValue lenv = JS_GetPropertyStr(ctx, hdrs, "length");
+  uint32_t hn = 0;
+  JS_ToUint32(ctx, &hn, lenv);
+  JS_FreeValue(ctx, lenv);
+  t->headers = scr_arr_new(SCR_ELEM_STR, hn);
+  for (uint32_t i = 0; i + 1 < hn; i += 2) {
+    JSValue nv = JS_GetPropertyUint32(ctx, hdrs, i);
+    JSValue vv = JS_GetPropertyUint32(ctx, hdrs, i + 1);
+    size_t nlen = 0, vlen = 0;
+    const char *hname = JS_ToCStringLen(ctx, &nlen, nv);
+    const char *hvalue = JS_ToCStringLen(ctx, &vlen, vv);
+    if (hname && hvalue) {
+      scr_arr_push_ref(t->headers, scr_str_new(hname, nlen));
+      scr_arr_push_ref(t->headers, scr_str_new(hvalue, vlen));
+    }
+    if (hname) JS_FreeCString(ctx, hname);
+    if (hvalue) JS_FreeCString(ctx, hvalue);
+    JS_FreeValue(ctx, nv);
+    JS_FreeValue(ctx, vv);
+  }
+  JS_FreeValue(ctx, hdrs);
+  /* The island's Request accepts this forbidden Fetch Metadata name, but
+   * Node's transport always controls its value. Match that behavior before
+   * the native request head is built. */
+  fx_strip_header(&t->headers, "sec-fetch-mode");
+  bool content_length_valid =
+      fx_content_length(t->headers, &t->request_has_content_length,
+                        &t->request_content_length);
+
+  JSValue bodyv = JS_GetPropertyStr(ctx, req, "body");
+  if (!JS_IsUndefined(bodyv) && !JS_IsNull(bodyv)) {
+    size_t blen = 0;
+    uint8_t *bytes = JS_GetUint8Array(ctx, &blen, bodyv);
+    if (bytes != NULL || blen == 0) {
+      t->body = scr_bytes_new(SCR_BYTES_U8, (double)blen);
+      if (blen > 0) memcpy(t->body->data, bytes, blen);
+    }
+  }
+  JS_FreeValue(ctx, bodyv);
+
+  t->next = fx_live;
+  fx_live = t;
+  fx_nlive++;
+  /*
+   * A configuration error can reject synchronously in fx_start_hop().
+   * That callback settles the transfer and releases the registry's last
+   * reference, so preserve the scalar result before the call.
+   */
+  int id = t->id;
+  if (content_length_valid) {
+    fx_start_hop(t);
+  } else {
+    fx_error(t, "fetch failed", NULL);
+  }
+  return JS_NewInt32(ctx, id);
+}
+
+static FxTransfer *fx_find(int32_t id) {
+  for (FxTransfer *t = fx_live; t; t = t->next) {
+    if (t->id == id) return t;
+  }
+  return NULL;
+}
+
+/* host.write(id, chunk): forwards one byte chunk from a streaming request.
+ * The boolean result lets a queued promise job stop pumping after settlement. */
+static JSValue fx_host_write(JSContext *ctx, JSValueConst this_val, int argc,
+                             JSValueConst *argv) {
+  (void)this_val;
+  (void)argc;
+  int32_t id = 0;
+  JS_ToInt32(ctx, &id, argv[0]);
+  FxTransfer *t = fx_find(id);
+  if (t == NULL || t->done || t->client == NULL ||
+      !t->request_streaming || t->request_ended) {
+    return JS_NewBool(ctx, false);
+  }
+  size_t blen = 0;
+  uint8_t *bytes = JS_GetUint8Array(ctx, &blen, argv[1]);
+  if (bytes == NULL && blen != 0) return JS_NewBool(ctx, false);
+  if (t->request_has_content_length &&
+      (t->request_body_sent > t->request_content_length ||
+       blen > t->request_content_length - t->request_body_sent)) {
+    fx_request_length_mismatch(t);
+    return JS_NewBool(ctx, false);
+  }
+  t->request_body_sent += blen;
+  if (blen > 0) {
+    ScrBytes *chunk = scr_bytes_new(SCR_BYTES_U8, (double)blen);
+    memcpy(chunk->data, bytes, blen);
+    scr_http_client_write_bytes(t->client, chunk);
+    scr_bytes_release(chunk);
+  }
+  return JS_NewBool(ctx, true);
+}
+
+/* host.end(id): closes a streaming request after its reader reaches EOF. */
+static JSValue fx_host_end(JSContext *ctx, JSValueConst this_val, int argc,
+                           JSValueConst *argv) {
+  (void)this_val;
+  (void)argc;
+  int32_t id = 0;
+  JS_ToInt32(ctx, &id, argv[0]);
+  FxTransfer *t = fx_find(id);
+  if (t == NULL || t->done || t->client == NULL ||
+      !t->request_streaming || t->request_ended) {
+    return JS_NewBool(ctx, false);
+  }
+  if (t->request_has_content_length &&
+      t->request_body_sent != t->request_content_length) {
+    fx_request_length_mismatch(t);
+    return JS_NewBool(ctx, false);
+  }
+  t->request_ended = true;
+  scr_http_client_end(t->client);
+  return JS_NewBool(ctx, true);
+}
+
+/* host.fail(id, detail): a request reader failed or produced a non-byte
+ * chunk. Tear down the hop and reject through the ordinary fetch error path. */
+static JSValue fx_host_fail(JSContext *ctx, JSValueConst this_val, int argc,
+                            JSValueConst *argv) {
+  (void)this_val;
+  (void)argc;
+  int32_t id = 0;
+  JS_ToInt32(ctx, &id, argv[0]);
+  FxTransfer *t = fx_find(id);
+  if (t == NULL || t->done) return JS_NewBool(ctx, false);
+  const char *detail = JS_ToCString(ctx, argv[1]);
+  if (t->client) scr_http_client_destroy(t->client);
+  fx_error(t, detail ? detail : "fetch failed", NULL);
+  if (detail) JS_FreeCString(ctx, detail);
+  return JS_NewBool(ctx, true);
+}
+
+/* host.abort(id): the island aborted the fetch or cancelled the response
+ * body stream. The transfer dies quietly — no onError, no onEnd. */
+static JSValue fx_host_abort(JSContext *ctx, JSValueConst this_val, int argc,
+                             JSValueConst *argv) {
+  (void)this_val;
+  (void)argc;
+  int32_t id = 0;
+  JS_ToInt32(ctx, &id, argv[0]);
+  FxTransfer *t = fx_find(id);
+  if (t != NULL) {
+    t->cancelled = true;
+    if (t->client) scr_http_client_destroy(t->client);
+    fx_settle(t);
+  }
+  return JS_UNDEFINED;
+}
+
+/* ── the JS half: island surface, request streaming, abort wiring, and
+ * error shaping ──────────────────────────────────────────────────────── */
+
+static const char fx_glue[] =
+    "(host) => {\n"
+    "  'use strict';\n"
+    "  const g = globalThis;\n"
+    "  const NULL_BODY = { 204: true, 205: true, 304: true };\n"
+    "  g.fetch = function fetch(input, init) {\n"
+    "    return new Promise((resolve, reject) => {\n"
+    "      let url;\n"
+    "      let method = 'GET';\n"
+    "      let headers = null;\n"
+    "      let body = null;\n"
+    "      let signal = null;\n"
+    "      let redirect = 'follow';\n"
+    "      if (input instanceof g.Request) {\n"
+    "        url = input.url;\n"
+    "        method = input.method;\n"
+    "        headers = new g.Headers(input.headers);\n"
+    "        body = input._body instanceof Uint8Array || input._body instanceof g.ReadableStream ? input._body : null;\n"
+    "        signal = input._signal;\n"
+    "        redirect = input.redirect;\n"
+    "      } else {\n"
+    "        url = String(input);\n"
+    "      }\n"
+    "      init = init === undefined || init === null ? {} : init;\n"
+    "      // WebIDL observes dictionary members in lexical order, exactly\n"
+    "      // once each, and converts each value before reading the next.\n"
+    "      const initBody = init.body;\n"
+    "      let initBodyValue = null;\n"
+    "      let initBodyContentType = null;\n"
+    "      if (initBody !== undefined && initBody !== null) {\n"
+    "        const convertedBody = new g.Request('http://localhost/', { method: 'POST', body: initBody, duplex: 'half' });\n"
+    "        initBodyValue = convertedBody._body;\n"
+    "        initBodyContentType = convertedBody.headers.get('content-type');\n"
+    "      }\n"
+    "      const initCache = init.cache;\n"
+    "      if (initCache !== undefined) throw new TypeError('unsupported RequestInit option: cache');\n"
+    "      const initCredentials = init.credentials;\n"
+    "      if (initCredentials !== undefined) throw new TypeError('unsupported RequestInit option: credentials');\n"
+    "      let useEnvProxy = g.process?.env?.NODE_USE_ENV_PROXY === '1';\n"
+    "      const initDispatcher = init.dispatcher;\n"
+    "      // Vercel's dynamic CLI installs its EnvProxyDispatcher when\n"
+    "      // ordinary proxy environment variables are present. Validate the\n"
+    "      // known public shape and activate equivalent native proxy routing\n"
+    "      // for this request. Do not silently accept arbitrary custom\n"
+    "      // dispatchers whose routing behavior the bridge cannot preserve.\n"
+    "      if (initDispatcher !== undefined) {\n"
+    "        const dispatcher = initDispatcher;\n"
+    "        const envProxyMethods = ['dispatch', 'close', 'destroy', 'agents', 'getAgent', 'shouldProxy', 'parseNoProxy'];\n"
+    "        const isVercelEnvProxy = dispatcher !== null && typeof dispatcher === 'object' &&\n"
+    "          dispatcher.constructor?.name === 'EnvProxyDispatcher' &&\n"
+    "          envProxyMethods.every((member) => typeof dispatcher[member] === 'function');\n"
+    "        if (!isVercelEnvProxy) {\n"
+    "          throw new TypeError('unsupported RequestInit option: dispatcher');\n"
+    "        }\n"
+    "        useEnvProxy = true;\n"
+    "      }\n"
+    "      const initDuplex = init.duplex;\n"
+    "      let duplex;\n"
+    "      if (initDuplex !== undefined) {\n"
+    "        duplex = String(initDuplex);\n"
+    "        if (duplex !== 'half') throw new TypeError(\"RequestInit.duplex must be 'half'\");\n"
+    "      }\n"
+    "      const initHeaders = init.headers;\n"
+    "      const convertedHeaders = initHeaders === undefined ? undefined : new g.Headers(initHeaders);\n"
+    "      const initIntegrity = init.integrity;\n"
+    "      if (initIntegrity !== undefined) throw new TypeError('unsupported RequestInit option: integrity');\n"
+    "      const initKeepalive = init.keepalive;\n"
+    "      if (initKeepalive !== undefined) throw new TypeError('unsupported RequestInit option: keepalive');\n"
+    "      const initMethod = init.method;\n"
+    "      const convertedMethod = initMethod === undefined ? undefined : String(initMethod);\n"
+    "      const initMode = init.mode;\n"
+    "      if (initMode !== undefined) throw new TypeError('unsupported RequestInit option: mode');\n"
+    "      const initPriority = init.priority;\n"
+    "      if (initPriority !== undefined) throw new TypeError('unsupported RequestInit option: priority');\n"
+    "      const initRedirect = init.redirect;\n"
+    "      if (initRedirect !== undefined) {\n"
+    "        redirect = String(initRedirect);\n"
+    "        if (redirect !== 'follow' && redirect !== 'error' && redirect !== 'manual') {\n"
+    "          throw new TypeError(`undefined: ${redirect} is not an accepted type. Expected one of follow, manual, error.`);\n"
+    "        }\n"
+    "      }\n"
+    "      const initReferrer = init.referrer;\n"
+    "      if (initReferrer !== undefined) throw new TypeError('unsupported RequestInit option: referrer');\n"
+    "      const initReferrerPolicy = init.referrerPolicy;\n"
+    "      if (initReferrerPolicy !== undefined) throw new TypeError('unsupported RequestInit option: referrerPolicy');\n"
+    "      const initSignal = init.signal;\n"
+    "      // An explicit init.signal overrides the Request's, null included.\n"
+    "      if (initSignal !== undefined) {\n"
+    "        if (initSignal !== null && !(initSignal instanceof g.AbortSignal)) {\n"
+    "          throw new TypeError('fetch init.signal must be an AbortSignal or null');\n"
+    "        }\n"
+    "        signal = initSignal;\n"
+    "      }\n"
+    "      const initWindow = init.window;\n"
+    "      if (initWindow !== undefined) throw new TypeError('unsupported RequestInit option: window');\n"
+    "      // Request validation follows the complete dictionary conversion.\n"
+    "      if (convertedMethod !== undefined) {\n"
+    "        method = new g.Request('http://localhost/', { method: convertedMethod }).method;\n"
+    "      }\n"
+    "      if (convertedHeaders !== undefined) headers = convertedHeaders;\n"
+    "      if (headers === null) headers = new g.Headers();\n"
+    "      let redirectMode = 0;\n"
+    "      if (redirect === 'error') redirectMode = 1;\n"
+    "      else if (redirect === 'manual') redirectMode = 2;\n"
+    "      // The effective body includes one inherited from an input Request.\n"
+    "      // A GET/HEAD method override must reject that body as well.\n"
+    "      if ((body !== null || initBodyValue !== null) && (method === 'GET' || method === 'HEAD')) {\n"
+    "        throw new TypeError('Request with GET/HEAD method cannot have body.');\n"
+    "      }\n"
+    "      if (initBodyValue !== null) {\n"
+    "        if (initBodyValue instanceof g.ReadableStream && duplex !== 'half') {\n"
+    "          throw new TypeError('RequestInit: duplex option is required when sending a body.');\n"
+    "        }\n"
+    "        body = initBodyValue;\n"
+    "        if (initBodyContentType !== null && !headers.has('content-type')) {\n"
+    "          headers.set('content-type', initBodyContentType);\n"
+    "        }\n"
+    "      }\n"
+    "      if (body !== null && !(body instanceof Uint8Array) && !(body instanceof g.ReadableStream)) {\n"
+    "        throw new TypeError('unsupported request body in the scriptc island');\n"
+    "      }\n"
+    "      // An already-aborted signal rejects with ITS reason before any\n"
+    "      // transfer starts (Node: validation above still throws first).\n"
+    "      if (signal !== null && signal.aborted) {\n"
+    "        reject(signal.reason);\n"
+    "        return;\n"
+    "      }\n"
+    "      let controller = null;\n"
+    "      let resolved = false;\n"
+    "      let done = false;\n"
+    "      let id = 0;\n"
+    "      let requestReader = body instanceof g.ReadableStream ? body.getReader() : null;\n"
+    "      const stopRequest = (reason) => {\n"
+    "        const reader = requestReader;\n"
+    "        requestReader = null;\n"
+    "        if (reader === null) return;\n"
+    "        try {\n"
+    "          const cancelled = reader.cancel(reason);\n"
+    "          if (cancelled !== undefined && cancelled !== null && typeof cancelled.catch === 'function') cancelled.catch(() => {});\n"
+    "        } catch (_e) { /* already released or errored */ }\n"
+    "        try { reader.releaseLock(); } catch (_e) { /* pending read */ }\n"
+    "      };\n"
+    "      // The transfer is over (delivered, failed, cancelled, or aborted):\n"
+    "      // a later signal abort must not touch it.\n"
+    "      const finish = (reason) => {\n"
+    "        if (done) return;\n"
+    "        done = true;\n"
+    "        stopRequest(reason);\n"
+    "        if (signal !== null) signal.removeEventListener('abort', onAbort);\n"
+    "      };\n"
+    "      const onAbort = () => {\n"
+    "        if (done) return;\n"
+    "        finish(signal.reason);\n"
+    "        host.abort(id); // the C side dies quietly; rejection is ours\n"
+    "        if (!resolved) {\n"
+    "          resolved = true;\n"
+    "          reject(signal.reason);\n"
+    "        } else if (controller !== null) {\n"
+    "          // Mid-stream: pending and future reads reject with the reason,\n"
+    "          // exactly Node's aborted-body behavior.\n"
+    "          try { controller.error(signal.reason); } catch (_e) { /* already closed */ }\n"
+    "          controller = null;\n"
+    "        }\n"
+    "      };\n"
+    "      const pumpRequest = () => {\n"
+    "        const reader = requestReader;\n"
+    "        if (done || reader === null) return;\n"
+    "        let pending;\n"
+    "        try { pending = reader.read(); }\n"
+    "        catch (error) {\n"
+    "          requestReader = null;\n"
+    "          try { reader.releaseLock(); } catch (_e) { /* already released */ }\n"
+    "          host.fail(id, error instanceof Error ? error.message : String(error));\n"
+    "          return;\n"
+    "        }\n"
+    "        pending.then(\n"
+    "          (result) => {\n"
+    "            if (done || requestReader !== reader) {\n"
+    "              try { reader.releaseLock(); } catch (_e) { /* cancel still pending */ }\n"
+    "              return;\n"
+    "            }\n"
+    "            if (result.done) {\n"
+    "              requestReader = null;\n"
+    "              try { reader.releaseLock(); } catch (_e) { /* already released */ }\n"
+    "              host.end(id);\n"
+    "              return;\n"
+    "            }\n"
+    "            let chunk = result.value;\n"
+    "            if (typeof chunk === 'string') chunk = new g.TextEncoder().encode(chunk);\n"
+    "            if (!(chunk instanceof Uint8Array)) {\n"
+    "              const error = new TypeError('Received non-Uint8Array chunk');\n"
+    "              requestReader = null;\n"
+    "              try {\n"
+    "                const cancelled = reader.cancel(error);\n"
+    "                if (cancelled !== undefined && cancelled !== null && typeof cancelled.catch === 'function') cancelled.catch(() => {});\n"
+    "              } catch (_e) { /* source already errored */ }\n"
+    "              try { reader.releaseLock(); } catch (_e) { /* pending cancel */ }\n"
+    "              host.fail(id, error.message);\n"
+    "              return;\n"
+    "            }\n"
+    "            if (host.write(id, chunk)) pumpRequest();\n"
+    "            else stopRequest();\n"
+    "          },\n"
+    "          (error) => {\n"
+    "            if (done || requestReader !== reader) {\n"
+    "              try { reader.releaseLock(); } catch (_e) { /* cancel still pending */ }\n"
+    "              return;\n"
+    "            }\n"
+    "            requestReader = null;\n"
+    "            try { reader.releaseLock(); } catch (_e) { /* already released */ }\n"
+    "            host.fail(id, error instanceof Error ? error.message : String(error));\n"
+    "          },\n"
+    "        );\n"
+    "      };\n"
+    "      const flat = [];\n"
+    "      for (const pair of headers) { flat.push(pair[0], pair[1]); }\n"
+    "      try {\n"
+    "        id = host.start(\n"
+    "          {\n"
+    "            url,\n"
+    "            method,\n"
+    "            headers: flat,\n"
+    "            body: body instanceof Uint8Array ? body : undefined,\n"
+    "            streaming: body instanceof g.ReadableStream,\n"
+    "            useEnvProxy,\n"
+    "            redirectMode,\n"
+    "          },\n"
+    "          {\n"
+    "          onResponse(status, statusText, raw, finalUrl, redirected) {\n"
+    "            resolved = true;\n"
+    "            const h = new g.Headers();\n"
+    "            for (let i = 0; i + 1 < raw.length; i += 2) {\n"
+    "              try { h.append(raw[i], raw[i + 1]); } catch (_e) { /* junk line */ }\n"
+    "            }\n"
+    "            let stream = null;\n"
+    "            if (method !== 'HEAD' && NULL_BODY[status] !== true) {\n"
+    "              stream = new g.ReadableStream({\n"
+    "                start(c) { controller = c; },\n"
+    "                cancel() { controller = null; finish(); host.abort(id); },\n"
+    "              });\n"
+    "            }\n"
+    "            resolve(g.__scr_mk_response(status, statusText, h, finalUrl, redirected, stream));\n"
+    "          },\n"
+    "          onData(chunk) {\n"
+    "            if (controller !== null) {\n"
+    "              try { controller.enqueue(chunk); } catch (_e) { /* consumer went away */ }\n"
+    "            }\n"
+    "          },\n"
+    "          onEnd() {\n"
+    "            finish();\n"
+    "            if (controller !== null) {\n"
+    "              try { controller.close(); } catch (_e) { /* already errored */ }\n"
+    "              controller = null;\n"
+    "            }\n"
+    "          },\n"
+    "          onError(detail, code) {\n"
+    "            finish();\n"
+    "            if (!resolved) {\n"
+    "              // Node's shape: TypeError 'fetch failed' with a CAUSE the\n"
+    "              // wrappers classify (message + code for the network cases).\n"
+    "              const cause = new Error(String(detail));\n"
+    "              if (code !== undefined) cause.code = code;\n"
+    "              if (code === 'ECONNREFUSED') cause.syscall = 'connect';\n"
+    "              else if (code === 'ENOTFOUND') cause.syscall = 'getaddrinfo';\n"
+    "              const err = new TypeError('fetch failed');\n"
+    "              err.cause = cause;\n"
+    "              reject(err);\n"
+    "            } else if (controller !== null) {\n"
+    "              try { controller.error(new TypeError('terminated')); } catch (_e) { /* already closed */ }\n"
+    "              controller = null;\n"
+    "            }\n"
+    "          },\n"
+    "          },\n"
+    "        );\n"
+    "      } catch (error) {\n"
+    "        stopRequest(error);\n"
+    "        throw error;\n"
+    "      }\n"
+    "      if (!done && signal !== null) signal.addEventListener('abort', onAbort, { once: true });\n"
+    "      if (!done && requestReader !== null) pumpRequest();\n"
+    "    });\n"
+    "  };\n"
+    "}\n";
+
+/* ── boot / teardown (registered with the island) ────────────────────── */
+
+static void fx_boot(void *jsctx) {
+  JSContext *ctx = (JSContext *)jsctx;
+  JSValue fn = JS_Eval(ctx, fx_glue, sizeof fx_glue - 1, "<scr-fetch>", JS_EVAL_TYPE_GLOBAL);
+  if (JS_IsException(fn)) {
+    fprintf(stderr, "scriptc: island fetch glue failed to evaluate\n");
+    abort();
+  }
+  JSValue host = JS_NewObject(ctx);
+  JS_SetPropertyStr(ctx, host, "start", JS_NewCFunction(ctx, fx_host_start, "start", 2));
+  JS_SetPropertyStr(ctx, host, "write", JS_NewCFunction(ctx, fx_host_write, "write", 2));
+  JS_SetPropertyStr(ctx, host, "end", JS_NewCFunction(ctx, fx_host_end, "end", 1));
+  JS_SetPropertyStr(ctx, host, "fail", JS_NewCFunction(ctx, fx_host_fail, "fail", 2));
+  JS_SetPropertyStr(ctx, host, "abort", JS_NewCFunction(ctx, fx_host_abort, "abort", 1));
+  JSValue r = JS_Call(ctx, fn, JS_UNDEFINED, 1, (JSValueConst *)&host);
+  JS_FreeValue(ctx, host);
+  JS_FreeValue(ctx, fn);
+  if (JS_IsException(r)) {
+    fprintf(stderr, "scriptc: island fetch glue failed to run\n");
+    abort();
+  }
+  JS_FreeValue(ctx, r);
+}
+
+/* Engine teardown with transfers still live (process.exit mid-request, or
+ * an exit with an abandoned body stream): free their engine values FIRST
+ * so the island's counting allocator returns to zero. The net/http exit
+ * cleanups (registered later, so they run earlier — atexit LIFO) have
+ * already dropped the listener closures; whatever the registry still
+ * holds settles here. */
+static void fx_teardown(void) {
+  while (fx_live) fx_settle(fx_live);
+}
+
+/* The emitted main calls this (before any island entry) in builds whose
+ * embedded graph references fetch. No pending/poll hooks: transfers live
+ * on real sockets the loop's own poller sleeps on, and armed island
+ * timers cap that sleep through the loop's island-deadline hook. */
+void scr_fetch_install(void) {
+  static SCR_TL bool installed = false;
+  if (installed) return;
+  installed = true;
+  scr_tls_ca_install();
+  fx_proxy_snapshot();
+  scr_atexit(fx_proxy_snapshot_free);
+  /* The net unit's loop hooks (pending/dispatch/pollfd): the emitted main
+   * registers them only for programs that USE node:net — a fetch-only
+   * build must register them itself or its sockets would neither keep
+   * the loop alive nor dispatch. */
+  scr_net_install();
+  /* The island's node:http/https client bridge rides the same units and
+   * is always compiled beside the native fetch (native-toolchain.ts) — embedded graphs
+   * that require node:http/https get working clients, not refusals. */
+  scr_net_island_install();
+  scr_island_set_fetch(fx_boot, NULL, NULL, fx_teardown);
+}
+
+#endif /* SCR_DYNAMIC */
 
 #undef SCR_FETCH_BAD_PORTS

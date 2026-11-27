@@ -64,7 +64,12 @@ if(SCRIPTC_STATIC_LINUX_BUILD AND NOT TARGET zstd::libzstd_shared)
   add_library(zstd::libzstd_shared INTERFACE IMPORTED)
 endif()
 
-find_package(LLVM 22.1.8 EXACT REQUIRED CONFIG)
+# The pinned release toolchain is LLVM 22.1.8. Experiments on hosts without
+# that bottle may select another installed LLVM explicitly; the helper then
+# reports that version and the compiler rejects it unless told to expect it.
+set(SCRIPTC_LLVM_VERSION "22.1.8" CACHE STRING
+    "Exact LLVM release the helper links against")
+find_package(LLVM ${SCRIPTC_LLVM_VERSION} EXACT REQUIRED CONFIG)
 
 # LLVM's exported Support target names zstd's shared target even when the
 # selected LLVM components are static. The npm sidecar must not retain a

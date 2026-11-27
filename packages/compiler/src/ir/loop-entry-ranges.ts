@@ -1,3 +1,4 @@
+// This file was modified from scriptc (Apache-2.0); see MODIFICATIONS.md.
 import type { IrExpr, IrFunction, IrStmt } from "./ir.js";
 import { everyExpr, everyStmt, everyStmtList } from "./traverse.js";
 import { byteNumberAccess } from "./byte-numbers.js";
@@ -51,6 +52,8 @@ export function findLoopEntryVersions(
   fn: IrFunction,
   facts: IntegerRangeFacts,
   slots: IntegerSlotFacts = {},
+  // The fork's proved in-bounds typed-array reads (analyzeIntegerRanges' inBounds), as `facts` was computed with.
+  inBounds: ReadonlySet<unknown> = new Set(),
 ): Map<IrStmt, LoopEntryVersion> {
   const result = new Map<IrStmt, LoopEntryVersion>();
   if (fn.async || fn.generator) return result;
@@ -75,7 +78,7 @@ export function findLoopEntryVersions(
       return true;
     },
   });
-  if (candidates.size > 0) versionLoops(fn, facts, slots, candidates, result, gainedOperands);
+  if (candidates.size > 0) versionLoops(fn, facts, slots, inBounds, candidates, result, gainedOperands);
   // A remainder-closed local (remainderClosedRange) whose reads carry no
   // fact, or one wider than its remainder's range, is assumed in that range
   // instead, together with the loop's other candidates: a linear
@@ -98,7 +101,7 @@ export function findLoopEntryVersions(
     },
   });
   if (narrowed.size > 0)
-    versionLoops(fn, facts, slots, narrowed, result, (loop, known, versioned) => [
+    versionLoops(fn, facts, slots, inBounds, narrowed, result, (loop, known, versioned) => [
       ...gainedOperands(loop, known, versioned),
       ...narrowedDividends(loop, facts, versioned),
     ]);
@@ -111,13 +114,14 @@ function versionLoops(
   fn: IrFunction,
   facts: IntegerRangeFacts,
   slots: IntegerSlotFacts,
+  inBounds: ReadonlySet<unknown>,
   initial: ReadonlyMap<IrStmt, ReadonlyMap<string, IntegerRange>>,
   result: Map<IrStmt, LoopEntryVersion>,
   roots: (loop: IrStmt, known: (e: IrExpr) => boolean, versioned: IntegerRangeFacts) => IrExpr[],
 ): void {
   const known = (e: IrExpr): boolean => !!facts.ranges.get(e);
   let candidates = initial;
-  let versioned = analyzeIntegerRangeFacts(fn, slots, assumptionsOf(candidates));
+  let versioned = analyzeIntegerRangeFacts(fn, slots, inBounds, assumptionsOf(candidates));
   const pruned = new Map<IrStmt, ReadonlyMap<string, IntegerRange>>();
   let dropped = false;
   for (const [loop, entry] of candidates) {
@@ -132,7 +136,7 @@ function versionLoops(
   if (dropped) {
     candidates = pruned;
     if (candidates.size === 0) return;
-    versioned = analyzeIntegerRangeFacts(fn, slots, assumptionsOf(candidates));
+    versioned = analyzeIntegerRangeFacts(fn, slots, inBounds, assumptionsOf(candidates));
   }
   for (const [loop, entry] of candidates) {
     if (roots(loop, known, versioned).length === 0) continue;

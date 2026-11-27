@@ -1,6 +1,0 @@
-{
- "order": [
-  "<repo>/tests/corpus/9872-child-stream-pause-max-buffer.ts"
- ],
- "diags": []
-}

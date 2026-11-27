@@ -1,6 +1,0 @@
-{
- "order": [
-  "<repo>/tests/corpus/5333-integer-guarded-while-counters.ts"
- ],
- "diags": []
-}

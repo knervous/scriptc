@@ -1,6 +1,0 @@
-{
- "order": [
-  "<repo>/tests/corpus/for-in-nullable-receiver.ts"
- ],
- "diags": []
-}

@@ -1,6 +1,0 @@
-{
- "order": [
-  "<repo>/tests/corpus/2795-array-optional-typedarray-source.ts"
- ],
- "diags": []
-}

@@ -1,3 +1,4 @@
+// This file was modified from scriptc (Apache-2.0); see MODIFICATIONS.md.
 import type { IrLibFn } from "./builtin-signatures.js";
 
 const MAY_THROW_LIB_FNS_PART_1: readonly IrLibFn[] = [
@@ -229,6 +230,33 @@ const MAY_THROW_LIB_FNS_PART_1: readonly IrLibFn[] = [
   "atomics.op",
   "atomics.wait",
   "atomics.notify",
+  // This fork: Atomics on any integer typed array (a RangeError for an index outside it; wait's TypeError on a
+  // thread that may not block), the browser target's host Dates and the native dyn forms.
+  "atomics.load",
+  "atomics.store",
+  "atomics.add",
+  "atomics.sub",
+  "atomics.and",
+  "atomics.or",
+  "atomics.xor",
+  "atomics.exchange",
+  "atomics.compareExchange",
+  "atomics.waitAsyncStart",
+  "date.hostStr",
+  "dyn.arrayCtor",
+  "dyn.arrayFromLength",
+  "dyn.reflectSetData",
+  "dyn.newCollection",
+  "dyn.needsOpen",
+  "error.prepareStackTraceGet",
+  "error.prepareStackTraceSet",
+  "dyn.reflectConstruct",
+  "dyn.reflectValue",
+  "dyn.arrayConstructorValue",
+  "dyn.objectConstructorValue",
+  "dyn.constructorStatics",
+  "dyn.collectionCtor",
+  "dyn.opened",
   "atomics.opDyn",
   "atomics.waitDyn",
   "atomics.notifyDyn",
@@ -274,6 +302,8 @@ const MAY_THROW_LIB_FNS_PART_1: readonly IrLibFn[] = [
   "fetch.headersNew",
   "fetch.responseNew",
   "fetch.responseJsonStatic",
+  "fetch.abortTimeout",
+  "fetch.abortAny",
   "abort.timeout",
   "abort.any",
   "event.new",
@@ -1017,6 +1047,9 @@ const MAY_THROW_LIB_FNS_PART_3: readonly IrLibFn[] = [
   "rl.inputFromDyn",
   "rl.outputFromDyn",
   "rl.write",
+  "island.eval",
+  "island.import",
+  "island.castFail",
   "rl.writeKey",
   "rl.cursor",
   "rl.seq",
@@ -1479,6 +1512,7 @@ const MAY_THROW_LIB_FNS_PART_5: readonly IrLibFn[] = [
   "fs.readChk",
   "fs.streamOptsChk",
   "net.connectAttempt",
+  "net.connectOptsChk",
   "net.connectDyn",
   "net.connectDynCb",
   "net.socketNew",
@@ -1702,9 +1736,9 @@ const MAY_THROW_LIB_FNS_PART_5: readonly IrLibFn[] = [
   "assert.ifErrorStr",
   "assert.ifErrorBool",
   "assert.ifErrorDyn",
-
+  // util.inspect of an island `any` composite: the runtime tag is all
   // there is, so the honest answer is a catchable TypeError.
-
+  "insp.jsval",
   // The wider sync fs slice: same catchable errno throws as the rest.
   "fs.unlinkSync",
   "fs.chmodSync",
@@ -1935,6 +1969,7 @@ export const ALWAYS_THROW_LIB_FNS: ReadonlySet<IrLibFn> = new Set([
   "fs.lchmodChk",
   "fs.readChk",
   "fs.streamOptsChk",
+  "net.connectOptsChk",
   "tls.caCertsChk",
   "sea.getAsset",
   "sea.getRawAsset",

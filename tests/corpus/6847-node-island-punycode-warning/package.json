@@ -1,1 +1,0 @@
-{ "name": "island-punycode-warning", "private": true, "type": "module", "scriptc": { "packages": { "puny-pkg": "node", "warn-pkg": "node" } } }

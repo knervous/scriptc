@@ -1,6 +1,0 @@
-{
- "order": [
-  "<repo>/tests/corpus/6162-dispose-observer-weak-keys.ts"
- ],
- "diags": []
-}

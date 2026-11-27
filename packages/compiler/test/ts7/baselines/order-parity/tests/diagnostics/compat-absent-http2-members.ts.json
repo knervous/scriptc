@@ -1,6 +1,0 @@
-{
- "order": [
-  "<repo>/tests/diagnostics/compat-absent-http2-members.ts"
- ],
- "diags": []
-}

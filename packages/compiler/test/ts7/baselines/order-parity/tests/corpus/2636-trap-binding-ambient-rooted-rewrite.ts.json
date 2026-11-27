@@ -1,6 +1,0 @@
-{
- "order": [
-  "<repo>/tests/corpus/2636-trap-binding-ambient-rooted-rewrite.ts"
- ],
- "diags": []
-}

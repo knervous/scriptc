@@ -1,7 +1,0 @@
-{
- "order": [
-  "<repo>/tests/corpus/jsdoc-field-foreign-instance/shapes.js",
-  "<repo>/tests/corpus/jsdoc-field-foreign-instance/main.js"
- ],
- "diags": []
-}

@@ -1,6 +1,0 @@
-{
- "order": [
-  "<repo>/tests/corpus/9004-destructure-asserted-optional.ts"
- ],
- "diags": []
-}

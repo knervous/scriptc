@@ -1,0 +1,15 @@
+<!doctype html><meta charset="utf-8"><title>Closed scalar-record proof</title><pre id="status">running…</pre>
+<script type="module">
+import {instantiateWasmGc,instantiateLinked,bindClosedExports} from './host.js';
+const load=async file=>new Uint8Array(await(await fetch(file,{cache:'no-store'})).arrayBuffer());
+try {
+ const profile=await(await fetch('./model.closed.json',{cache:'no-store'})).json();
+ const model=await instantiateWasmGc(await load('./model.wasm'));model.main();const e=bindClosedExports(model.instance.exports,profile);
+ const trace=[e.total(),e.update(0,5),e.enable(1,false),e.update(1,8),e.enable(1,true)];
+ if(JSON.stringify(trace)!=='[26,47,35,35,59]'||typeof e.active(0)!=='boolean')throw Error('model mismatch');
+ let rejected=0;for(const action of [()=>e.update({},2),()=>e.update(0),()=>e.enable(0,'yes')]){try{action();}catch(err){if(err instanceof TypeError)rejected++;else throw err;}}
+ if(rejected!==3)throw Error('boundary checks failed');
+ const merged=await instantiateLinked(await load('./merged.wasm'),{model:{}});merged.modules.model.main();const result=merged.instance.exports.drive();if(result!==54)throw Error('merged caller mismatch');
+ document.querySelector('#status').textContent=JSON.stringify({passed:true,profile:profile.profile,trace,rejected,mergedCaller:result},null,2)+'\nPASS';
+}catch(error){document.querySelector('#status').textContent='FAIL '+String(error?.stack??error);}
+</script>

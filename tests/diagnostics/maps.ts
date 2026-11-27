@@ -4,7 +4,7 @@
 // Boolean keys compile alongside the remaining value and method fences.
 const byFlag = new Map<boolean, string>();
 
-// Function values compile (closures keep their identity in the slot).
+// Values exclude functions (no closure story in the uniform value slot yet).
 const handlers = new Map<string, () => void>();
 
 // Typed nested Maps retain their identity and are supported.

@@ -1,6 +1,0 @@
-{
- "order": [
-  "<repo>/tests/corpus/guarded-native-iterables.ts"
- ],
- "diags": []
-}

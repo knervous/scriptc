@@ -1,3 +1,4 @@
+// This file was modified from scriptc (Apache-2.0); see MODIFICATIONS.md.
 import {
   F64,
   isRefCounted,
@@ -89,7 +90,8 @@ function producer(fn: IrFunction, shapes: ReadonlyMap<string, IrRecordShape>): P
         value.fields.length === shape.fields.length &&
         value.fields.every(
           (f) =>
-            !f.overflow &&
+            !f.drop &&
+        !f.overflow &&
             f.value.type.kind === "f64" &&
             scalarTemporaries(f.value) &&
             shape.fields.some((sf) => sf.name === f.name),
@@ -444,6 +446,7 @@ function literalProducer(
     literal.fields.length !== shape.fields.length ||
     !literal.fields.every(
       (f) =>
+        !f.drop &&
         !f.overflow &&
         shape.fields.some((sf) => sf.name === f.name && sf.type.kind === f.value.type.kind) &&
         ownedTemporaries(f.value),

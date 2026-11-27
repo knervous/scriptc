@@ -1,3 +1,4 @@
+// This file was modified from scriptc (Apache-2.0); see MODIFICATIONS.md.
 /* Object guard groups, the backend half (shape-tier design 3.3; the plan
  * is ir/js-groups.ts, the record scr_js_group_probe in scr_js_object.c).
  *
@@ -25,7 +26,7 @@ import { emitBorrowedInput } from "./borrowed-inputs.js";
 import { DYN_KIND } from "./dyn.js";
 import type { ExprOf, LlValue, LlvmEmitterContext } from "./expr-context.js";
 import { asResult, gep, helperCall, jsIcSiteOf, kindIs, load } from "./js-ic.js";
-import { JS_BITS } from "./jsval-encoding.js";
+import { JS_BITS } from "./jsword-encoding.js";
 
 type Host = LlvmEmitterContext;
 

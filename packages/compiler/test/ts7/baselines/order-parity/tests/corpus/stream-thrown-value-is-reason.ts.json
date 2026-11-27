@@ -1,6 +1,0 @@
-{
- "order": [
-  "<repo>/tests/corpus/stream-thrown-value-is-reason.ts"
- ],
- "diags": []
-}

@@ -1,7 +1,0 @@
-{
- "order": [
-  "<repo>/tests/corpus/js-lazy-chunk-loader/loader.mjs",
-  "<repo>/tests/corpus/js-lazy-chunk-loader/main.ts"
- ],
- "diags": []
-}

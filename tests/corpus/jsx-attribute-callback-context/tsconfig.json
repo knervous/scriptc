@@ -1,8 +1,0 @@
-{
-  "compilerOptions": {
-    "strict": true,
-    "module": "nodenext",
-    "jsx": "react-jsx",
-    "jsxImportSource": "#jsx"
-  }
-}

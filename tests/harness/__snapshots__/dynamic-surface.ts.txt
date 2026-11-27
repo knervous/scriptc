@@ -1,8 +1,17 @@
-dynamic-surface.ts:13:38 - error SC2020: 'Number.prototype.toLocaleString at locale "de-DE"' is part of the standard library types but has no scriptc lowering yet
+dynamic-surface.ts:11:15 - error SC2012: '.toPrecision()' on numbers runs in the embedded dynamic engine, which this build does not include
 
-  12 | const tau = Math.PI * 2;
-  13 | const price = (19.99).toLocaleString("de-DE");
-     |                                      ^~~~~~~
-  14 | const n = Number.parseFloat("3.14");
+  10 | const tau = Math.PI * 2;
+  11 | const price = (19.99).toPrecision(4);
+     |               ^~~~~~~~~~~~~~~~~~~~~~
+  12 | const n = Number.parseFloat("3.14");
 
-  hint: which locale Node picks for a requested tag is locale negotiation, which is not modelled; the default locale (no argument), "en-US" and "en" compile
+  hint: build with --dynamic to run this call in the embedded engine (adds ~620KB to the binary); static builds never include it
+
+dynamic-surface.ts:12:11 - error SC2012: 'Number.parseFloat' runs in the embedded dynamic engine, which this build does not include
+
+  11 | const price = (19.99).toPrecision(4);
+  12 | const n = Number.parseFloat("3.14");
+     |           ^~~~~~~~~~~~~~~~~~~~~~~~~
+  13 | void n;
+
+  hint: build with --dynamic to run this call in the embedded engine (adds ~620KB to the binary); static builds never include it

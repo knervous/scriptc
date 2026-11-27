@@ -1,3 +1,4 @@
+// This file was modified from scriptc (Apache-2.0); see MODIFICATIONS.md.
 #pragma once
 
 #include <cstdint>
@@ -23,6 +24,8 @@ struct EmitOptions {
   std::string RelocationModel = "pic";
   std::string DiagnosticFormat = "json";
   std::string SourcePath;
+  /* The CPU the code is tuned and feature-selected for (`apple-m1`: every Apple silicon Mac); generic otherwise. */
+  std::string Cpu = "generic";
   // Runtime bitcode whose small functions are imported available_externally.
   std::vector<std::string> ImportBitcode;
   // Private directory for reusable partition artifacts; empty disables reuse.

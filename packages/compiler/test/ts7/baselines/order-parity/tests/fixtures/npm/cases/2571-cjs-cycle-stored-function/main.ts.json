@@ -1,6 +1,0 @@
-{
- "order": [
-  "<repo>/tests/fixtures/npm/cases/2571-cjs-cycle-stored-function/main.ts"
- ],
- "diags": []
-}

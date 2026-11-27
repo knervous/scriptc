@@ -1,3 +1,4 @@
+// This file was modified from scriptc (Apache-2.0); see MODIFICATIONS.md.
 /* Inline-cache sites of the dynamic tier (two-tier design stage S4).
  *
  * Lowering builds every dynamic property access on a constant key as a
@@ -380,7 +381,7 @@ export class JsIcSites {
 
   /** Whether `e` is the receiver itself for every ordinary object or array:
    * the receiver, or a chain of property-bag helpers applied to it. A
-   * conversion between the dyn and jsval forms keeps the object it holds. */
+   * conversion between the dyn and jsword forms keeps the object it holds. */
   private bagOf(e: IrExpr, receiver: string): boolean {
     if (isVar(e, receiver)) return true;
     if (e.kind === "libCall" && (e.fn === "js.toDyn" || e.fn === "js.fromDyn"))

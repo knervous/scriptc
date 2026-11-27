@@ -1,6 +1,0 @@
-{
- "order": [
-  "<repo>/tests/corpus/async-local-storage-with-scope.cjs"
- ],
- "diags": []
-}

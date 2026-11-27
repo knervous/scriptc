@@ -1,6 +1,0 @@
-{
- "order": [
-  "<repo>/tests/corpus/2403-kill-continue-backedge.ts"
- ],
- "diags": []
-}

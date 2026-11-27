@@ -1,7 +1,0 @@
-{
- "order": [
-  "<repo>/tests/corpus/js-class-method-omitted-callbacks/helper.js",
-  "<repo>/tests/corpus/js-class-method-omitted-callbacks/main.ts"
- ],
- "diags": []
-}

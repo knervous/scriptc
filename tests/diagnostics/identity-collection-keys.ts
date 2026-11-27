@@ -34,8 +34,7 @@ narrow.get(wide as Key);
 members.delete((wide as Key)!);
 new Set<Key>([wide as Key]);
 
-// A dynamic array or tuple seed is the sequence of keys, not one key: the
-// checked array conversion runs and every element keeps its identity.
+// Dynamic array/tuple seeds would copy their reference elements too.
 const unknownKeys: unknown = [{ id: 1 }];
 new Set<Key>(unknownKeys as Key[]);
 new Set<Key>(unknownKeys as [Key]);

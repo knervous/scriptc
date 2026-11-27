@@ -1,3 +1,4 @@
+// This file was modified from scriptc (Apache-2.0); see MODIFICATIONS.md.
 #include "scr_runtime.h"
 
 #include <math.h>
@@ -2404,6 +2405,11 @@ void scr_arr_set_len(ScrArr *a, double length) {
     scr_arr_invalid_length(length);
     return;
   }
+  if (scr_arr_frozen(a)) {
+    static const char message[] = "Cannot assign to read only property 'length' of object '[object Array]'";
+    scr_throw_error_msg(SCR_ERR_TYPE, message, sizeof message - 1);
+    return;
+  }
   size_t next = (size_t)length;
   if (next < a->len) {
     scr_arr_cut(a, next);
@@ -2925,6 +2931,26 @@ void *scr_arr_get_ref(ScrArr *a, double i) {
   return p;
 }
 
+/* ── frozen arrays ─────────────────────────────────────────────────────────
+ * Object.freeze of a compiled array sets `frozen`; every write after it refuses as WasmGC's compiled arrays do (a
+ * TypeError in V8's wording, strict or not), releasing the element the write would have moved in. A refusal while an
+ * exception is already pending (a variadic push's later values) only releases. */
+static bool scr_arr_refuses(ScrArr *a, double index, bool indexed, const uint64_t *moved) {
+  if (!scr_arr_frozen(a)) return false;
+  if (moved && scr_elem_is_ref(a->elem)) scr_elem_release(a, *moved);
+  if (scr_exc_pending()) return true;
+  char message[160];
+  size_t idx;
+  if (!indexed || !scr_arr_valid_index(index, &idx))
+    snprintf(message, sizeof message, "Cannot assign to read only property of a frozen array");
+  else if (idx < a->len)
+    snprintf(message, sizeof message, "Cannot assign to read only property '%zu' of object '[object Array]'", idx);
+  else
+    snprintf(message, sizeof message, "Cannot add property %zu, object is not extensible", idx);
+  scr_throw_error_msg(SCR_ERR_TYPE, message, strlen(message));
+  return true;
+}
+
 void *scr_arr_borrow_ref(ScrArr *a, double i) {
   return scr_slot_to_ptr(scr_arr_require_slot(a, i));
 }
@@ -2932,6 +2958,7 @@ void *scr_arr_borrow_ref(ScrArr *a, double i) {
 /* ── writes: i == len appends ──────────────────────────────────────────── */
 
 static void scr_arr_set_slot(ScrArr *a, double i, uint64_t slot) {
+  if (scr_arr_refuses(a, i, true, &slot)) return;
   size_t idx;
   if (!scr_arr_valid_index(i, &idx)) {
     scr_arr_prop_set(a, i, slot);
@@ -2968,6 +2995,7 @@ void scr_arr_set_ref(ScrArr *a, double i, void *v) {
 }
 
 void scr_arr_set_undefined(ScrArr *a, double i) {
+  if (scr_arr_refuses(a, i, true, NULL)) return;
   size_t idx;
   if (!scr_arr_valid_index(i, &idx)) {
     scr_arr_prop_set_undefined(a, i);
@@ -3017,6 +3045,7 @@ void scr_dyn_foreign_throw(ScrDyn *value, const char *want) {
 }
 
 bool scr_arr_delete(ScrArr *a, double i) {
+  if (scr_arr_refuses(a, 0, false, NULL)) return false;
   size_t idx;
   if (!scr_arr_valid_index(i, &idx)) return scr_arr_prop_delete(a, i);
   if (idx >= a->len) return false;
@@ -3030,6 +3059,7 @@ bool scr_arr_delete(ScrArr *a, double i) {
 /* ── push / pop ────────────────────────────────────────────────────────── */
 
 static double scr_arr_push_slot(ScrArr *a, uint64_t slot) {
+  if (scr_arr_refuses(a, (double)a->len, true, &slot)) return (double)a->len;
   /* scr_arr_check_index(a, len, true) without the double round trip: the
    * length is an integer, so only the upper bound can fail. */
   if (a->len > SCR_ARR_MAX_INDEX) scr_arr_trap_oob(SCR_ARR_LEN_F64(a->len), a->len);
@@ -3076,6 +3106,7 @@ double scr_arr_push_many(ScrArr *a, size_t count, const uint64_t *slots) {
 }
 
 double scr_arr_push_spread(ScrArr *a, const ScrArr *src) {
+  if (scr_arr_refuses(a, (double)a->len, true, NULL)) return (double)a->len;
   size_t old_len = a->len;
   size_t add = src->len;
   if (add > SCR_ARR_MAX_LENGTH - old_len) scr_arr_oom();
@@ -3196,6 +3227,7 @@ void scr_arr_reserve_len(ScrArr *a, double n) {
  * retains its source, snapshots the count, and handles self-spread after the
  * tail move by reading the relocated original block. */
 static double scr_arr_unshift_slot(ScrArr *a, uint64_t slot) {
+  if (scr_arr_refuses(a, 0, false, &slot)) return (double)a->len;
   if (a->len == SCR_ARR_MAX_LENGTH) {
     scr_arr_trap_oob(SCR_ARR_LEN_F64(a->len), a->len);
   }
@@ -3289,6 +3321,7 @@ double scr_arr_unshift_many(ScrArr *a, size_t count, const uint64_t *slots) {
 }
 
 double scr_arr_unshift_spread(ScrArr *a, const ScrArr *src) {
+  if (scr_arr_refuses(a, 0, false, NULL)) return (double)a->len;
   size_t old_len = a->len;
   size_t add = src->len;
   if (add == 0) return (double)old_len;
@@ -3344,6 +3377,7 @@ double scr_arr_unshift_spread(ScrArr *a, const ScrArr *src) {
 }
 
 ScrArr *scr_arr_reverse(ScrArr *a) {
+  if (scr_arr_refuses(a, 0, false, NULL)) return scr_arr_retain(a);
   size_t len = a->len;
   if (!scr_arr_has_states(a)) {
     for (size_t i = 0; i < len / 2; i++) {
@@ -3387,6 +3421,7 @@ ScrArr *scr_arr_reverse(ScrArr *a) {
 
 uint8_t scr_arr_pop_state(ScrArr *a, uint64_t *slot_out) {
   if (slot_out) *slot_out = 0;
+  if (a->len && scr_arr_refuses(a, 0, false, NULL)) return SCR_ARR_HOLE;
   if (a->len == 0) return SCR_ARR_HOLE;
   size_t idx = a->len - 1;
   if (!scr_arr_has_states(a)) {
@@ -3428,6 +3463,7 @@ void *scr_arr_pop_ref(ScrArr *a) { return scr_slot_to_ptr(scr_arr_pop_slot(a)); 
  * retain). */
 uint8_t scr_arr_shift_state(ScrArr *a, uint64_t *slot_out) {
   if (slot_out) *slot_out = 0;
+  if (a->len && scr_arr_refuses(a, 0, false, NULL)) return SCR_ARR_HOLE;
   if (a->len == 0) return SCR_ARR_HOLE;
   size_t old_len = a->len;
   if (scr_arr_is_dense(a)) {
@@ -3488,7 +3524,13 @@ void *scr_arr_shift_ref(ScrArr *a) { return scr_slot_to_ptr(scr_arr_shift_slot(a
  * elements come back as a fresh +1 array IN ORDER, their ownership MOVED
  * out of the receiver (no retain/release churn); the tail slides down.
  * Borrows a. */
+/* A refused splice's result: a fresh empty array of the receiver's kind (+1). */
+static ScrArr *scr_arr_new_empty_like(const ScrArr *a) {
+  return a->elem == SCR_ELEM_REF ? scr_arr_new_ops(scr_arr_ops(a), 1) : scr_arr_new(a->elem, 1);
+}
+
 ScrArr *scr_arr_splice(ScrArr *a, double start, double deleteCount) {
+  if (scr_arr_refuses(a, 0, false, NULL)) return scr_arr_new_empty_like(a);
   double len = SCR_ARR_LEN_F64(a->len);
   double s0 = isnan(start) ? 0 : trunc(start);
   if (s0 < 0) s0 += len;
@@ -3569,6 +3611,7 @@ ScrArr *scr_arr_splice(ScrArr *a, double start, double deleteCount) {
  * appending the tail follows indexed copying (holes stay holes). */
 ScrArr *scr_arr_splice_insert(ScrArr *a, double start, double deleteCount,
                               const ScrArr *items) {
+  if (scr_arr_refuses(a, 0, false, NULL)) return scr_arr_new_empty_like(a);
   double len = SCR_ARR_LEN_F64(a->len);
   double s0 = isnan(start) ? 0 : trunc(start);
   if (s0 < 0) s0 += len;

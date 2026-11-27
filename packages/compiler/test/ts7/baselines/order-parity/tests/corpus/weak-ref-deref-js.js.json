@@ -1,6 +1,0 @@
-{
- "order": [
-  "<repo>/tests/corpus/weak-ref-deref-js.js"
- ],
- "diags": []
-}

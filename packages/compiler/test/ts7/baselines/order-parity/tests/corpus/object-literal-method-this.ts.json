@@ -1,6 +1,0 @@
-{
- "order": [
-  "<repo>/tests/corpus/object-literal-method-this.ts"
- ],
- "diags": []
-}

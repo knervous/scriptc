@@ -1,6 +1,0 @@
-{
- "order": [
-  "<repo>/tests/diagnostics/types-only-workspace-package-value-import/main.ts"
- ],
- "diags": []
-}

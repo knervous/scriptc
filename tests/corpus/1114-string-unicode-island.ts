@@ -1,3 +1,4 @@
+// @dynamic
 // Astral-plane and special-cased strings cross the boundary intact (UTF-8
 // on the static side, engine UTF-16 inside): supplementary-plane case
 // pairs (Deseret), 1:many mappings (ß → SS), context-sensitive Greek final

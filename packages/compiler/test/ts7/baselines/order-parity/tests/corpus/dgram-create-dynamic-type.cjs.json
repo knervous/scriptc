@@ -1,6 +1,0 @@
-{
- "order": [
-  "<repo>/tests/corpus/dgram-create-dynamic-type.cjs"
- ],
- "diags": []
-}

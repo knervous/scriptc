@@ -1,6 +1,0 @@
-{
- "order": [
-  "<repo>/tests/corpus/4641-nothrow-try-catch.ts"
- ],
- "diags": []
-}

@@ -1,6 +1,0 @@
-{
- "order": [
-  "<repo>/tests/corpus/5341-integer-recursion-boundaries.ts"
- ],
- "diags": []
-}

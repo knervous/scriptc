@@ -1,6 +1,0 @@
-{
- "order": [
-  "<repo>/tests/corpus/spawn-detached-spread-order.ts"
- ],
- "diags": []
-}

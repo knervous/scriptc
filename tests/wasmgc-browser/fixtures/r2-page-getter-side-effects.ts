@@ -1,0 +1,1 @@
+const h:any=globalThis;const r:{n:number}=h.auditMakeAccessor();console.log('before',h.auditAccessorHits());console.log(r.n,'after',h.auditAccessorHits());

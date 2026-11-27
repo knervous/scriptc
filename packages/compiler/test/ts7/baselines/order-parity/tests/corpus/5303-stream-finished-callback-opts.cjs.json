@@ -1,6 +1,0 @@
-{
- "order": [
-  "<repo>/tests/corpus/5303-stream-finished-callback-opts.cjs"
- ],
- "diags": []
-}

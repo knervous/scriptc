@@ -1,6 +1,0 @@
-{
- "order": [
-  "<repo>/tests/corpus/9365-instanceof-union-indexed-class-arm.ts"
- ],
- "diags": []
-}

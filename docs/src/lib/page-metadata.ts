@@ -1,7 +1,6 @@
 import type { Metadata } from "next";
-import { versionedOgImage } from "./og-version";
 import { PAGE_TITLES } from "./page-titles";
-import { description, ogHomeTitle, siteName } from "./site";
+import { description, siteName } from "./site";
 
 export function pageMetadata(slug: string): Metadata {
   const title = PAGE_TITLES[slug];
@@ -9,7 +8,7 @@ export function pageMetadata(slug: string): Metadata {
 
   const displayTitle = title.replace(/\n/g, " ");
   const fullTitle = `${displayTitle} | ${siteName}`;
-  const ogImageUrl = versionedOgImage(slug ? `/og/${slug}` : "/og", slug ? title : ogHomeTitle);
+  const ogImageUrl = slug ? `/og/${slug}` : "/og";
 
   return {
     title: displayTitle,

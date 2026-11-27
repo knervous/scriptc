@@ -1,6 +1,0 @@
-{
- "order": [
-  "<repo>/tests/corpus/process-stdio-descriptors.cjs"
- ],
- "diags": []
-}

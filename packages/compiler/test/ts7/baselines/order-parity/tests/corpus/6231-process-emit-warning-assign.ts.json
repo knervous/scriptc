@@ -1,6 +1,0 @@
-{
- "order": [
-  "<repo>/tests/corpus/6231-process-emit-warning-assign.ts"
- ],
- "diags": []
-}

@@ -1,6 +1,0 @@
-{
- "order": [
-  "<repo>/tests/diagnostics/variadic-function-slot-count.ts"
- ],
- "diags": []
-}

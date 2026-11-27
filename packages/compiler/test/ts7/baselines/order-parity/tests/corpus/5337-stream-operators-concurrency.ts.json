@@ -1,6 +1,0 @@
-{
- "order": [
-  "<repo>/tests/corpus/5337-stream-operators-concurrency.ts"
- ],
- "diags": []
-}

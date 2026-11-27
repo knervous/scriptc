@@ -1,3 +1,4 @@
+// This file was modified from scriptc (Apache-2.0); see MODIFICATIONS.md.
 /* Ask 4: the integer-boundary inference — a flow-sensitive forward abstract
  * interpretation over the lowered IR that PROVES wholeness and range for
  * every value reaching a profile-declared i64/u64 boundary slot, or REFUSES
@@ -24,9 +25,9 @@
  *      adjacent integers stop being distinguishable); u64 additionally
  *      requires a non-negative lower bound.
  *
- * No reinterpretation, no truncation, no coercion the author didn't
- * write: a proven crossing is the mathematically exact integer the f64
- * held. One consequence decided here: -0 is a whole
+ * Never reinterpretation, never silent truncation, never a coercion the
+ * author didn't write: a proven crossing is the mathematically exact
+ * integer the f64 held. One consequence decided here: -0 is a whole
  * number (the f64 spelling of integer zero) — it crosses as 0, a PROVE.
  *
  * The abstract domain is an interval over the extended reals joined with
@@ -71,7 +72,15 @@
  *
  * Runs ONLY for library builds whose profile declares at least one
  * integer slot; the executable lane never calls it. */
-import type { IrExpr, IrFunction, IrModule, IrNumBinOp, IrStmt, IrType, SrcLoc } from "../ir/ir.js";
+import type {
+  IrExpr,
+  IrFunction,
+  IrModule,
+  IrNumBinOp,
+  IrStmt,
+  IrType,
+  SrcLoc,
+} from "../ir/ir.js";
 
 /* ── the abstract domain ────────────────────────────────────────────────── */
 
@@ -98,13 +107,7 @@ export interface AbsVal {
 
 const normZero = (x: number): number => (Object.is(x, -0) ? 0 : x);
 
-function absVal(
-  lo: number,
-  hi: number,
-  whole: boolean,
-  maybeNaN: boolean,
-  spelling?: string,
-): AbsVal {
+function absVal(lo: number, hi: number, whole: boolean, maybeNaN: boolean, spelling?: string): AbsVal {
   lo = normZero(lo);
   hi = normZero(hi);
   // Infinities are not integers: a set with a non-finite bound may
@@ -130,10 +133,8 @@ function constVal(value: number, spelling?: string): AbsVal {
 }
 
 /** Least upper bound: interval hull, wholeness/NaN pessimism, spelling
- * kept only when both sides carry the same one. Exported for the slot
- * config, where an aliased unit's parameter seed is the hull of every
- * inbound shape its exports prove. */
-export function join(a: AbsVal, b: AbsVal): AbsVal {
+ * kept only when both sides carry the same one. */
+function join(a: AbsVal, b: AbsVal): AbsVal {
   if (isBottom(a)) return b;
   if (isBottom(b)) return a;
   const numA = hasNumeric(a);
@@ -146,13 +147,7 @@ export function join(a: AbsVal, b: AbsVal): AbsVal {
 }
 
 function sameVal(a: AbsVal, b: AbsVal): boolean {
-  return (
-    a.lo === b.lo &&
-    a.hi === b.hi &&
-    a.whole === b.whole &&
-    a.maybeNaN === b.maybeNaN &&
-    a.spelling === b.spelling
-  );
+  return a.lo === b.lo && a.hi === b.hi && a.whole === b.whole && a.maybeNaN === b.maybeNaN && a.spelling === b.spelling;
 }
 
 /* Threshold widening: when a loop-header join keeps growing, jump each
@@ -186,16 +181,14 @@ function transferAdd(a: AbsVal, b: AbsVal): AbsVal {
   let maybeNaN = a.maybeNaN || b.maybeNaN;
   if (!hasNumeric(a) || !hasNumeric(b)) return { ...BOTTOM, maybeNaN };
   // Infinity + -Infinity = NaN: possible when opposite infinities meet.
-  if ((a.hi === Infinity && b.lo === -Infinity) || (a.lo === -Infinity && b.hi === Infinity))
-    maybeNaN = true;
+  if ((a.hi === Infinity && b.lo === -Infinity) || (a.lo === -Infinity && b.hi === Infinity)) maybeNaN = true;
   return absVal(a.lo + b.lo, a.hi + b.hi, a.whole && b.whole, maybeNaN);
 }
 
 function transferSub(a: AbsVal, b: AbsVal): AbsVal {
   let maybeNaN = a.maybeNaN || b.maybeNaN;
   if (!hasNumeric(a) || !hasNumeric(b)) return { ...BOTTOM, maybeNaN };
-  if ((a.hi === Infinity && b.hi === Infinity) || (a.lo === -Infinity && b.lo === -Infinity))
-    maybeNaN = true;
+  if ((a.hi === Infinity && b.hi === Infinity) || (a.lo === -Infinity && b.lo === -Infinity)) maybeNaN = true;
   return absVal(a.lo - b.hi, a.hi - b.lo, a.whole && b.whole, maybeNaN);
 }
 
@@ -208,12 +201,7 @@ function transferMul(a: AbsVal, b: AbsVal): AbsVal {
   const aInf = a.lo === -Infinity || a.hi === Infinity;
   const bInf = b.lo === -Infinity || b.hi === Infinity;
   if ((aHasZero && bInf) || (bHasZero && aInf)) maybeNaN = true;
-  const p = [
-    boundMul(a.lo, b.lo),
-    boundMul(a.lo, b.hi),
-    boundMul(a.hi, b.lo),
-    boundMul(a.hi, b.hi),
-  ];
+  const p = [boundMul(a.lo, b.lo), boundMul(a.lo, b.hi), boundMul(a.hi, b.lo), boundMul(a.hi, b.hi)];
   return absVal(Math.min(...p), Math.max(...p), a.whole && b.whole, maybeNaN);
 }
 
@@ -281,17 +269,12 @@ function transferBitwise(op: IrNumBinOp, a: AbsVal, b: AbsVal): AbsVal {
     const x = a.lo;
     const y = b.lo;
     const r =
-      op === "&"
-        ? x & y
-        : op === "|"
-          ? x | y
-          : op === "^"
-            ? x ^ y
-            : op === "<<"
-              ? x << y
-              : op === ">>"
-                ? x >> y
-                : x >>> y;
+      op === "&" ? x & y :
+      op === "|" ? x | y :
+      op === "^" ? x ^ y :
+      op === "<<" ? x << y :
+      op === ">>" ? x >> y :
+      x >>> y;
     return constVal(r);
   }
   if (op === ">>>") return absVal(0, 2 ** 32 - 1, true, false);
@@ -311,24 +294,13 @@ function transferNeg(a: AbsVal): AbsVal {
 
 function transferBin(op: IrNumBinOp, a: AbsVal, b: AbsVal): AbsVal {
   switch (op) {
-    case "+":
-      return transferAdd(a, b);
-    case "-":
-      return transferSub(a, b);
-    case "*":
-      return transferMul(a, b);
-    case "/":
-      return transferDiv(a, b);
-    case "%":
-      return transferMod(a, b);
-    case "**":
-      return transferPow(a, b);
-    case "&":
-    case "|":
-    case "^":
-    case "<<":
-    case ">>":
-    case ">>>":
+    case "+": return transferAdd(a, b);
+    case "-": return transferSub(a, b);
+    case "*": return transferMul(a, b);
+    case "/": return transferDiv(a, b);
+    case "%": return transferMod(a, b);
+    case "**": return transferPow(a, b);
+    case "&": case "|": case "^": case "<<": case ">>": case ">>>":
       return transferBitwise(op, a, b);
     default:
       // Comparisons produce bool, not a numeric abstract value.
@@ -342,14 +314,7 @@ function transferBin(op: IrNumBinOp, a: AbsVal, b: AbsVal): AbsVal {
  * unbounded) or NaN (Math.trunc(NaN) is NaN — maybeNaN propagates). */
 function transferMathRound(fn: "trunc" | "floor" | "ceil" | "round", a: AbsVal): AbsVal {
   if (!hasNumeric(a)) return { ...BOTTOM, maybeNaN: a.maybeNaN };
-  const f =
-    fn === "trunc"
-      ? Math.trunc
-      : fn === "floor"
-        ? Math.floor
-        : fn === "ceil"
-          ? Math.ceil
-          : Math.round;
+  const f = fn === "trunc" ? Math.trunc : fn === "floor" ? Math.floor : fn === "ceil" ? Math.ceil : Math.round;
   return absVal(f(a.lo), f(a.hi), true, a.maybeNaN);
 }
 
@@ -365,12 +330,7 @@ function transferMinMax(fn: "min" | "max", args: AbsVal[]): AbsVal {
   if (args.some((v) => !hasNumeric(v))) return { ...BOTTOM, maybeNaN };
   const lo = fn === "min" ? Math.min(...args.map((v) => v.lo)) : Math.max(...args.map((v) => v.lo));
   const hi = fn === "min" ? Math.min(...args.map((v) => v.hi)) : Math.max(...args.map((v) => v.hi));
-  return absVal(
-    lo,
-    hi,
-    args.every((v) => v.whole),
-    maybeNaN,
-  );
+  return absVal(lo, hi, args.every((v) => v.whole), maybeNaN);
 }
 
 /* ── the boundary check: PROVE or REFUSE ───────────────────────────────── */
@@ -412,11 +372,7 @@ function checkBoundary(v: AbsVal, path: string, cls: IntClass, loc: SrcLoc): Int
   // Representability first: the author wrote a number the program never held.
   if (v.spelling !== undefined && !spellingRoundTrips(v.spelling)) {
     return {
-      path,
-      cls,
-      loc,
-      outcome: "refuse",
-      obligation: "representability",
+      path, cls, loc, outcome: "refuse", obligation: "representability",
       detail: `the literal ${v.spelling} is not representable as f64 — it reads back as ${Number(v.spelling)}`,
       fix: "write the nearest representable integer explicitly, or restructure so the value stays within ±(2^53 − 1)",
     };
@@ -427,11 +383,7 @@ function checkBoundary(v: AbsVal, path: string, cls: IntClass, loc: SrcLoc): Int
   }
   if (v.maybeNaN) {
     return {
-      path,
-      cls,
-      loc,
-      outcome: "refuse",
-      obligation: "wholeness",
+      path, cls, loc, outcome: "refuse", obligation: "wholeness",
       detail: "the value may be NaN, which is not a whole number",
       fix: "guard the value with a comparison before the boundary (any ordered comparison excludes NaN), then state intent with Math.trunc/Math.floor/Math.ceil/Math.round if it may be fractional",
     };
@@ -439,11 +391,7 @@ function checkBoundary(v: AbsVal, path: string, cls: IntClass, loc: SrcLoc): Int
   const min = cls === "u64" ? 0 : SAFE_MIN;
   if (!(v.lo >= min && v.hi <= SAFE_MAX)) {
     return {
-      path,
-      cls,
-      loc,
-      outcome: "refuse",
-      obligation: "range",
+      path, cls, loc, outcome: "refuse", obligation: "range",
       detail:
         `the proven range [${v.lo}, ${v.hi}] does not fit ${cls === "u64" ? `[0, ${SAFE_MAX}]` : `[${SAFE_MIN}, ${SAFE_MAX}]`} — integrality is provable only within ±(2^53 − 1)` +
         (cls === "u64" ? ", and a u64 slot additionally requires a non-negative proven range" : ""),
@@ -452,11 +400,7 @@ function checkBoundary(v: AbsVal, path: string, cls: IntClass, loc: SrcLoc): Int
   }
   if (!v.whole) {
     return {
-      path,
-      cls,
-      loc,
-      outcome: "refuse",
-      obligation: "wholeness",
+      path, cls, loc, outcome: "refuse", obligation: "wholeness",
       detail: `the value is not provably whole — the proven range [${v.lo}, ${v.hi}] may contain non-integers`,
       fix: "state intent at the boundary with Math.trunc, Math.floor, Math.ceil, or Math.round",
     };
@@ -530,18 +474,12 @@ export function hasIntSlots(cfg: IntSlotConfig): boolean {
  * marshalling wrapper). */
 export function classSeed(cls: string): AbsVal {
   switch (cls) {
-    case "i64":
-      return absVal(SAFE_MIN, SAFE_MAX, true, false);
-    case "u64":
-      return absVal(0, SAFE_MAX, true, false);
-    case "u8":
-      return absVal(0, 255, true, false);
-    case "u32":
-      return absVal(0, 2 ** 32 - 1, true, false);
-    case "i32":
-      return absVal(-(2 ** 31), 2 ** 31 - 1, true, false);
-    default:
-      return { ...TOP };
+    case "i64": return absVal(SAFE_MIN, SAFE_MAX, true, false);
+    case "u64": return absVal(0, SAFE_MAX, true, false);
+    case "u8": return absVal(0, 255, true, false);
+    case "u32": return absVal(0, 2 ** 32 - 1, true, false);
+    case "i32": return absVal(-(2 ** 31), 2 ** 31 - 1, true, false);
+    default: return { ...TOP };
   }
 }
 
@@ -642,10 +580,7 @@ function globalEffectsOf(mod: IrModule): GlobalEffects {
   const calls = new Map<string, Set<string>>();
   const unknown = new Set<string>();
 
-  // The full IrType, not a structural `{ kind: string }`: the native
-  // compiler would extract that one record arm and trap on bytes, array
-  // and every other arm that carries more fields.
-  const typeHasFunc = (t: IrType): boolean => JSON.stringify(t).includes('"func"');
+  const typeHasFunc = (t: { kind: string }): boolean => JSON.stringify(t).includes('"func"');
 
   for (const fn of mod.functions) {
     const w = new Set<string>();
@@ -692,22 +627,13 @@ function globalEffectsOf(mod: IrModule): GlobalEffects {
             } else if (item !== null && typeof item === "object") {
               // field-shaped entries ({ name, value } etc.)
               for (const sub of Object.values(item as object)) {
-                if (
-                  sub !== null &&
-                  typeof sub === "object" &&
-                  typeof (sub as { kind?: unknown }).kind === "string"
-                ) {
+                if (sub !== null && typeof sub === "object" && typeof (sub as { kind?: unknown }).kind === "string") {
                   visitExpr(sub as IrExpr);
                 }
               }
             }
           }
-        } else if (
-          v !== null &&
-          typeof v === "object" &&
-          typeof (v as { kind?: unknown }).kind === "string" &&
-          key !== "type"
-        ) {
+        } else if (v !== null && typeof v === "object" && typeof (v as { kind?: unknown }).kind === "string" && key !== "type") {
           visitExpr(v as IrExpr);
         }
       }
@@ -727,11 +653,7 @@ function globalEffectsOf(mod: IrModule): GlobalEffects {
       for (const v of Object.values(s as unknown as Record<string, unknown>)) {
         if (Array.isArray(v)) {
           for (const item of v) {
-            if (
-              item !== null &&
-              typeof item === "object" &&
-              typeof (item as { kind?: unknown }).kind === "string"
-            ) {
+            if (item !== null && typeof item === "object" && typeof (item as { kind?: unknown }).kind === "string") {
               const node = item as { kind: string };
               if (isStmtKind(node.kind)) visitStmt(item as IrStmt);
               else visitExpr(item as IrExpr);
@@ -742,11 +664,7 @@ function globalEffectsOf(mod: IrModule): GlobalEffects {
               if (Array.isArray(cs.body)) cs.body.forEach(visitStmt);
             }
           }
-        } else if (
-          v !== null &&
-          typeof v === "object" &&
-          typeof (v as { kind?: unknown }).kind === "string"
-        ) {
+        } else if (v !== null && typeof v === "object" && typeof (v as { kind?: unknown }).kind === "string") {
           const node = v as { kind: string };
           if (isStmtKind(node.kind)) visitStmt(v as IrStmt);
           else visitExpr(v as IrExpr);
@@ -783,32 +701,10 @@ function globalEffectsOf(mod: IrModule): GlobalEffects {
 }
 
 const STMT_KINDS = new Set([
-  "varDecl",
-  "assign",
-  "exprStmt",
-  "if",
-  "while",
-  "doWhile",
-  "switch",
-  "for",
-  "arraySet",
-  "arraySetLength",
-  "arraySetUndefined",
-  "arrayDelete",
-  "bytesSet",
-  "forOf",
-  "return",
-  "fieldSet",
-  "recordSet",
-  "recordKeySet",
-  "recordKeyDelete",
-  "break",
-  "continue",
-  "block",
-  "throw",
-  "runtimeFence",
-  "rethrow",
-  "tryCatch",
+  "varDecl", "assign", "exprStmt", "if", "while", "doWhile", "switch", "for",
+  "arraySet", "arraySetLength", "arraySetUndefined", "arrayDelete", "bytesSet", "forOf", "return", "fieldSet", "recordSet",
+  "recordKeySet", "recordKeyDelete", "break", "continue", "block", "throw",
+  "runtimeFence", "rethrow", "tryCatch",
 ]);
 const isStmtKind = (k: string): boolean => STMT_KINDS.has(k);
 
@@ -824,22 +720,8 @@ interface LoopFrame {
   continues: (Env | null)[];
 }
 
-const NEGATE: Record<string, string> = {
-  "<": ">=",
-  "<=": ">",
-  ">": "<=",
-  ">=": "<",
-  "===": "!==",
-  "!==": "===",
-};
-const FLIP: Record<string, string> = {
-  "<": ">",
-  "<=": ">=",
-  ">": "<",
-  ">=": "<=",
-  "===": "===",
-  "!==": "!==",
-};
+const NEGATE: Record<string, string> = { "<": ">=", "<=": ">", ">": "<=", ">=": "<", "===": "!==", "!==": "===" };
+const FLIP: Record<string, string> = { "<": ">", "<=": ">=", ">": "<", ">=": "<=", "===": "===", "!==": "!==" };
 const CMP_OPS = new Set(["<", "<=", ">", ">=", "===", "!=="]);
 const ORDERED_CMP_OPS = new Set(["<", "<=", ">", ">="]);
 
@@ -907,20 +789,12 @@ class FnAnalyzer {
       if (!this.bindingCarriesNumber(p.localId)) return;
       const declared = slots?.params[i] ?? null;
       const seed = slots?.paramSeeds[i] ?? null;
-      // Two exports may land on one unit, so the slot's declared class is
-      // the STRICTER of theirs (u64's range sits inside i64's) while the
-      // seed is the hull of the shapes every alias admits: a value can
-      // arrive through any of them, and an entry that takes a plain f64
-      // admits anything, so it bounds the binding rather than refining the
-      // class. With one declaration the two agree.
-      if (declared !== null)
-        env.set(p.localId, seed !== null ? join(classSeed(declared), seed) : classSeed(declared));
+      if (declared !== null) env.set(p.localId, classSeed(declared));
       else if (seed !== null) env.set(p.localId, { ...seed });
       else env.set(p.localId, { ...TOP });
     });
     this.collect = true;
-    this.retSlot =
-      slots !== undefined && slots.ret !== null ? { cls: slots.ret, path: slots.retPath! } : null;
+    this.retSlot = slots !== undefined && slots.ret !== null ? { cls: slots.ret, path: slots.retPath! } : null;
     this.execStmts(fn.body, env);
   }
 
@@ -951,6 +825,10 @@ class FnAnalyzer {
 
   private execStmt(s: IrStmt, env: Env): Env | null {
     switch (s.kind) {
+      case "genBindBarrier":
+        // Upstream's invisible suspension at the end of a generator's parameter
+        // prologue: no value, no binding, no env change (this fork's frontend emits none).
+        return env;
       case "varDecl": {
         if (s.init === null) return env;
         const v = this.evalExpr(s.init, env);
@@ -973,8 +851,7 @@ class FnAnalyzer {
         const thenEnv = this.refine(cloneEnv(env), s.cond, true, allowPaths);
         const elseEnv = this.refine(cloneEnv(env), s.cond, false, allowPaths);
         const a = thenEnv === null ? null : this.execStmts(s.then, thenEnv);
-        const b =
-          s.else_ === null ? elseEnv : elseEnv === null ? null : this.execStmts(s.else_, elseEnv);
+        const b = s.else_ === null ? elseEnv : elseEnv === null ? null : this.execStmts(s.else_, elseEnv);
         return joinEnv(a, b);
       }
       case "while":
@@ -991,12 +868,7 @@ class FnAnalyzer {
         });
       }
       case "doWhile":
-        return this.execLoop(env, {
-          cond: s.cond,
-          body: s.body,
-          labels: s.labels ?? [],
-          doWhile: true,
-        });
+        return this.execLoop(env, { cond: s.cond, body: s.body, labels: s.labels ?? [], doWhile: true });
       case "forOf": {
         this.evalExpr(s.iterable, env);
         const elemF64 = this.bindingCarriesNumber(s.localId);
@@ -1009,12 +881,7 @@ class FnAnalyzer {
       }
       case "switch": {
         this.evalExpr(s.disc, env);
-        const frame: LoopFrame = {
-          kind: "switch",
-          labels: s.labels ?? [],
-          breaks: [],
-          continues: [],
-        };
+        const frame: LoopFrame = { kind: "switch", labels: s.labels ?? [], breaks: [], continues: [] };
         this.frames.push(frame);
         let running: Env | null = null; // the fallthrough path
         let hasDefault = false;
@@ -1141,18 +1008,10 @@ class FnAnalyzer {
           // The finally also runs on the pending-exception and
           // pending-return paths; obligations inside it must hold there
           // too, so it executes over the havoc-joined state.
-          out = this.execStmts(
-            s.finallyBody,
-            joinEnv(out, this.havocForCatch(entry, s.tryBody)) ??
-              this.havocForCatch(entry, s.tryBody),
-          );
+          out = this.execStmts(s.finallyBody, joinEnv(out, this.havocForCatch(entry, s.tryBody)) ?? this.havocForCatch(entry, s.tryBody));
         }
         return out;
       }
-      case "genBindBarrier":
-        // An invisible suspension at the end of a generator's parameter
-        // prologue: no value, no binding, no env change.
-        return env;
     }
   }
 
@@ -1177,11 +1036,7 @@ class FnAnalyzer {
       for (const v of Object.values(s as unknown as Record<string, unknown>)) {
         if (Array.isArray(v)) {
           for (const item of v) {
-            if (
-              item !== null &&
-              typeof item === "object" &&
-              typeof (item as { kind?: unknown }).kind === "string"
-            ) {
+            if (item !== null && typeof item === "object" && typeof (item as { kind?: unknown }).kind === "string") {
               const node = item as { kind: string };
               if (isStmtKind(node.kind)) visitStmt(item as IrStmt);
               else visitExpr(item as IrExpr);
@@ -1190,11 +1045,7 @@ class FnAnalyzer {
               if (Array.isArray(cs.body)) cs.body.forEach(visitStmt);
             }
           }
-        } else if (
-          v !== null &&
-          typeof v === "object" &&
-          typeof (v as { kind?: unknown }).kind === "string"
-        ) {
+        } else if (v !== null && typeof v === "object" && typeof (v as { kind?: unknown }).kind === "string") {
           const node = v as { kind: string };
           if (isStmtKind(node.kind)) visitStmt(v as IrStmt);
           else visitExpr(v as IrExpr);
@@ -1207,19 +1058,11 @@ class FnAnalyzer {
       for (const v of Object.values(e as unknown as Record<string, unknown>)) {
         if (Array.isArray(v)) {
           for (const item of v) {
-            if (
-              item !== null &&
-              typeof item === "object" &&
-              typeof (item as { kind?: unknown }).kind === "string"
-            ) {
+            if (item !== null && typeof item === "object" && typeof (item as { kind?: unknown }).kind === "string") {
               visitExpr(item as IrExpr);
             }
           }
-        } else if (
-          v !== null &&
-          typeof v === "object" &&
-          typeof (v as { kind?: unknown }).kind === "string"
-        ) {
+        } else if (v !== null && typeof v === "object" && typeof (v as { kind?: unknown }).kind === "string") {
           visitExpr(v as IrExpr);
         }
       }
@@ -1288,10 +1131,7 @@ class FnAnalyzer {
     // (`for (;;)`) exits only through breaks.
     let exit: Env | null = null;
     if (opts.doWhile ?? false) {
-      exit =
-        opts.cond !== undefined && final.postBody !== null
-          ? this.refine(final.postBody, opts.cond, false, false)
-          : null;
+      exit = opts.cond !== undefined && final.postBody !== null ? this.refine(final.postBody, opts.cond, false, false) : null;
     } else if (opts.cond !== undefined) {
       exit = this.refine(cloneEnv(head), opts.cond, false, false);
     } else if (opts.alwaysExits ?? false) {
@@ -1310,15 +1150,7 @@ class FnAnalyzer {
    * condition, before its verdict. */
   private runLoopBodyOnce(
     head: Env,
-    opts: {
-      cond?: IrExpr;
-      body: IrStmt[];
-      update?: IrStmt;
-      labels: string[];
-      doWhile?: boolean;
-      seedEachIteration?: string;
-      alwaysExits?: boolean;
-    },
+    opts: { cond?: IrExpr; body: IrStmt[]; update?: IrStmt; labels: string[]; doWhile?: boolean; seedEachIteration?: string; alwaysExits?: boolean },
     frame?: LoopFrame,
   ): { back: Env | null; postBody: Env | null } {
     const f: LoopFrame = frame ?? { kind: "loop", labels: opts.labels, breaks: [], continues: [] };
@@ -1367,12 +1199,7 @@ class FnAnalyzer {
         const isAnd = cond.op === "&&";
         if (isAnd === branch) {
           // (a && b) true  — both held; (a || b) false — both failed.
-          return this.refine(
-            this.refine(env, cond.left, branch, allowPaths),
-            cond.right,
-            branch,
-            allowPaths,
-          );
+          return this.refine(this.refine(env, cond.left, branch, allowPaths), cond.right, branch, allowPaths);
         }
         // (a && b) false — a failed, or a held and b failed; dually for ||.
         const viaLeft = this.refine(cloneEnv(env), cond.left, branch, allowPaths);
@@ -1431,8 +1258,7 @@ class FnAnalyzer {
           // Truthy: not NaN, not zero — endpoint exclusion when whole.
           let r: AbsVal = { ...v, maybeNaN: false };
           if (r.whole && r.lo === 0 && r.hi >= 1) r = absVal(1, r.hi, r.whole, false, r.spelling);
-          else if (r.whole && r.hi === 0 && r.lo <= -1)
-            r = absVal(r.lo, -1, r.whole, false, r.spelling);
+          else if (r.whole && r.hi === 0 && r.lo <= -1) r = absVal(r.lo, -1, r.whole, false, r.spelling);
           out.set(key, r);
         } else {
           // Falsy: 0, -0, or NaN.
@@ -1505,11 +1331,7 @@ class FnAnalyzer {
         const slot = this.cfg.records.get(e.shapeId)?.get(e.field);
         if (numberCarrierKind(e.type, this.mod) === null) return { ...TOP };
         const key = this.pathKey(e, slot?.cls ?? null);
-        return key === null
-          ? slot === undefined
-            ? { ...TOP }
-            : classSeed(slot.cls)
-          : envGet(env, key);
+        return key === null ? (slot === undefined ? { ...TOP } : classSeed(slot.cls)) : envGet(env, key);
       }
       case "fieldGet": {
         if (numberCarrierKind(e.type, this.mod) === null) return { ...TOP };
@@ -1537,7 +1359,9 @@ class FnAnalyzer {
    * IR access (`m.total`, `m["total"]`) intentionally share a key; distinct
    * receiver bindings never do. Accessors/dynamic keys/computed receivers
    * have different IR nodes and are excluded. */
-  private staticAccessPath(e: IrExpr): { rootId: string | null; steps: string[][] } | null {
+  private staticAccessPath(
+    e: IrExpr,
+  ): { rootId: string | null; steps: string[][] } | null {
     switch (e.kind) {
       case "varRef":
         return { rootId: e.localId, steps: [["var", e.localId]] };
@@ -1565,8 +1389,7 @@ class FnAnalyzer {
   private pathKey(e: IrExpr, cls: IntClass | null): string | null {
     const path = this.staticAccessPath(e);
     if (path === null) return null;
-    const prefix =
-      cls === null ? PATH_TOP_PREFIX : cls === "i64" ? PATH_I64_PREFIX : PATH_U64_PREFIX;
+    const prefix = cls === null ? PATH_TOP_PREFIX : cls === "i64" ? PATH_I64_PREFIX : PATH_U64_PREFIX;
     const key = `${prefix}${JSON.stringify(path.steps)}`;
     this.pathRoots.set(key, path.rootId);
     return key;
@@ -1628,27 +1451,17 @@ class FnAnalyzer {
   /* ── expression evaluation (side effects applied to env) ────────────── */
 
   private evalMath(e: IrExpr & { kind: "libCall" }, env: Env, mutate: boolean): AbsVal | null {
-    const arg = (i: number): AbsVal =>
-      mutate ? this.evalExpr(e.args[i]!, env) : this.evalPure(e.args[i]!, env);
+    const arg = (i: number): AbsVal => (mutate ? this.evalExpr(e.args[i]!, env) : this.evalPure(e.args[i]!, env));
     switch (e.fn) {
-      case "math.trunc":
-        return transferMathRound("trunc", arg(0));
-      case "math.floor":
-        return transferMathRound("floor", arg(0));
-      case "math.ceil":
-        return transferMathRound("ceil", arg(0));
-      case "math.round":
-        return transferMathRound("round", arg(0));
-      case "math.abs":
-        return transferAbs(arg(0));
-      case "math.min":
-        return transferMinMax("min", [arg(0), arg(1)]);
-      case "math.max":
-        return transferMinMax("max", [arg(0), arg(1)]);
-      case "math.random":
-        return absVal(0, 1, false, false); // [0, 1): never NaN, never whole beyond 0
-      default:
-        return null;
+      case "math.trunc": return transferMathRound("trunc", arg(0));
+      case "math.floor": return transferMathRound("floor", arg(0));
+      case "math.ceil": return transferMathRound("ceil", arg(0));
+      case "math.round": return transferMathRound("round", arg(0));
+      case "math.abs": return transferAbs(arg(0));
+      case "math.min": return transferMinMax("min", [arg(0), arg(1)]);
+      case "math.max": return transferMinMax("max", [arg(0), arg(1)]);
+      case "math.random": return absVal(0, 1, false, false); // [0, 1): never NaN, never whole beyond 0
+      default: return null;
     }
   }
 
@@ -1660,8 +1473,7 @@ class FnAnalyzer {
   seedBindings(fn: IrFunction, mod: IrModule): void {
     this.numberBindings = new Set();
     for (const l of fn.locals) {
-      if (numberCarrierKind(l.type, mod) !== null && l.boxed !== true)
-        this.numberBindings.add(l.id);
+      if (numberCarrierKind(l.type, mod) !== null && l.boxed !== true) this.numberBindings.add(l.id);
     }
     for (const g of mod.globals ?? []) {
       if (numberCarrierKind(g.type, mod) !== null) this.numberBindings.add(g.id);
@@ -1824,9 +1636,7 @@ class FnAnalyzer {
         return { ...TOP };
       }
       case "recordLit": {
-        const slotMap = this.cfg.records.get(
-          (e.type as { kind: "record"; shapeId: string }).shapeId,
-        );
+        const slotMap = this.cfg.records.get((e.type as { kind: "record"; shapeId: string }).shapeId);
         for (const f of e.fields) {
           const v = this.evalExpr(f.value, env);
           const slot = slotMap?.get(f.name);
@@ -1840,9 +1650,7 @@ class FnAnalyzer {
         // The clone copies already-proven field values. Only explicit
         // overrides create new writes that must discharge integer slots.
         this.evalExpr(e.source, env);
-        const slotMap = this.cfg.records.get(
-          (e.type as { kind: "record"; shapeId: string }).shapeId,
-        );
+        const slotMap = this.cfg.records.get((e.type as { kind: "record"; shapeId: string }).shapeId);
         for (const f of e.overrides) {
           const v = this.evalExpr(f.value, env);
           const slot = slotMap?.get(f.name);
@@ -1862,11 +1670,7 @@ class FnAnalyzer {
         const slot = this.cfg.records.get(e.shapeId)?.get(e.field);
         if (numberCarrierKind(e.type, this.mod) !== null) {
           const key = this.pathKey(e, slot?.cls ?? null);
-          return key === null
-            ? slot === undefined
-              ? { ...TOP }
-              : classSeed(slot.cls)
-            : envGet(env, key);
+          return key === null ? (slot === undefined ? { ...TOP } : classSeed(slot.cls)) : envGet(env, key);
         }
         return { ...TOP };
       }
@@ -1927,31 +1731,18 @@ function childExprs(e: IrExpr): IrExpr[] {
     if (Array.isArray(v)) {
       for (const item of v) {
         if (item !== null && typeof item === "object") {
-          if (
-            typeof (item as { kind?: unknown }).kind === "string" &&
-            !isStmtKind((item as { kind: string }).kind)
-          ) {
+          if (typeof (item as { kind?: unknown }).kind === "string" && !isStmtKind((item as { kind: string }).kind)) {
             out.push(item as IrExpr);
           } else {
             for (const sub of Object.values(item as object)) {
-              if (
-                sub !== null &&
-                typeof sub === "object" &&
-                typeof (sub as { kind?: unknown }).kind === "string" &&
-                !isStmtKind((sub as { kind: string }).kind)
-              ) {
+              if (sub !== null && typeof sub === "object" && typeof (sub as { kind?: unknown }).kind === "string" && !isStmtKind((sub as { kind: string }).kind)) {
                 out.push(sub as IrExpr);
               }
             }
           }
         }
       }
-    } else if (
-      v !== null &&
-      typeof v === "object" &&
-      typeof (v as { kind?: unknown }).kind === "string" &&
-      !isStmtKind((v as { kind: string }).kind)
-    ) {
+    } else if (v !== null && typeof v === "object" && typeof (v as { kind?: unknown }).kind === "string" && !isStmtKind((v as { kind: string }).kind)) {
       out.push(v as IrExpr);
     }
   }

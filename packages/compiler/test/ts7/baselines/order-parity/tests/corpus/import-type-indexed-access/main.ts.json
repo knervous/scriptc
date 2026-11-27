@@ -1,7 +1,0 @@
-{
- "order": [
-  "<repo>/tests/corpus/import-type-indexed-access/n.js",
-  "<repo>/tests/corpus/import-type-indexed-access/main.ts"
- ],
- "diags": []
-}

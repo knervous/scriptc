@@ -1,6 +1,0 @@
-{
- "order": [
-  "<repo>/tests/corpus/native-callback-dispatch.ts"
- ],
- "diags": []
-}

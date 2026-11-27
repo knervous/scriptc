@@ -1,6 +1,7 @@
+// This file was modified from scriptc (Apache-2.0); see MODIFICATIONS.md.
 /** Check the only JSON string form the native runtime cannot yet retain.
  * JSON.parse itself validates grammar. A valid surrogate pair is preserved;
- * a lone escape must not change a type literal or symbol name. */
+ * a lone escape must not silently change a type literal or symbol name. */
 export function checkSemanticJsonStrings(json: string, preservesSurrogates: boolean): void {
   // Most checker responses contain no Unicode escapes. Inspect only escape
   // sequences instead of mapping every native string index to UTF-16. Valid
@@ -13,10 +14,7 @@ export function checkSemanticJsonStrings(json: string, preservesSurrogates: bool
     if (unit < 0xd800 || unit > 0xdfff) continue;
     if (unit <= 0xdbff && json.charCodeAt(index + 1) === 92 && json.charCodeAt(index + 2) === 117) {
       const next = jsonHexUnit(json, index + 3);
-      if (next >= 0xdc00 && next <= 0xdfff) {
-        index += 6;
-        continue;
-      }
+      if (next >= 0xdc00 && next <= 0xdfff) { index += 6; continue; }
     }
     throw new Error("TypeScript semantic response: runtime cannot preserve lone UTF-16 surrogates");
   }
@@ -27,14 +25,7 @@ function jsonHexUnit(json: string, offset: number): number {
   let value = 0;
   for (let index = offset; index < offset + 4; index++) {
     const code = json.charCodeAt(index);
-    const digit =
-      code >= 48 && code <= 57
-        ? code - 48
-        : code >= 65 && code <= 70
-          ? code - 55
-          : code >= 97 && code <= 102
-            ? code - 87
-            : -1;
+    const digit = code >= 48 && code <= 57 ? code - 48 : code >= 65 && code <= 70 ? code - 55 : code >= 97 && code <= 102 ? code - 87 : -1;
     if (digit < 0) return -1;
     value = value * 16 + digit;
   }
@@ -76,8 +67,8 @@ function malformedReply(): never {
 
 /** The index after the JSON value that starts at `start`: an object, an
  * array, a string or a bare literal. Strings are skipped with their escapes,
- * so brackets inside them do not count. Throws when the value is unclosed. */
-export function jsonValueEnd(bytes: Uint8Array, start: number): number {
+ * so brackets inside them do not count. */
+function jsonValueEnd(bytes: Uint8Array, start: number): number {
   let depth = 0;
   let index = start;
   while (index < bytes.length) {
@@ -101,27 +92,6 @@ export function jsonValueEnd(bytes: Uint8Array, start: number): number {
   }
   if (depth !== 0) malformedReply();
   return index;
-}
-
-/** The scanner the decoders find value ends with: jsonValueEnd, or the
- * native compiler's scanner (useNativeJsonValueEnd). It is a property of a
- * constant object: a program that installs the scanner but decodes no
- * reply must still initialize it, and an assigned module variable with no
- * other reader would be left uninitialized by a native build. */
-const scanner: { valueEnd: (bytes: Uint8Array, start: number) => number } = {
-  valueEnd: jsonValueEnd,
-};
-
-/** Has the decoders find value ends with `scan`, which returns what
- * jsonValueEnd returns, or -1 where jsonValueEnd throws. The native compiler
- * installs its C scanner (native/ts7-process.c), which skips the strings that
- * make up most reply bytes with memchr. */
-export function useNativeJsonValueEnd(scan: (bytes: Uint8Array, start: number) => number): void {
-  scanner.valueEnd = (bytes, start) => {
-    const end = scan(bytes, start);
-    if (end < 0) malformedReply();
-    return end;
-  };
 }
 
 /** The id an object reply starts with (`{"id":N`), or -1 when it starts
@@ -149,7 +119,7 @@ function parseJsonSlice<T>(bytes: Uint8Array, start: number, end: number): T {
 
 /** One element of a reply: null, or the object with leading id `id`. Objects
  * the caller already holds under that id are not decoded. */
-function replyElement<T extends object, R>(
+function replyElement<T extends { id: number }, R>(
   bytes: Uint8Array,
   start: number,
   end: number,
@@ -172,14 +142,14 @@ function replyElement<T extends object, R>(
  * reply is null. Objects the caller already holds under their id, which a
  * reply repeats whenever it names them, are returned from `cached` without
  * decoding their text; the rest are decoded and handed to `build`. */
-export function decodeSemanticObject<T extends object, R>(
+export function decodeSemanticObject<T extends { id: number }, R>(
   bytes: Uint8Array,
   cached: (id: number) => R | undefined,
   build: (data: T) => R,
 ): R | null {
   const start = skipJsonSpace(bytes, 0);
   if (start === bytes.length) return null;
-  const end = scanner.valueEnd(bytes, start);
+  const end = jsonValueEnd(bytes, start);
   if (skipJsonSpace(bytes, end) !== bytes.length) malformedReply();
   return replyElement(bytes, start, end, cached, build);
 }
@@ -187,7 +157,7 @@ export function decodeSemanticObject<T extends object, R>(
 /** A checker reply that is an array of objects (each with a numeric `id`) and
  * nulls, or null. An empty reply is null. Elements are resolved as in
  * decodeSemanticObject. */
-export function decodeSemanticObjects<T extends object, R>(
+export function decodeSemanticObjects<T extends { id: number }, R>(
   bytes: Uint8Array,
   cached: (id: number) => R | undefined,
   build: (data: T) => R,
@@ -195,7 +165,7 @@ export function decodeSemanticObjects<T extends object, R>(
   let index = skipJsonSpace(bytes, 0);
   if (index === bytes.length) return null;
   if (bytes[index] !== OPEN_BRACKET) {
-    const end = scanner.valueEnd(bytes, index);
+    const end = jsonValueEnd(bytes, index);
     if (
       skipJsonSpace(bytes, end) !== bytes.length ||
       parseJsonSlice<null>(bytes, index, end) !== null
@@ -210,7 +180,7 @@ export function decodeSemanticObjects<T extends object, R>(
     return result;
   }
   for (;;) {
-    const end = scanner.valueEnd(bytes, index);
+    const end = jsonValueEnd(bytes, index);
     if (end === index) malformedReply();
     result.push(replyElement(bytes, index, end, cached, build));
     index = skipJsonSpace(bytes, end);

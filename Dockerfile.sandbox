@@ -1,4 +1,4 @@
-ARG NODE_VERSION=24.22.1
+ARG NODE_VERSION=24.15.0
 FROM ubuntu:24.04
 
 ARG NODE_VERSION
@@ -7,17 +7,11 @@ ARG ZIG_VERSION=0.16.0
 
 ENV DEBIAN_FRONTEND=noninteractive
 
-# Every download below is checked against the pinned digests before it is used.
-COPY scripts/toolchain.sha256 scripts/verify-toolchain.sh scripts/install-zig.sh /tmp/toolchain/
-
 RUN apt-get update \
     && apt-get install --yes --no-install-recommends \
         ca-certificates curl gnupg \
     && curl --fail --silent --show-error --location https://apt.llvm.org/llvm-snapshot.gpg.key \
-        --output /tmp/llvm-snapshot.gpg.key \
-    && sh /tmp/toolchain/verify-toolchain.sh /tmp/llvm-snapshot.gpg.key \
-    && gpg --dearmor --output /usr/share/keyrings/llvm-snapshot.gpg /tmp/llvm-snapshot.gpg.key \
-    && rm /tmp/llvm-snapshot.gpg.key \
+        | gpg --dearmor --output /usr/share/keyrings/llvm-snapshot.gpg \
     && echo "deb [signed-by=/usr/share/keyrings/llvm-snapshot.gpg] https://apt.llvm.org/noble/ llvm-toolchain-noble-22 main" \
         > /etc/apt/sources.list.d/llvm22.list \
     && apt-get update \
@@ -30,9 +24,7 @@ RUN apt-get update \
         curl \
         git \
         libclang-rt-22-dev \
-        libpolly-22-dev \
         libzstd-dev \
-        lld-22 \
         llvm-22-dev \
         ninja-build \
         xz-utils \
@@ -40,18 +32,23 @@ RUN apt-get update \
     && ln -sf clang-22 /usr/bin/clang \
     && ln -sf clang++-22 /usr/bin/clang++ \
     && test "$(llvm-config-22 --version)" = 22.1.8 \
-    && test -x "$(dirname "$(readlink -f /usr/bin/clang)")/ld.lld" \
     && rm -rf /var/lib/apt/lists/*
 
 RUN curl --fail --silent --show-error --location \
         --output /tmp/node.tar.xz \
         "https://nodejs.org/dist/v${NODE_VERSION}/node-v${NODE_VERSION}-linux-x64.tar.xz" \
-    && sh /tmp/toolchain/verify-toolchain.sh /tmp/node.tar.xz "node-v${NODE_VERSION}-linux-x64.tar.xz" \
+    && curl --fail --silent --show-error --location \
+        --output /tmp/SHASUMS256.txt \
+        "https://nodejs.org/dist/v${NODE_VERSION}/SHASUMS256.txt" \
+    && grep " node-v${NODE_VERSION}-linux-x64.tar.xz$" /tmp/SHASUMS256.txt \
+        | sed 's#node-v[^ ]*-linux-x64.tar.xz#/tmp/node.tar.xz#' \
+        | sha256sum --check --strict - \
     && tar -xJf /tmp/node.tar.xz --directory /usr/local --strip-components=1 \
-    && rm /tmp/node.tar.xz
+    && rm /tmp/node.tar.xz /tmp/SHASUMS256.txt
 
-RUN sh /tmp/toolchain/install-zig.sh "$ZIG_VERSION" \
-    && rm -r /tmp/toolchain
+COPY scripts/install-zig.sh /tmp/install-zig.sh
+RUN sh /tmp/install-zig.sh "$ZIG_VERSION" \
+    && rm /tmp/install-zig.sh
 
 RUN npm install --global "pnpm@${PNPM_VERSION}"
 

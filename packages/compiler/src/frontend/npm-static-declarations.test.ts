@@ -1,5 +1,6 @@
 import { describe, expect, test } from "vitest";
 import {
+  applyNpmStaticDeclarationFunctions,
   applyNpmStaticDeclarationProperties,
   applyNpmStaticDeclarationOverloads,
   applyNpmStaticFindReturnWidening,
@@ -7,6 +8,7 @@ import {
   applyNpmStaticNullableClassFields,
   npmStaticDeclarationReexports,
   npmStaticRuntimeClassTargets,
+  parseNpmStaticDeclarationFunctions,
   parseNpmStaticDeclarationProperties,
   parseNpmStaticDeclarationOverloads,
 } from "./npm-static-declarations.js";
@@ -18,9 +20,7 @@ describe("npm-static JSDoc namepaths", () => {
       collect(items = []) { return items; }
     }`;
     const text = applyNpmStaticJsDocNamepaths("index.js", source);
-    expect(text).toBe(
-      source.replace("Owner~Item", "*         ").replace("Owner#Result", "*           "),
-    );
+    expect(text).toBe(source.replace("Owner~Item", "*         ").replace("Owner#Result", "*           "));
     expect(text?.length).toBe(source.length);
     expect(applyNpmStaticJsDocNamepaths("index.js", text!)).toBeNull();
   });
@@ -69,9 +69,7 @@ describe("npm-static nullable class field inference", () => {
     const source = `import { Buffer as Buffer2 } from "./buffer.js";
 class View { buffer = null; init() { this.buffer = Buffer2.create(4); } reset() { this.buffer = null; } }`;
     const result = applyNpmStaticNullableClassFields("view.js", source);
-    expect(result?.text).toContain(
-      "/** @type {ReturnType<typeof Buffer2.create> | null} */ buffer = null;",
-    );
+    expect(result?.text).toContain("/** @type {ReturnType<typeof Buffer2.create> | null} */ buffer = null;");
     expect(result?.text).toContain("this.buffer = Buffer2.create(4)");
     expect(applyNpmStaticNullableClassFields("view.js", result!.text)).toBeNull();
   });
@@ -139,12 +137,7 @@ class Input {
     "constructor({ Parser }) { this.parser = new Parser(); }",
     "constructor() { function Parser() {} this.parser = new Parser(); }",
   ])("declines a shadowed constructor: %s", (body) => {
-    expect(
-      applyNpmStaticNullableClassFields(
-        "index.js",
-        `class Parser {} class Input { parser = null; ${body} }`,
-      ),
-    ).toBeNull();
+    expect(applyNpmStaticNullableClassFields("index.js", `class Parser {} class Input { parser = null; ${body} }`)).toBeNull();
   });
 
   test("preserves annotations and ignores unrelated receivers", () => {
@@ -163,21 +156,11 @@ class Input {
     expect(result?.text).toContain("/** @type {unknown} */ annotated = null;");
   });
 
-  test.each([
-    "Parser = Other;",
-    "[Parser] = values;",
-    "({ Parser } = value);",
-    "for (Parser of values) {}",
-  ])("declines mutable constructor names: %s", (write) => {
-    expect(
-      applyNpmStaticNullableClassFields(
-        "index.js",
-        `class Parser {} class Other {}
+  test.each(["Parser = Other;", "[Parser] = values;", "({ Parser } = value);", "for (Parser of values) {}"])("declines mutable constructor names: %s", (write) => {
+    expect(applyNpmStaticNullableClassFields("index.js", `class Parser {} class Other {}
       ${write}
       class Input { parser = null; constructor() { this.parser = new Parser(); } }
-    `,
-      ),
-    ).toBeNull();
+    `)).toBeNull();
   });
 });
 
@@ -229,14 +212,7 @@ class Choices {
   test("extracts only complete representation-safe overload groups", () => {
     const overloads = parseNpmStaticDeclarationOverloads("index.d.ts", declarations);
     expect([...overloads.keys()]).toEqual(["Chainy"]);
-    expect([...overloads.get("Chainy")!.keys()]).toEqual([
-      "name",
-      "description",
-      "tag",
-      "aliases",
-      "helpOption",
-      "single",
-    ]);
+    expect([...overloads.get("Chainy")!.keys()]).toEqual(["name", "description", "tag", "aliases", "helpOption", "single"]);
     expect(overloads.get("Chainy")!.get("name")).toEqual([
       { parameters: [], returnType: "string" },
       { parameters: [{ name: "value", type: "string", optional: false }], returnType: "this" },
@@ -267,17 +243,15 @@ module.exports = { Chainy };
     expect(rewritten!.insertions).toHaveLength(2);
     expect(rewritten!.text.match(/@overload/g)).toHaveLength(4);
     expect(rewritten!.text).toContain("@param {string} [value] @returns {string | Chainy}");
-    expect(
-      rewritten!.text.slice(source.indexOf("class Hidden"), source.indexOf("class Chainy")),
-    ).not.toContain("@overload");
+    expect(rewritten!.text.slice(source.indexOf("class Hidden"), source.indexOf("class Chainy"))).not.toContain("@overload");
   });
 
   test("projects only nullable-self properties onto matching constructor null writes", () => {
     const properties = parseNpmStaticDeclarationProperties("index.d.ts", declarations);
-    expect(properties).toEqual(new Map([["Chainy", new Map([["parent", "Chainy | null"]])]]));
-    const rewritten = applyNpmStaticDeclarationProperties(
-      "index.js",
-      `
+    expect(properties).toEqual(new Map([
+      ["Chainy", new Map([["parent", "Chainy | null"]])],
+    ]));
+    const rewritten = applyNpmStaticDeclarationProperties("index.js", `
 class Chainy {
   constructor() {
     this.parent = null;
@@ -286,9 +260,7 @@ class Chainy {
   }
 }
 module.exports = { Chainy };
-`,
-      properties,
-    );
+`, properties);
     expect(rewritten).not.toBeNull();
     expect(rewritten!.insertions).toHaveLength(1);
     expect(rewritten!.text).toContain("/** @type {Chainy | null} */ this.parent = null;");
@@ -297,9 +269,7 @@ module.exports = { Chainy };
   });
 
   test("projects an array getter overload onto its empty constructor backing field", () => {
-    const rewritten = applyNpmStaticDeclarationOverloads(
-      "index.js",
-      `
+    const rewritten = applyNpmStaticDeclarationOverloads("index.js", `
 class Chainy {
   constructor() { this._aliases = []; }
   aliases(values) {
@@ -309,17 +279,13 @@ class Chainy {
   }
 }
 module.exports = { Chainy };
-`,
-      parseNpmStaticDeclarationOverloads("index.d.ts", declarations),
-    );
+`, parseNpmStaticDeclarationOverloads("index.d.ts", declarations));
     expect(rewritten).not.toBeNull();
     expect(rewritten!.text).toContain("/** @type {string[]} */ this._aliases = [];");
   });
 
   test("projects nullable void callback fields through local subclass initializers", () => {
-    const properties = parseNpmStaticDeclarationProperties(
-      "index.d.ts",
-      `
+    const properties = parseNpmStaticDeclarationProperties("index.d.ts", `
 export class Base {
   parent: Base | null;
   callback: (() => void) | null;
@@ -330,22 +296,9 @@ export class Base {
   static shared: (() => void) | null;
   private hidden: (() => void) | null;
 }
-`,
-    );
-    expect(properties).toEqual(
-      new Map([
-        [
-          "Base",
-          new Map([
-            ["parent", "Base | null"],
-            ["callback", "(() => void) | null"],
-          ]),
-        ],
-      ]),
-    );
-    const rewritten = applyNpmStaticDeclarationProperties(
-      "index.js",
-      `
+`);
+    expect(properties).toEqual(new Map([["Base", new Map([["parent", "Base | null"], ["callback", "(() => void) | null"]])]]));
+    const rewritten = applyNpmStaticDeclarationProperties("index.js", `
 export class Base { parent = null; callback = null; }
 class Middle extends Base {}
 export class Derived extends Middle { callback = () => { console.log("callback"); }; }
@@ -359,18 +312,12 @@ class Returned extends Base { callback = () => { if (true) return 1; }; }
 class Nested extends Base { callback = () => { const inner = () => { return 1; }; console.log(inner()); }; }
 class Static extends Base { static callback = null; }
 class Unrelated { callback = null; }
-`,
-      properties,
-    );
+`, properties);
     expect(rewritten?.insertions).toHaveLength(5);
     expect(rewritten?.text).toContain("/** @type {(() => void) | null} */ callback = null;");
-    expect(rewritten?.text).toContain(
-      "/** @type {(() => void) | null} */ callback = () => { console.log",
-    );
+    expect(rewritten?.text).toContain("/** @type {(() => void) | null} */ callback = () => { console.log");
     expect(rewritten?.text).toContain("/** @type {(() => void) | null} */ this.callback = null;");
-    expect(rewritten?.text).toContain(
-      "class Annotated extends Base { /** @type {() => void} */ callback",
-    );
+    expect(rewritten?.text).toContain("class Annotated extends Base { /** @type {() => void} */ callback");
     expect(rewritten?.text).toContain("class WithArgs extends Base { callback");
     expect(rewritten?.text).toContain("class Async extends Base { callback");
     expect(rewritten?.text).toContain("class Value extends Base { callback");
@@ -381,80 +328,52 @@ class Unrelated { callback = null; }
   });
 
   test("projects safe optional parameters over stricter implementation JSDoc", () => {
-    const rewritten = applyNpmStaticDeclarationOverloads(
-      "index.js",
-      `
+    const rewritten = applyNpmStaticDeclarationOverloads("index.js", `
 class Chainy {
   /** @param {string | boolean} flags @param {string} [description] @returns {Chainy} */
   helpOption(flags, description) { return this; }
 }
 module.exports = { Chainy };
-`,
-      parseNpmStaticDeclarationOverloads("index.d.ts", declarations),
-    );
+`, parseNpmStaticDeclarationOverloads("index.d.ts", declarations));
     expect(rewritten).not.toBeNull();
     expect(rewritten!.text).toContain("@param {string | boolean} [flags]");
     expect(rewritten!.text).toContain("@param {string} [description]");
   });
   test("reports only relative declaration-barrel edges", () => {
-    expect(
-      npmStaticDeclarationReexports(
-        "esm.d.mts",
-        `
+    expect(npmStaticDeclarationReexports("esm.d.mts", `
       export * from "./index.js";
       export { Type } from "./types.js";
       export * from "other-package";
-    `,
-      ),
-    ).toEqual(["./index.js", "./types.js"]);
+    `)).toEqual(["./index.js", "./types.js"]);
   });
 
   test("binds declaration classes to direct and one-hop runtime exports", () => {
-    expect(
-      npmStaticRuntimeClassTargets(
-        "index.js",
-        `
+    expect(npmStaticRuntimeClassTargets("index.js", `
       const { Command, Other: Alias } = require("./lib/command.js");
       class Local {}
       exports.Command = Command;
       exports.Alias = Alias;
       exports.Local = Local;
-    `,
-        new Set(["Command", "Alias", "Local"]),
-      ),
-    ).toEqual(
-      new Map([
-        ["Command", { specifier: "./lib/command.js", localName: "Command" }],
-        ["Local", { specifier: null, localName: "Local" }],
-      ]),
-    );
+    `, new Set(["Command", "Alias", "Local"]))).toEqual(new Map([
+      ["Command", { specifier: "./lib/command.js", localName: "Command" }],
+      ["Local", { specifier: null, localName: "Local" }],
+    ]));
   });
 
   test("binds declaration classes through one-hop ESM import/export plumbing", () => {
-    expect(
-      npmStaticRuntimeClassTargets(
-        "index.js",
-        `
+    expect(npmStaticRuntimeClassTargets("index.js", `
       import { Command, Other as Alias } from "./lib/command.js";
       class Local {}
       export { Command, Alias, Local };
-    `,
-        new Set(["Command", "Alias", "Local"]),
-      ),
-    ).toEqual(
-      new Map([
-        ["Command", { specifier: "./lib/command.js", localName: "Command" }],
-        ["Alias", { specifier: "./lib/command.js", localName: "Other" }],
-        ["Local", { specifier: null, localName: "Local" }],
-      ]),
-    );
+    `, new Set(["Command", "Alias", "Local"]))).toEqual(new Map([
+      ["Command", { specifier: "./lib/command.js", localName: "Command" }],
+      ["Alias", { specifier: "./lib/command.js", localName: "Other" }],
+      ["Local", { specifier: null, localName: "Local" }],
+    ]));
   });
 
   test("binds bundled ESM export aliases to their implementation names", () => {
-    expect(
-      npmStaticRuntimeClassTargets(
-        "index.js",
-        `
+    expect(npmStaticRuntimeClassTargets("index.js", `
       import { View2 as LocalView } from "./chunk.js";
       class Renderer2 {}
       export { LocalView as View, Renderer2 as Renderer };
@@ -464,22 +383,15 @@ module.exports = { Chainy };
       export { TypeOnly };
       const { Other: Mutable } = require("./other.cjs");
       export { Mutable as RequiredAlias };
-    `,
-        new Set(["View", "Renderer", "Buffer", "Hidden", "TypeOnly", "RequiredAlias"]),
-      ),
-    ).toEqual(
-      new Map([
-        ["View", { specifier: "./chunk.js", localName: "View2" }],
-        ["Renderer", { specifier: null, localName: "Renderer2" }],
-        ["Buffer", { specifier: "./buffer.js", localName: "Buffer2" }],
-      ]),
-    );
+    `, new Set(["View", "Renderer", "Buffer", "Hidden", "TypeOnly", "RequiredAlias"]))).toEqual(new Map([
+      ["View", { specifier: "./chunk.js", localName: "View2" }],
+      ["Renderer", { specifier: null, localName: "Renderer2" }],
+      ["Buffer", { specifier: "./buffer.js", localName: "Buffer2" }],
+    ]));
   });
 
   test("projects zero-argument scalar returns without replacing implementation JSDoc", () => {
-    const signatures = parseNpmStaticDeclarationOverloads(
-      "index.d.ts",
-      `
+    const signatures = parseNpmStaticDeclarationOverloads("index.d.ts", `
       export class View {
         text(): string;
         count(): number;
@@ -493,20 +405,9 @@ module.exports = { Chainy };
         asyncOnly(): string;
         generatorOnly(): string;
       }
-    `,
-    );
-    expect([...signatures.get("View")!.keys()]).toEqual([
-      "text",
-      "count",
-      "active",
-      "documented",
-      "staticOnly",
-      "asyncOnly",
-      "generatorOnly",
-    ]);
-    const rewritten = applyNpmStaticDeclarationOverloads(
-      "index.js",
-      `
+    `);
+    expect([...signatures.get("View")!.keys()]).toEqual(["text", "count", "active", "documented", "staticOnly", "asyncOnly", "generatorOnly"]);
+    const rewritten = applyNpmStaticDeclarationOverloads("index.js", `
       export class View {
         text() { return this.source.text(); }
         count() { return this.source.count(); }
@@ -518,14 +419,57 @@ module.exports = { Chainy };
         async asyncOnly() { return "async"; }
         *generatorOnly() { yield "generator"; }
       }
-    `,
-      signatures,
-    );
+    `, signatures);
     expect(rewritten!.insertions).toHaveLength(3);
     expect(rewritten!.text).toContain("@returns {string} */ text()");
     expect(rewritten!.text).toContain("@returns {number} */ count()");
     expect(rewritten!.text).toContain("@returns {boolean} */ active()");
     expect(rewritten!.text).not.toContain("@returns {bigint}");
     expect(rewritten!.text).toContain("/** @returns {number} */\n        documented()");
+  });
+});
+
+describe("npm-static declared function signatures", () => {
+  const dts = `export = R;
+    declare namespace R {
+      type SetStateAction<S> = S | ((prevState: S) => S);
+      type Dispatch<A> = (value: A) => void;
+      interface RefObject<T> { current: T }
+      interface Augmented {}
+      function useState<S>(initialState: S | (() => S)): [S, Dispatch<SetStateAction<S>>];
+      function useState<S = undefined>(): [S | undefined, Dispatch<SetStateAction<S | undefined>>];
+      function useRef<T>(initialValue: T): RefObject<T>;
+      function useMemo<T>(factory: () => T, deps: readonly unknown[]): T;
+      function cacheSignal(): Augmented | null;
+      function useCallback<T extends Function>(callback: T, deps: readonly unknown[]): T;
+      function forwardRef<T>(render: (props: any) => T): T;
+    }`;
+
+  test("respells generic overload groups with the file's aliases inlined", () => {
+    const fns = parseNpmStaticDeclarationFunctions("index.d.ts", dts);
+    expect(fns.get("useState")).toBe(
+      "{ <S>(initialState: (S) | ((() => S))): [S, ((value: ((((S)) | (((prevState: (S)) => (S)))))) => void)]; " +
+      "<S = undefined>(): [(S) | (undefined), ((value: (((((S) | (undefined))) | (((prevState: ((S) | (undefined))) => ((S) | (undefined))))))) => void)] }",
+    );
+    expect(fns.get("useRef")).toBe("{ <T>(initialValue: T): ({ current: (T) }) }");
+    expect(fns.get("useMemo")).toBe("{ <T>(factory: () => T, deps: readonly (unknown)[]): T }");
+  });
+
+  test("keeps inference outside the safe grammar (augmentation points, Function, any)", () => {
+    const fns = parseNpmStaticDeclarationFunctions("index.d.ts", dts);
+    expect(fns.has("cacheSignal")).toBe(false);
+    expect(fns.has("useCallback")).toBe(false);
+    expect(fns.has("forwardRef")).toBe(false);
+  });
+
+  test("top-level declarations need export; projection lands on CommonJS and ESM exports once", () => {
+    const fns = parseNpmStaticDeclarationFunctions("index.d.ts", "export declare function id<T>(value: T): T;\ndeclare function hidden(): void;");
+    expect([...fns.keys()]).toEqual(["id"]);
+    const cjs = `"use strict";\nexports.id = function (value) { return value; };\nexports.other = function () {};`;
+    const rewritten = applyNpmStaticDeclarationFunctions("index.js", cjs, fns)!;
+    expect(rewritten.text).toBe(`"use strict";\n/** @type {{ <T>(value: T): T }} */\nexports.id = function (value) { return value; };\nexports.other = function () {};`);
+    expect(applyNpmStaticDeclarationFunctions("index.js", rewritten.text, fns)).toBeNull();
+    const esm = applyNpmStaticDeclarationFunctions("index.mjs", "export function id(value) { return value; }", fns)!;
+    expect(esm.text).toBe("/** @type {{ <T>(value: T): T }} */\nexport function id(value) { return value; }");
   });
 });

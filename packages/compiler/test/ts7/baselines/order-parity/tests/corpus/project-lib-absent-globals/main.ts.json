@@ -1,6 +1,0 @@
-{
- "order": [
-  "<repo>/tests/corpus/project-lib-absent-globals/main.ts"
- ],
- "diags": []
-}

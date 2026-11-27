@@ -2,17 +2,11 @@ import { mkdtempSync, rmSync, writeFileSync } from "node:fs";
 import { join } from "node:path";
 import { tmpdir } from "node:os";
 import { afterEach, expect, test, vi } from "vitest";
-import {
-  FrontendServices,
-  PROGRAM_HOST_LOADS,
-  programHostLoads,
-  type ComptimeEvaluator,
-} from "./services.js";
+import { FrontendServices, type ComptimeEvaluator } from "./services.js";
 import { Ts7Api } from "./ts7/rpc-api.js";
 import { checkPreflight, isNodeEsmFile, loadProgram } from "./program.js";
 import { clearResolveCaches } from "./resolve.js";
 import type { Ts7ApiOptions } from "./ts7/program-host.js";
-import { getTextOfNode } from "./ts7/node-functions.js";
 
 const directories: string[] = [];
 afterEach(() => {
@@ -20,12 +14,9 @@ afterEach(() => {
   for (const dir of directories.splice(0)) rmSync(dir, { recursive: true, force: true });
 });
 function setup(evaluator?: ComptimeEvaluator) {
-  const dir = mkdtempSync(
-    join(process.platform === "win32" ? tmpdir() : "/tmp", "scriptc-services-"),
-  );
+  const dir = mkdtempSync(join(process.platform === "win32" ? tmpdir() : "/tmp", "scriptc-services-"));
   directories.push(dir);
-  const connections: { api: Ts7Api; close: ReturnType<typeof vi.spyOn>; options: Ts7ApiOptions }[] =
-    [];
+  const connections: { api: Ts7Api; close: ReturnType<typeof vi.spyOn>; options: Ts7ApiOptions }[] = [];
   const factory = vi.fn((options: Ts7ApiOptions) => {
     const api = new Ts7Api(options);
     connections.push({ api, close: vi.spyOn(api, "close"), options });
@@ -38,30 +29,44 @@ test("compile-time execution belongs to the supplied host and closes with its se
   const value = { table: [1, 2, 3] };
   const evaluate = vi.fn(() => value);
   const { services, factory } = setup(evaluate);
-  const limits = { timeoutMs: 2000, memoryMb: 256 };
-  expect(services.evaluateComptime("() => [1, 2, 3]", limits, ["() => 4"])).toBe(value);
-  expect(evaluate).toHaveBeenCalledExactlyOnceWith("() => [1, 2, 3]", limits, ["() => 4"]);
+  expect(services.evaluateComptime("() => [1, 2, 3]", 2000)).toBe(value);
+  expect(evaluate).toHaveBeenCalledExactlyOnceWith("() => [1, 2, 3]", 2000);
   expect(factory).not.toHaveBeenCalled();
   services.close();
-  expect(() => services.evaluateComptime("() => 1", limits)).toThrow("closed");
+  expect(() => services.evaluateComptime("() => 1", 2000)).toThrow("closed");
   expect(evaluate).toHaveBeenCalledTimes(1);
 });
 
 test("a host without a compile-time evaluator refuses explicitly", () => {
   const { services, factory } = setup();
-  try {
-    expect(() => services.evaluateComptime("() => 1", { timeoutMs: 2000, memoryMb: 256 })).toThrow(
-      "does not provide compile-time evaluation",
-    );
-  } finally {
-    services.close();
-  }
+  try { expect(() => services.evaluateComptime("() => 1", 2000)).toThrow("does not provide compile-time evaluation"); }
+  finally { services.close(); }
+  expect(factory).not.toHaveBeenCalled();
+});
+
+test("TypeScript package emission belongs to its host and obeys the service lifecycle", () => {
+  const emit = vi.fn(() => "export const value = 1;");
+  const factory = vi.fn(() => { throw new Error("emission must not open a parser connection"); });
+  const services = new FrontendServices(factory, process.cwd(), undefined, undefined, emit);
+  expect(services.emitRuntimeTypeScript("index.ts", "export const value: number = 1;", "esm")).toBe("export const value = 1;");
+  expect(emit).toHaveBeenCalledExactlyOnceWith("index.ts", "export const value: number = 1;", "esm");
+  expect(factory).not.toHaveBeenCalled();
+  services.close();
+  expect(() => services.emitRuntimeTypeScript("index.ts", "", "esm")).toThrow("closed");
+  expect(emit).toHaveBeenCalledTimes(1);
+});
+
+test("a host without a TypeScript package emitter refuses explicitly", () => {
+  const { services, factory } = setup();
+  try { expect(() => services.emitRuntimeTypeScript("index.ts", "", "esm")).toThrow("does not provide TypeScript package emission"); }
+  finally { services.close(); }
   expect(factory).not.toHaveBeenCalled();
 });
 
 test("service construction and irrelevant rewrites open no connections", () => {
   const { services, factory } = setup();
   expect(services.rewriteCjs("exports.value = 1;", "index.js")).toBeNull();
+  expect(services.globalFetchModules([])).toEqual(new Set());
   expect(services.declarationOverloads("index.js", "", new Map())).toBeNull();
   expect(services.declarationProperties("index.js", "", new Map())).toBeNull();
   services.close();
@@ -69,6 +74,7 @@ test("service construction and irrelevant rewrites open no connections", () => {
   expect(factory).not.toHaveBeenCalled();
   expect(() => services.parse("a.ts", "", "ts")).toThrow("closed");
   expect(() => services.createProgramHost()).toThrow("closed");
+  expect(() => services.globalFetchModules([])).toThrow("closed");
   expect(() => services.rewriteCjs("", "a.js")).toThrow("closed");
   expect(() => services.declarationOverloads("a.js", "", new Map())).toThrow("closed");
   expect(() => services.declarationProperties("a.js", "", new Map())).toThrow("closed");
@@ -87,7 +93,7 @@ test("syntax sessions reuse one connection and returned ASTs survive edits and c
   services.close();
   services.close();
   expect(connections[0]!.close).toHaveBeenCalledTimes(1);
-  expect(getTextOfNode(before.statements.nodes[0]!)).toBe(before.text);
+  expect(before.statements[0]!.getText()).toBe(before.text);
 });
 
 test("program hosts remain usable after their creating services close", () => {
@@ -100,13 +106,21 @@ test("program hosts remain usable after their creating services close", () => {
   expect(connections[1]!.close).toHaveBeenCalledTimes(1);
   host.addVirtualFile(join(dir, "main.ts"), "export const value = 1;");
   const program = host.createProgram([join(dir, "main.ts")], { noLib: true, types: [] });
-  try {
-    expect(program.getSourceFile(join(dir, "main.ts"))!.text).toBe("export const value = 1;");
-  } finally {
-    program.dispose();
-    host.close();
-  }
+  try { expect(program.getSourceFile(join(dir, "main.ts"))!.text).toBe("export const value = 1;"); }
+  finally { program.dispose(); host.close(); }
   expect(connections[0]!.close).toHaveBeenCalledTimes(1);
+});
+
+test("fetch analysis never shares a semantic session with detached syntax", () => {
+  const { services, connections } = setup();
+  const file = services.parse("same.js", "const fetch = () => 1;", "js");
+  expect([...services.globalFetchModules([{ key: "same.js", source: "fetch();", format: "cjs" }])]).toEqual(["same.js"]);
+  expect(connections).toHaveLength(2);
+  expect(connections[0]!.close).not.toHaveBeenCalled();
+  expect(connections[1]!.close).toHaveBeenCalledTimes(1);
+  expect(services.parse("same.js", file.text, "js")).toBe(file);
+  services.close();
+  expect(connections.every((connection) => connection.close.mock.calls.length === 1)).toBe(true);
 });
 
 test("load failure releases the newly opened program host and keeps supplied services reusable", () => {
@@ -118,30 +132,21 @@ test("load failure releases the newly opened program host and keeps supplied ser
     const entry = join(dir, "main.ts");
     writeFileSync(entry, "export const value = 1;");
     const load = loadProgram(entry, services);
-    try {
-      expect(checkPreflight(load)).toEqual([]);
-    } finally {
-      load.dispose();
-      load.dispose();
-    }
+    try { expect(checkPreflight(load)).toEqual([]); }
+    finally { load.dispose(); load.dispose(); }
     expect(connections[1]!.close).toHaveBeenCalledTimes(1);
     expect(services.parse("a.ts", "export {};", "ts").text).toBe("export {};");
-  } finally {
-    services.close();
-  }
+  } finally { services.close(); }
 });
 
 test("a malformed load option is rejected before opening any connection", () => {
   const { services, factory, dir } = setup();
   try {
-    expect(() =>
-      loadProgram(join(dir, "main.ts"), services, { externalTypes: [["wild/*", "missing.d.ts"]] }),
-    ).toThrow("invalid external type specifier");
+    expect(() => loadProgram(join(dir, "main.ts"), services, { externalTypes: [["wild/*", "missing.d.ts"]] })).toThrow("invalid external type specifier");
     expect(factory).not.toHaveBeenCalled();
-  } finally {
-    services.close();
-  }
+  } finally { services.close(); }
 });
+
 
 test("Node format decisions belong to their program even when source ASTs are reused", () => {
   const { services, dir } = setup();
@@ -163,75 +168,8 @@ test("Node format decisions belong to their program even when source ASTs are re
       expect(isNodeEsmFile(source, next)).toBe(false);
       expect(isNodeEsmFile(source, first)).toBe(true);
       expect(isNodeEsmFile(source)).toBe(false);
-    } finally {
-      next.dispose();
-    }
+    } finally { next.dispose(); }
     expect(next.analysis.nodeEsmFiles.size).toBe(0);
-  } finally {
-    first.dispose();
-    host.close();
-    services.close();
-  }
+  } finally { first.dispose(); host.close(); services.close(); }
   expect(first.analysis.nodeEsmFiles.size).toBe(0);
-});
-
-test("reused program hosts serve later loads, up to their share, one connection per live host", () => {
-  const { services, connections, dir } = setup();
-  services.reuseProgramHosts(3);
-  const entry = join(dir, "main.ts");
-  writeFileSync(entry, "export const value = 1;");
-  try {
-    // Two loads alive at once hold two hosts; after they close, the next
-    // loads reuse those connections.
-    const a = loadProgram(entry, services);
-    const b = loadProgram(entry, services);
-    expect(connections).toHaveLength(2);
-    a.dispose();
-    b.dispose();
-    for (let load = 0; load < 5; load++) {
-      const next = loadProgram(entry, services);
-      expect(checkPreflight(next)).toEqual([]);
-      next.dispose();
-    }
-    // Each host served 3 loads (the share), then closed: a third host
-    // started for the last load.
-    expect(connections).toHaveLength(3);
-    expect(connections[0]!.close).toHaveBeenCalledTimes(1);
-    expect(connections[1]!.close).toHaveBeenCalledTimes(1);
-    expect(connections[2]!.close).not.toHaveBeenCalled();
-  } finally {
-    services.close();
-  }
-  expect(connections[2]!.close).toHaveBeenCalledTimes(1);
-});
-
-test("without reuse, and for timed hosts, every load gets its own host", () => {
-  const { services, connections } = setup();
-  try {
-    services.createProgramHost().close();
-    services.createProgramHost().close();
-    expect(connections).toHaveLength(2);
-    services.reuseProgramHosts(4);
-    services.createProgramHost({ collectTiming: true }).close();
-    services.createProgramHost({ collectTiming: true }).close();
-    expect(connections).toHaveLength(4);
-    for (const connection of connections) expect(connection.close).toHaveBeenCalledTimes(1);
-    // A host in a different directory is not reused for this one.
-    services.createProgramHost({ cwd: tmpdir() }).close();
-    services.createProgramHost().close();
-    expect(connections).toHaveLength(6);
-  } finally {
-    services.close();
-  }
-  for (const connection of connections) expect(connection.close).toHaveBeenCalledTimes(1);
-});
-
-test("SCRIPTC_TS7_HOST_LOADS selects the share and rejects malformed values", () => {
-  expect(programHostLoads({})).toBe(PROGRAM_HOST_LOADS);
-  expect(programHostLoads({ SCRIPTC_TS7_HOST_LOADS: "1" })).toBe(1);
-  expect(programHostLoads({ SCRIPTC_TS7_HOST_LOADS: "12" })).toBe(12);
-  for (const value of ["0", "-1", "2.5", "many"])
-    expect(() => programHostLoads({ SCRIPTC_TS7_HOST_LOADS: value })).toThrow(
-      "SCRIPTC_TS7_HOST_LOADS must be a positive integer",
-    );
 });

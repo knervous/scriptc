@@ -1,3 +1,4 @@
+// This file was modified from scriptc (Apache-2.0); see MODIFICATIONS.md.
 /* Typed arrays / Buffer: ONE runtime representation (ScrBytes — see the
  * header contract). An ScrBytes either OWNS its storage or is a VIEW into
  * an owner's (backing set, chain depth exactly 1): DataView, subarray(),
@@ -1407,6 +1408,13 @@ static bool scr_bytes_copy_array_like(ScrBytes *dst, const ScrDyn *src, size_t o
   return true;
 }
 
+/* An island typed array as a native copy of its own kind (+1); NULL when the value is not one. */
+static ScrBytes *scr_bytes_island_copy(const ScrDyn *value) {
+  if (value->kind != SCR_DYN_JSVAL) return NULL;
+  const ScrDynJsvalOps *ops = scr_dyn_jsval_ops();
+  return ops->bytes_copy ? ops->bytes_copy(value->v.jsval.cell) : NULL;
+}
+
 ScrBytes *scr_bytes_from_dyn(ScrBytesElem elem, const ScrDyn *value, bool from) {
   if (from && (value->kind == SCR_DYN_NULL || value->kind == SCR_DYN_UNDEF)) {
     const char *msg = value->kind == SCR_DYN_NULL
@@ -1425,6 +1433,12 @@ ScrBytes *scr_bytes_from_dyn(ScrBytesElem elem, const ScrDyn *value, bool from) 
     return out;
   }
   if (value->kind == SCR_DYN_BYTES) return scr_bytes_convert(elem, value->v.bytes);
+  ScrBytes *island = scr_bytes_island_copy(value);
+  if (island) {
+    ScrBytes *out = scr_bytes_convert(elem, island);
+    scr_bytes_release(island);
+    return out;
+  }
   if (!from && scr_buffer_storage_is(value)) return scr_array_buffer_view(elem, value, scr_dyn_undefined(), scr_dyn_undefined());
   if (!from && (value->kind == SCR_DYN_NUM || value->kind == SCR_DYN_BOOL ||
                 value->kind == SCR_DYN_STR || value->kind == SCR_DYN_NULL || value->kind == SCR_DYN_UNDEF ||
@@ -1502,6 +1516,12 @@ void scr_bytes_set_from_dyn(ScrBytes *dst, const ScrDyn *src, double offset) {
   }
   if (src->kind == SCR_DYN_BYTES) {
     scr_bytes_set_from(dst, src->v.bytes, t);
+    return;
+  }
+  ScrBytes *island = scr_bytes_island_copy(src);
+  if (island) {
+    scr_bytes_set_from(dst, island, t);
+    scr_bytes_release(island);
     return;
   }
   double length;

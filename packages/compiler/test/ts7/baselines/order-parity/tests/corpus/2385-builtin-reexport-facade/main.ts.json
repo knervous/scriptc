@@ -1,7 +1,0 @@
-{
- "order": [
-  "<repo>/tests/corpus/2385-builtin-reexport-facade/facade.ts",
-  "<repo>/tests/corpus/2385-builtin-reexport-facade/main.ts"
- ],
- "diags": []
-}

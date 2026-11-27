@@ -1,6 +1,0 @@
-{
- "order": [
-  "<repo>/tests/corpus/8350-worker-shared-loop-bounds.ts"
- ],
- "diags": []
-}

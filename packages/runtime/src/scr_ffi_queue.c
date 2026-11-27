@@ -1,3 +1,4 @@
+// This file was modified from scriptc (Apache-2.0); see MODIFICATIONS.md.
 #include "scr_runtime.h"
 
 #include <stdint.h>
@@ -39,7 +40,9 @@ typedef struct {
 } ScrFfiArg;
 
 struct ScrFfiCall {
-  ScrFfiTable *table;       /* opaque on the posting thread */
+  ScrFfiTable *table;       /* opaque on the posting thread; NULL for a C task */
+  void (*task)(void *);     /* a C task (scr_remote_post): run with task_arg on the owning thread */
+  void *task_arg;
   void *loop;               /* reserved instance/loop identity */
   ScrClosure *callback;     /* opaque; the table owns its script RC pin */
   ScrFfiDispatchFn dispatch;
@@ -48,12 +51,36 @@ struct ScrFfiCall {
   struct ScrFfiCall *next;
 };
 
-static ScrFfiCall *scr_ffi_head;
-static ScrFfiCall *scr_ffi_tail;
-static size_t scr_ffi_foreign_registrations;
-static bool scr_ffi_installed;
-static bool scr_ffi_stopping;
-static int scr_ffi_wake_pipe[2] = {-1, -1};
+/* One queue per runtime instance (one per thread under SCR_THREAD_INSTANCES,
+ * the process's one otherwise). A foreign descriptor records its owner's queue
+ * in table->loop when the script thread registers a callback; a foreign thread
+ * posts through that pointer, never through thread-local state, so a call
+ * lands on the instance that owns the callback. One process lock guards every
+ * queue and every table's registration fields. */
+typedef struct ScrFfiQueue {
+  ScrFfiCall *head;
+  ScrFfiCall *tail;
+  size_t foreign_registrations;
+  size_t holds;             /* scr_remote_hold: owner-thread liveness (pending async waits) */
+  void (*wake)(void *);     /* scr_remote_set_wake: an embedder's loop doorbell, besides the pipe */
+  void *wake_ctx;
+  bool installed;
+  bool stopping;
+  int wake_pipe[2];
+} ScrFfiQueue;
+
+static SCR_TL ScrFfiQueue scr_ffi_queue_cell;
+static SCR_TL bool scr_ffi_queue_ready;
+
+/* The calling instance's queue (script thread only). */
+static ScrFfiQueue *scr_ffi_queue(void) {
+  ScrFfiQueue *q = &scr_ffi_queue_cell;
+  if (!scr_ffi_queue_ready) {
+    scr_ffi_queue_ready = true;
+    q->wake_pipe[0] = q->wake_pipe[1] = -1;
+  }
+  return q;
+}
 
 #ifdef _WIN32
 static SRWLOCK scr_ffi_lock = SRWLOCK_INIT;
@@ -141,7 +168,9 @@ void scr_ffi_retain_foreign(ScrFfiTable *table, ScrClosure *callback) {
     table->cap = cap;
   }
   table->entries[table->len++] = scr_closure_retain(callback);
-  scr_ffi_foreign_registrations++;
+  ScrFfiQueue *q = scr_ffi_queue();
+  table->loop = q;
+  q->foreign_registrations++;
   scr_ffi_lock_leave();
 }
 
@@ -159,7 +188,8 @@ void scr_ffi_release_foreign(ScrFfiTable *table, ScrClosure *callback) {
     ScrClosure *owned = table->entries[i];
     table->len--;
     if (i != table->len) table->entries[i] = table->entries[table->len];
-    if (scr_ffi_foreign_registrations > 0) scr_ffi_foreign_registrations--;
+    ScrFfiQueue *owner = table->loop;
+    if (owner != NULL && owner->foreign_registrations > 0) owner->foreign_registrations--;
     bool deferred = table->queued > 0;
     if (deferred) scr_ffi_table_retire(table, owned);
     scr_ffi_lock_leave();
@@ -174,6 +204,8 @@ ScrFfiCall *scr_ffi_call_new(ScrFfiTable *table, ScrClosure *callback,
                              ScrFfiDispatchFn dispatch, size_t nargs) {
   ScrFfiCall *call = scr_ffi_foreign_alloc(sizeof *call);
   call->table = table;
+  call->task = NULL;
+  call->task_arg = NULL;
   call->loop = table->loop;
   call->callback = callback;
   call->dispatch = dispatch;
@@ -234,24 +266,33 @@ void scr_ffi_call_copy_cstring(ScrFfiCall *call, size_t i, const char *v) {
                          "scriptc: native callback passed a NULL cstring\n");
 }
 
+/* Appends to a queue and rings its pipe (the queue lock held). */
+static void scr_ffi_enqueue_locked(ScrFfiQueue *q, ScrFfiCall *call) {
+  if (q->tail != NULL) q->tail->next = call;
+  else q->head = call;
+  q->tail = call;
+#if !defined(_WIN32) && !defined(__wasi__)
+  if (q->wake_pipe[1] >= 0) {
+    ssize_t ignored = write(q->wake_pipe[1], "f", 1);
+    (void)ignored; /* a full pipe is already readable */
+  }
+#endif
+}
+
 void scr_ffi_post(ScrFfiCall *call) {
   scr_ffi_lock_enter();
-  if (scr_ffi_stopping || !scr_ffi_table_contains(call->table, call->callback)) {
+  ScrFfiQueue *q = call->loop;
+  if (q == NULL || q->stopping || !scr_ffi_table_contains(call->table, call->callback)) {
     scr_ffi_lock_leave();
     scr_ffi_call_free(call);
     return;
   }
   call->table->queued++;
-  if (scr_ffi_tail != NULL) scr_ffi_tail->next = call;
-  else scr_ffi_head = call;
-  scr_ffi_tail = call;
-#if !defined(_WIN32) && !defined(__wasi__)
-  if (scr_ffi_wake_pipe[1] >= 0) {
-    ssize_t ignored = write(scr_ffi_wake_pipe[1], "f", 1);
-    (void)ignored; /* a full pipe is already readable */
-  }
-#endif
+  scr_ffi_enqueue_locked(q, call);
+  void (*wake)(void *) = q->wake;
+  void *wake_ctx = q->wake_ctx;
   scr_ffi_lock_leave();
+  if (wake != NULL) wake(wake_ctx);
 }
 
 static const ScrFfiArg *scr_ffi_get_arg(const ScrFfiCall *call, size_t index) {
@@ -269,29 +310,43 @@ size_t scr_ffi_call_get_len(const ScrFfiCall *call, size_t i) { return scr_ffi_g
 
 static bool scr_ffi_pending(void) {
   bool pending;
+  ScrFfiQueue *q = scr_ffi_queue();
   scr_ffi_lock_enter();
-  pending = scr_ffi_foreign_registrations > 0 || scr_ffi_head != NULL;
+  pending = q->foreign_registrations > 0 || q->holds > 0 || q->head != NULL;
   scr_ffi_lock_leave();
   return pending;
 }
 
-static void scr_ffi_wake_drain(void) {
+static void scr_ffi_wake_drain(ScrFfiQueue *q) {
 #if !defined(_WIN32) && !defined(__wasi__)
-  if (scr_ffi_wake_pipe[0] < 0) return;
+  if (q->wake_pipe[0] < 0) return;
   char buf[64];
-  while (read(scr_ffi_wake_pipe[0], buf, sizeof buf) > 0) {}
+  while (read(q->wake_pipe[0], buf, sizeof buf) > 0) {}
+#else
+  (void)q;
 #endif
 }
 
 static bool scr_ffi_dispatch(void) {
+  ScrFfiQueue *q = scr_ffi_queue();
   scr_ffi_lock_enter();
-  ScrFfiCall *call = scr_ffi_head;
+  ScrFfiCall *call = q->head;
   if (call != NULL) {
-    scr_ffi_head = call->next;
-    if (scr_ffi_head == NULL) scr_ffi_tail = NULL;
+    q->head = call->next;
+    if (q->head == NULL) q->tail = NULL;
   }
   scr_ffi_lock_leave();
   if (call == NULL) return false;
+
+  if (call->table == NULL) {
+    /* A C task: run it, then the same empty-queue drain as a callback. */
+    call->task(call->task_arg);
+    scr_ffi_lock_enter();
+    if (q->head == NULL) scr_ffi_wake_drain(q);
+    scr_ffi_lock_leave();
+    free(call);
+    return true;
+  }
 
   call->dispatch(call->callback, call);
 
@@ -301,27 +356,31 @@ static bool scr_ffi_dispatch(void) {
   /* Keep the wake fd readable while queued calls remain. Drain only while
    * holding the same lock writers use, closing the post-vs-drain lost-wakeup
    * race for the transition to an empty queue. */
-  bool more = scr_ffi_head != NULL;
-  if (!more) scr_ffi_wake_drain();
+  bool more = q->head != NULL;
+  if (!more) scr_ffi_wake_drain(q);
   scr_ffi_lock_leave();
   scr_ffi_call_free(call);
   scr_ffi_release_retired(table);
   return true;
 }
 
-static int scr_ffi_pollfd(void) { return scr_ffi_wake_pipe[0]; }
+static int scr_ffi_pollfd(void) { return scr_ffi_queue()->wake_pipe[0]; }
 
 void scr_ffi_install(void) {
-  if (scr_ffi_installed) return;
-  scr_ffi_installed = true;
+  ScrFfiQueue *q = scr_ffi_queue();
+  if (q->installed) return;
+  q->installed = true;
 #if !defined(_WIN32) && !defined(__wasi__)
-  if (pipe(scr_ffi_wake_pipe) == 0) {
+  int pipe_fds[2];
+  if (pipe(pipe_fds) == 0) {
     for (int i = 0; i < 2; i++) {
-      (void)fcntl(scr_ffi_wake_pipe[i], F_SETFL, O_NONBLOCK);
-      (void)fcntl(scr_ffi_wake_pipe[i], F_SETFD, FD_CLOEXEC);
+      (void)fcntl(pipe_fds[i], F_SETFL, O_NONBLOCK);
+      (void)fcntl(pipe_fds[i], F_SETFD, FD_CLOEXEC);
     }
-  } else {
-    scr_ffi_wake_pipe[0] = scr_ffi_wake_pipe[1] = -1;
+    scr_ffi_lock_enter();
+    q->wake_pipe[0] = pipe_fds[0];
+    q->wake_pipe[1] = pipe_fds[1];
+    scr_ffi_lock_leave();
   }
 #endif
   scr_loop_set_ffi(&scr_ffi_pending, &scr_ffi_dispatch, &scr_ffi_pollfd,
@@ -329,29 +388,30 @@ void scr_ffi_install(void) {
 }
 
 void scr_ffi_stop(void) {
+  ScrFfiQueue *q = scr_ffi_queue();
   scr_ffi_lock_enter();
-  if (scr_ffi_stopping) {
+  if (q->stopping) {
     scr_ffi_lock_leave();
     return;
   }
-  scr_ffi_stopping = true;
-  ScrFfiCall *calls = scr_ffi_head;
-  scr_ffi_head = scr_ffi_tail = NULL;
+  q->stopping = true;
+  ScrFfiCall *calls = q->head;
+  q->head = q->tail = NULL;
   for (ScrFfiCall *call = calls; call != NULL; call = call->next) {
-    if (call->table->queued > 0) call->table->queued--;
+    if (call->table != NULL && call->table->queued > 0) call->table->queued--;
   }
-  scr_ffi_wake_drain();
+  scr_ffi_wake_drain(q);
 #if !defined(_WIN32) && !defined(__wasi__)
-  if (scr_ffi_wake_pipe[0] >= 0) close(scr_ffi_wake_pipe[0]);
-  if (scr_ffi_wake_pipe[1] >= 0) close(scr_ffi_wake_pipe[1]);
+  if (q->wake_pipe[0] >= 0) close(q->wake_pipe[0]);
+  if (q->wake_pipe[1] >= 0) close(q->wake_pipe[1]);
 #endif
-  scr_ffi_wake_pipe[0] = scr_ffi_wake_pipe[1] = -1;
+  q->wake_pipe[0] = q->wake_pipe[1] = -1;
   scr_ffi_lock_leave();
   while (calls != NULL) {
     ScrFfiCall *next = calls->next;
     ScrFfiTable *table = calls->table;
     scr_ffi_call_free(calls);
-    scr_ffi_release_retired(table);
+    if (table != NULL) scr_ffi_release_retired(table);
     calls = next;
   }
 }
@@ -363,7 +423,8 @@ void scr_ffi_teardown_foreign(ScrFfiTable *table) {
   size_t len = table->len;
   ScrClosure **retired = table->retired;
   size_t retired_len = table->retired_len;
-  if (scr_ffi_foreign_registrations >= len) scr_ffi_foreign_registrations -= len;
+  ScrFfiQueue *owner = table->loop;
+  if (owner != NULL && owner->foreign_registrations >= len) owner->foreign_registrations -= len;
   table->entries = NULL;
   table->len = 0;
   table->cap = 0;
@@ -376,4 +437,49 @@ void scr_ffi_teardown_foreign(ScrFfiTable *table) {
   free(entries);
   for (size_t i = 0; i < retired_len; i++) scr_closure_release(retired[i]);
   free(retired);
+}
+
+/* ── the remote inbox (scr_runtime.h) ─────────────────────────────────
+ * Another thread's way into this instance's loop: C tasks ride the same
+ * per-instance queue, pipe and loop hook as foreign FFI callbacks. */
+void *scr_instance_remote(void) {
+  scr_ffi_install();
+  return scr_ffi_queue();
+}
+
+void scr_remote_post(void *remote, void (*task)(void *), void *arg) {
+  ScrFfiQueue *q = remote;
+  ScrFfiCall *call = scr_ffi_foreign_alloc(sizeof *call);
+  memset(call, 0, sizeof *call);
+  call->task = task;
+  call->task_arg = arg;
+  call->loop = q;
+  scr_ffi_lock_enter();
+  if (q->stopping) {
+    scr_ffi_lock_leave();
+    free(call);
+    return;
+  }
+  scr_ffi_enqueue_locked(q, call);
+  void (*wake)(void *) = q->wake;
+  void *wake_ctx = q->wake_ctx;
+  scr_ffi_lock_leave();
+  if (wake != NULL) wake(wake_ctx);
+}
+
+void scr_remote_hold(int delta) {
+  ScrFfiQueue *q = scr_ffi_queue();
+  scr_ffi_lock_enter();
+  if (delta > 0) q->holds += (size_t)delta;
+  else if ((size_t)-delta <= q->holds) q->holds -= (size_t)-delta;
+  else q->holds = 0;
+  scr_ffi_lock_leave();
+}
+
+void scr_remote_set_wake(void (*wake)(void *), void *ctx) {
+  ScrFfiQueue *q = scr_ffi_queue();
+  scr_ffi_lock_enter();
+  q->wake = wake;
+  q->wake_ctx = ctx;
+  scr_ffi_lock_leave();
 }

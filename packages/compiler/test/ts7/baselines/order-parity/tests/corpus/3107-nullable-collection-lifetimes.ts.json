@@ -1,6 +1,0 @@
-{
- "order": [
-  "<repo>/tests/corpus/3107-nullable-collection-lifetimes.ts"
- ],
- "diags": []
-}

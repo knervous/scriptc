@@ -1,3 +1,4 @@
+// This file was modified from scriptc (Apache-2.0); see MODIFICATIONS.md.
 /** Runtime library modes have distinct trap and state ownership contracts. */
 export function withLibraryRuntimeFlavors(matrix) {
   // A wasm pack carries the EventTarget unit in every flavor (AbortSignal
@@ -57,11 +58,12 @@ export function withLibraryRuntimeFlavors(matrix) {
     },
   ].map((unit) => ({
     ...unit,
-    // Libraries run neither workers nor the young-in nursery (an
+    // Libraries run neither the engine, workers nor the young-in nursery (an
     // executable-only experiment), and they carry no promise unit, so no
     // promise adapter exists for a checked-dynamic key to name.
     variants: unit.variants.filter(
       (variant) =>
+        !variant.defines.includes("SCR_DYNAMIC") &&
         !variant.defines.includes("SCR_WORKERS") &&
         !variant.defines.includes("SCR_YIN") &&
         !variant.defines.includes("SCR_DYN_PROMISE_KEYS"),

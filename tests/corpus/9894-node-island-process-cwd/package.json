@@ -1,1 +1,0 @@
-{ "name": "island-process-cwd", "private": true, "type": "module", "scriptc": { "packages": { "process-state": "node" } } }

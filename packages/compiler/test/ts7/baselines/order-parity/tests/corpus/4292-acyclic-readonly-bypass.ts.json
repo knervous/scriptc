@@ -1,6 +1,0 @@
-{
- "order": [
-  "<repo>/tests/corpus/4292-acyclic-readonly-bypass.ts"
- ],
- "diags": []
-}

@@ -1,6 +1,0 @@
-{
- "order": [
-  "<repo>/tests/corpus/6210-typeof-global-static-members.js"
- ],
- "diags": []
-}

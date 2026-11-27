@@ -1,21 +1,33 @@
-import { expect, test } from "vitest";
-import { moduleTagNumber, portableRelativePath } from "./stable-names.js";
+import { afterEach, expect, test } from "vitest";
+import { keyHash, setStableNameFiles, stableFileName } from "./stable-names.js";
 
-test("module tag numbers depend only on the file name and stay distinct", () => {
-  const first = moduleTagNumber("lib/a.ts", new Set());
-  expect(moduleTagNumber("lib/a.ts", new Set([7, 8]))).toBe(first);
-  expect(moduleTagNumber("lib/b.ts", new Set())).not.toBe(first);
-  expect(moduleTagNumber("lib/a.ts", new Set([first]))).toBe((first + 1) >>> 0);
-  expect(moduleTagNumber("lib/a.ts", new Set([first, (first + 1) >>> 0]))).toBe((first + 2) >>> 0);
+afterEach(() => setStableNameFiles([]));
+
+const checkout = (root: string) => [
+  `${root}/client/.wasmgc-entry4211/src/main.ts`,
+  `${root}/client/.wasmgc-entry4211/src/render/world.ts`,
+  `${root}/vendor/lite/src/scene.ts`,
+  "/Users/someone/elsewhere/client/node_modules/pkg/index.d.ts",
+];
+
+test("a key names the program's files relative to its checkout, so two checkouts agree", () => {
+  const key = (root: string) => {
+    setStableNameFiles(checkout(root));
+    return stableFileName(`r|${root}/vendor/lite/src/scene.ts:10:20|${root}/client/.wasmgc-entry99/src/main.ts`);
+  };
+  const one = key("/Users/a/source/tree");
+  const two = key("/private/tmp/x/scratchpad/worktree");
+  expect(one).toBe("r|vendor/lite/src/scene.ts:10:20|client/.wasmgc/src/main.ts");
+  expect(two).toBe(one);
+  expect(keyHash(two)).toBe(keyHash(one));
 });
 
-test("relative module paths use / on every platform", () => {
-  expect(portableRelativePath("/repo/src", "/repo/src/lib/a.ts", "linux")).toBe("lib/a.ts");
-  expect(portableRelativePath("C:/repo/src", "C:/repo/src/lib/a.ts", "win32")).toBe("lib/a.ts");
-  expect(portableRelativePath("C:\\repo\\src", "C:/repo/node_modules/x/index.d.ts", "win32")).toBe(
-    "../node_modules/x/index.d.ts",
-  );
-  expect(
-    moduleTagNumber(portableRelativePath("C:/repo", "C:/repo/lib/a.ts", "win32"), new Set()),
-  ).toBe(moduleTagNumber(portableRelativePath("/repo", "/repo/lib/a.ts", "linux"), new Set()));
+test("a package is named by its path under node_modules, wherever that directory is", () => {
+  setStableNameFiles(checkout("/Users/a/source/tree"));
+  expect(stableFileName("/Users/someone/elsewhere/client/node_modules/@scope/pkg/dist/a.d.ts:4"))
+    .toBe("node_modules/@scope/pkg/dist/a.d.ts:4");
+});
+
+test("without program files a key keeps its paths, minus the build's private mirror", () => {
+  expect(stableFileName("/a/b/client/.wasmgc-entry12/src/x.ts")).toBe("/a/b/client/.wasmgc/src/x.ts");
 });

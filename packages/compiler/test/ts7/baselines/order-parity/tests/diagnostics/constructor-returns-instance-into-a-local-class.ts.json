@@ -1,6 +1,0 @@
-{
- "order": [
-  "<repo>/tests/diagnostics/constructor-returns-instance-into-a-local-class.ts"
- ],
- "diags": []
-}

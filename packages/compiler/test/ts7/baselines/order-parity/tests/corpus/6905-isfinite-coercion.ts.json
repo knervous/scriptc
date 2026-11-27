@@ -1,6 +1,0 @@
-{
- "order": [
-  "<repo>/tests/corpus/6905-isfinite-coercion.ts"
- ],
- "diags": []
-}

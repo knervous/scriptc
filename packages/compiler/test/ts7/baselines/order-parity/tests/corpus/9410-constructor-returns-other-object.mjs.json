@@ -1,6 +1,0 @@
-{
- "order": [
-  "<repo>/tests/corpus/9410-constructor-returns-other-object.mjs"
- ],
- "diags": []
-}

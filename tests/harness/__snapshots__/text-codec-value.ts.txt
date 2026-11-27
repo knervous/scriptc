@@ -1,29 +1,36 @@
-text-codec-value.ts:16:5 - error SC2020: 'uninitialized lexical codec bindings' is part of the standard library types but has no scriptc lowering yet
+text-codec-value.ts:2:13 - error SC1090: console.log of 'TextEncoder' values (TextEncoder instances have no inspect lowering yet) are not supported yet
 
-  15 | var varEncoder = new TextEncoder();
-  16 | let uninitializedDecoder: TextDecoder;
+  1 | const encoder = new TextEncoder();
+  2 | console.log(encoder);
+    |             ^~~~~~~
+  3 | 
+
+text-codec-value.ts:17:5 - error SC2020: 'uninitialized lexical codec bindings' is part of the standard library types but has no scriptc lowering yet
+
+  16 | var varEncoder = new TextEncoder();
+  17 | let uninitializedDecoder: TextDecoder;
      |     ^~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~
-  17 | function earlyVarCapture(): Uint8Array {
+  18 | function earlyVarCapture(): Uint8Array {
 
   hint: initialize let or const TextEncoder/TextDecoder bindings at their declaration
 
-text-codec-value.ts:18:21 - error SC1030: the reference to 'localEncoder' above its 'var' declaration (a read there would be 'undefined', which the binding's type cannot hold — annotate it '| undefined' or move the declaration up) is not supported yet
+text-codec-value.ts:19:21 - error SC1030: the reference to 'localEncoder' above its 'var' declaration (a read there would be 'undefined', which the binding's type cannot hold — annotate it '| undefined' or move the declaration up) is not supported yet
 
-  17 | function earlyVarCapture(): Uint8Array {
-  18 |   const use = () => localEncoder.encode("x");
+  18 | function earlyVarCapture(): Uint8Array {
+  19 |   const use = () => localEncoder.encode("x");
      |                     ^~~~~~~~~~~~
-  19 |   const bytes = use();
+  20 |   const bytes = use();
 
-text-codec-value.ts:32:15 - error SC1090: the reference to 'caseEncoder' (a binding form with no lowering) is not supported yet
+text-codec-value.ts:33:15 - error SC1090: the reference to 'caseEncoder' (a binding form with no lowering) is not supported yet
 
-  31 |     const Encoded = class {
-  32 |       bytes = caseEncoder.encode("should fence");
+  32 |     const Encoded = class {
+  33 |       bytes = caseEncoder.encode("should fence");
      |               ^~~~~~~~~~~
-  33 |     };
+  34 |     };
 
-text-codec-value.ts:38:17 - error SC1090: codec bindings read from another switch clause before initialization is proven is not supported yet
+text-codec-value.ts:39:17 - error SC1090: codec bindings read from another switch clause before initialization is proven is not supported yet
 
-  37 |     // @ts-expect-error -- dispatch can enter here while caseEncoder is in its TDZ
-  38 |     console.log(caseEncoder.encode("should fence directly").length);
+  38 |     // @ts-expect-error -- dispatch can enter here while caseEncoder is in its TDZ
+  39 |     console.log(caseEncoder.encode("should fence directly").length);
      |                 ^~~~~~~~~~~
-  39 |     break;
+  40 |     break;

@@ -1,6 +1,0 @@
-{
- "order": [
-  "<repo>/tests/corpus/async-dynamic-return-promise-ordering.ts"
- ],
- "diags": []
-}

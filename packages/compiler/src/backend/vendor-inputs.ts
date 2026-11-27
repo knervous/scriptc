@@ -1,3 +1,4 @@
+// This file was modified from scriptc (Apache-2.0); see MODIFICATIONS.md.
 /** The pinned QuickJS, mbedTLS, zlib, brotli, and zstd inputs used by native
  * recipes. */
 export const QJS_COMMIT = "3c8f3d68953955950074c41c6e4d999562ae82a7";
@@ -59,6 +60,7 @@ export function icuSourceList(text: string): string[] {
 }
 /** Exact translation-unit membership shared by cache builds and external
  * source-pack recipes. */
+export const QJS_ENGINE_SOURCES = ["dtoa.c", "libregexp.c", "libunicode.c", "quickjs.c"] as const;
 export const LRE_SOURCES = ["libregexp.c", "libunicode.c"] as const;
 const ZLIB_COMMON_SOURCES = [
   "adler32.c",

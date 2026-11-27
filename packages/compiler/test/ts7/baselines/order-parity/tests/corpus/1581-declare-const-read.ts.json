@@ -1,6 +1,0 @@
-{
- "order": [
-  "<repo>/tests/corpus/1581-declare-const-read.ts"
- ],
- "diags": []
-}

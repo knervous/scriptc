@@ -1,7 +1,0 @@
-{
- "order": [
-  "<repo>/tests/corpus/http-client-function-alias/clients.ts",
-  "<repo>/tests/corpus/http-client-function-alias/main.ts"
- ],
- "diags": []
-}

@@ -1,6 +1,0 @@
-{
- "order": [
-  "<repo>/tests/corpus/destructure-conditional-missing-tuple.ts"
- ],
- "diags": []
-}

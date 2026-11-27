@@ -1,6 +1,0 @@
-{
- "order": [
-  "<repo>/tests/corpus/6915-dynamic-builtin-construct.mjs"
- ],
- "diags": []
-}

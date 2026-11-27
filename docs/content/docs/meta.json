@@ -5,21 +5,15 @@
     "index",
     "quickstart",
     "---Guides---",
-    "node-development-loop",
     "coverage",
     "dependencies",
-    "platforms",
-    "wasm",
     "ffi",
-    "threads",
-    "contracts",
-    "experimental",
-    "dual-run",
     "native-objects",
+    "wasm",
+    "platforms",
     "---Reference---",
     "cli",
-    "limitations",
-    "[Node.js Compatibility](/compatibility)",
-    "how-it-works"
+    "how-it-works",
+    "limitations"
   ]
 }

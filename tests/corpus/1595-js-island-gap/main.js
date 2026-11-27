@@ -1,3 +1,4 @@
+// @dynamic
 // The INFERENCE-GAP program: this directory's tsconfig turns noImplicitAny
 // off, so the untyped parameters type `any` — exactly where `any` lands in
 // TS: the embedded dynamic engine under --dynamic (this build), an honest

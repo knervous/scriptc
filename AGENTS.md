@@ -4,13 +4,9 @@ This is the only agent guide for the repository. Its rules apply everywhere, inc
 
 ## Markdown style
 
-Write prose paragraphs and list items as single source lines and let editors and renderers wrap them naturally. Do not hard-wrap Markdown at a fixed column; preserve separate lines only where Markdown syntax or intentional formatting requires them, such as headings, lists, tables, blockquotes, and code blocks. The Limitations page partials under `docs/content/limitations/` are the exception: they keep one sentence per line (see Limitations page partials).
-
-Use the `technical-writer` skill (`.agents/skills/technical-writer/SKILL.md`) when you write or edit prose for this repo, including docs pages, READMEs, changelog entries, commit messages, PR descriptions, and issues.
+Write prose paragraphs and list items as single source lines and let editors and renderers wrap them naturally. Do not hard-wrap Markdown at a fixed column; preserve separate lines only where Markdown syntax or intentional formatting requires them, such as headings, lists, tables, blockquotes, and code blocks.
 
 ## Build and test
-
-Use `pnpm lint` and `pnpm format:check` for owned JS/TS; apply formatting with `pnpm format` and review any `pnpm lint:fix` changes. Preserve the exclusions in `.oxlintrc.jsonc` and `.oxfmtrc.jsonc`: program fixtures and deliberately invalid or formatting-sensitive inputs, generated outputs, vendor sources, and the standalone docs workspace are not part of the root tooling scope. Do not reformat embedded source strings or sort imports. Keep lint exceptions narrowly scoped and explain their semantic purpose. Compiler frontend/backend imports and the explicit TypeScript parser islands are enforced by oxlint.
 
 ```bash
 pnpm install && pnpm -r build   # build the workspace
@@ -19,8 +15,6 @@ pnpm test:sandbox              # full gate: ~4m custom image, ~9m cold managed f
 
 The ordinary workspace build does not rebuild packaged native artifacts. When changing native assembly/object emission or runtime-pack selection, install CMake, Ninja, the pinned LLVM 22 development package, and Zig 0.16.0, then run the matching `@scriptc/llvm-<platform>` and `@scriptc/runtime-<platform>` `build:native` scripts explicitly. The macOS full test suite also needs its generated artifacts.
 
-The Linux x64 runtime pack's speed flavor is optimized with the committed runtime profile `packages/runtime-pack-common/profiles/linux-x64-gnu.profdata.gz`. When `packages/runtime-pack-common/test/runtime-profile.test.ts` fails, the profile is stale: refresh it as the runtime profile paragraphs of [RELEASING.md](./RELEASING.md) describe (`node scripts/refresh-runtime-profile.mjs`, Linux x64) and commit the new profile on its own. A refresh changes every `--optimization=speed` executable on Linux x64 and no other.
-
 Use focused local tests while iterating, then use `pnpm test:sandbox` whenever a
 full validation gate is required. It loads Sandbox configuration from the
 shell and `.env.local`, runs portable coverage across disposable Linux
@@ -28,8 +22,6 @@ Sandboxes, and retains the Darwin-native contracts on macOS. Linux hosts run
 their supported native-clang contracts locally; other hosts retain those
 checks in the Sandboxes. Both lanes green is the bar before shipping any
 change.
-
-`SCRIPTC_SANDBOX_NATIVE_REFERENCE` names a built checkout inside a prepared `SCRIPTC_SANDBOX_SNAPSHOT` or image: each lane copies that checkout's LLVM helper and runtime pack instead of rebuilding them when their source inputs are identical. Sandbox creation is rate limited per team in vCPUs per minute, so the runner retries a rate-limited creation with backoff. Larger Sandboxes (`SCRIPTC_SANDBOX_VCPUS` up to 32, with `SCRIPTC_TEST_WORKERS` at half the vCPUs) shorten the lanes most.
 
 `VERCEL_OIDC_TOKEN` is the preferred credential. `VERCEL_TOKEN` remains
 supported with explicit `VERCEL_TEAM_ID` and `VERCEL_PROJECT_ID`. The custom
@@ -52,24 +44,6 @@ SCRIPTC_TEST_WORKERS=4 SCRIPTC_SAN=1 pnpm test  # sanitized lane
 
 Corpus programs are differential tests against Node: every program runs under Node and as a compiled native binary, and stdout, stderr, and exit codes must match byte-for-byte. A new feature lands with corpus programs that pin its behavior both ways.
 
-Name a new corpus program after what it tests, without a number: lowercase words joined by hyphens, such as `tests/corpus/intersection-restated-members.ts`, or a directory such as `tests/corpus/<name>/main.ts` for a multi-file program. Parallel changes kept taking the same next number; with names, two changes collide only when they add the same name, which git reports as a conflict. Leave existing numbered programs as they are: never rename or renumber them, and name a new program even when it extends a numbered family.
-
-Record a new or remeasured program's CI cost (used to balance the test shards) in `tests/harness/corpus-costs/<program>.json`, not in `tests/harness/corpus-costs.json`; see the README there.
-
-Runtime code that parses bytes from outside the process (HTTP, URLs, JSON, regular expressions, text and binary decoders, decompression) has fuzz targets in `tests/fuzz`; see the README there. `node scripts/fuzz.mjs` builds them as one program with AddressSanitizer, the reference-count audit and UndefinedBehaviorSanitizer, replays the regression cases and fuzzes each target for a fixed time. `.github/workflows/fuzz.yml` runs it briefly on pull requests that change `packages/runtime` and for longer every night. A fix for a failure it finds lands with the failing case in `tests/fuzz/regressions/<target>/`, and a new parser of outside bytes lands with a target. The same workflow runs `node scripts/tsan-workers.mjs` every night: the corpus programs that use worker threads, built and run with ThreadSanitizer. A race it reports is fixed, not added to `tests/harness/tsan.supp`, unless the entry's comment can say why the race is tolerated and what removes it.
-
-Before opening a PR that adds or changes corpus, diagnostic, or frontend fixtures, run `pnpm test:ts7 --baselines-only`. This fast completeness check uses the same fixture discovery as the parity suite; it does not type-check or replace behavioral parity. Generate missing preflight/order baselines, review their diagnostics and module order, and run the affected `order-parity.test.ts` batches before pushing. Keep existing baseline entries unchanged unless the corresponding behavior intentionally changes. The full `pnpm test:ts7` command also checks completeness before starting its sweep.
-
-A change that must not cost good code anything, such as a compatibility fix that replaces a refusal, proves it with the zero-cost gate. The gate compiles the benchmark workloads, the self-hosted compiler, the self-hosting emitter fixtures, and the TypeScript corpus with two built checkouts. It requires byte-identical IR, LLVM, and release executables, and compile time within tolerance. `--allow=<regex>` names the change's pattern signature: programs whose sources match may differ, and the PR lists them. `--allow-programs=<file>` names the programs that may differ by id instead, one per line as the gate prints them (`corpus/…`, `bench/…`, `self/cli`, `fixture/…`) with `#` comments: it combines with `--allow`, an id that names no program is an error, and the summary counts the listed programs that differ and names the ones that are identical. The gate builds the candidate checkout's copy of any benchmark or corpus program the change itself rewrites or adds with both compilers, and a program the baseline compiler cannot build is `changed-by-pr`; a program the change deletes is `removed-by-pr`. Those rows are listed with the other notes and do not fail the gate; any other build error does. The gate classifies every other difference. A program is `runtime-only` when its IR and LLVM are identical and its executable differs only through runtime objects that differ between the two checkouts' runtime packs; the gate lists the changed runtime functions each such program links and the size change, and passes with a note, so a runtime C change does not fail the gate when no program's code changes. A program is `nondeterministic` when the baseline, building it again, differs from its own first build in the same artifacts; it also passes with a note. Any other difference is `differs` and fails the gate, which names the first differing function. `--strict` fails runtime-only and nondeterministic programs too, for a change that must leave every executable byte-identical. The gate also enforces the two-tier runtime separation: no executable may gain symbols from `DYNAMIC_TIER_PREFIXES` in `scripts/zero-cost-compare.mjs`, and fully typed benchmarks may link none; extend that list as dynamic-tier units land. `--quick` checks only the benchmarks; `--cachegrind` adds per-function instruction counts for executables that differ. Run it in a Sandbox with both checkouts prepared:
-
-```bash
-node scripts/zero-cost-gate.mjs --baseline=/vercel/sandbox/prev --candidate=. --allow='\barguments\b'
-```
-
-The whole gate takes 30 to 75 minutes on one 8-vCPU Sandbox, so shard it across Sandboxes. `--shard=i/n` splits the bench and corpus programs; the self-hosted compiler and the emitter fixtures run in shard 1, or alone with `--set=self`, and the candidate-source build overlaps the comparison builds on hosts with 40 GB or more. Each shard writes `--json`, and `node scripts/zero-cost-merge.mjs <shard.json>...` merges them into one verdict, recomputing the compile-time intervals over every shard. `--record-baseline-cache=<file>` builds only the baseline and records each program's artifact hashes; `--baseline-cache=<file>` then skips the baseline build of every program whose candidate artifacts hash the same, which halves the work for a change that leaves most programs identical. A record applies only to the built baseline checkout, toolchain, and paths it was made with, and is ignored otherwise; a program whose entry, relative imports, or optimization level changed since the record builds its baseline.
-
-The compiler's own compile is budgeted in `scripts/self-compile-budget.json`, because the builds the gate compares use the baseline's compiler source and cannot see what a change's own source costs. The gate judges the candidate's source built with the candidate, and CI's native compiler profile job judges the same on every compiler change: the whole-program lowering passes that build takes must be exactly the ones listed (one construct in the compiler's source can make it lower itself again), the heap it still holds at the end of a lowering pass must stay within 5% of the budget per source byte, and that heap may fill at most 65% of `heapLimitMb`, the `--max-old-space-size` every self-compile entry point passes. The gate also fails when the candidate's source takes more than 10% longer to compile than the baseline's with the same compiler in the same run, beyond the growth of the source; it repeats the pair once before it does. The same pair of builds is compared by what it emits, which is exact: the gate fails when the candidate's compiler source compiles to more than 1% more LLVM bytes or functions than the baseline's beyond the growth of the source, or when the dynamic tier's functions in it grow by more than 5% (and 100 functions). Growth of that kind means a compiler type became a dynamic value, which `scriptc coverage packages/compiler/src/native/cli.ts --explain-dynamic` shows; `outputGrowthAllowance` grants it to the PR that sets it. The budget's `neverDynamicClasses` lists the compiler's classes that must not become dynamic values in its own build at all (the `Lowerer`): `--check` and CI's native compiler job build with `SCRIPTC_DYNAMIC_CLASSES` set to them, the build reports every place that makes an instance of one a dynamic value, and one such place fails the check with its file, line and source text. A class instance becomes a dynamic value where it is handed to an interface or record type with a method, or to `unknown`, `any` or a type parameter; hand the callee a record built once, a function, or the class itself. To move a budget on purpose, change its `value` and state why in its `reason` in the same PR (a changed value with the old reason fails); `sourceCostAllowance` grants compile time to the PR that sets it. `node scripts/self-compile-budget.mjs --check` judges one checkout on its own, and `--record --reason=<why>` writes what it measured.
-
 Test location follows scope:
 
 - Co-locate white-box unit tests with implementation files under
@@ -79,20 +53,6 @@ Test location follows scope:
 
 Keep existing tests in place unless a change already touches their organization;
 new tests should follow this convention.
-
-## Numbered registries
-
-Parallel changes must never pick the same number by hand. Each registry has one source of truth and a fast check:
-
-- Diagnostic codes: claim a code by adding its row, in numeric order, to `DIAGNOSTIC_CODES` in `packages/compiler/src/diagnostics/codes.ts` before any site uses it. A shipped construct's code moves to `RETIRED_DIAGNOSTIC_CODES` and is never reused; codes that open work already uses are held in `RESERVED_DIAGNOSTIC_CODES`. `codes.test.ts` fails on a code without a row, a retired code in use, an unused row, or rows out of order, and two claims of one code are a merge conflict or a duplicate key.
-- Dyn handle tags: add a new tag by name only to `SCR_DYNH_NEW_TAGS` in `packages/runtime/src/scr_dyn.h`, in name order; the enum numbers it. Pin a tag to an explicit value in `SCR_DYNH_TAGS` only when the LLVM backend needs its number. The header does not compile when two tags share a value, and `dyn-handle-tags.test.ts` names the problem.
-- Runtime enums and flag bits the backend mirrors (`ScrDynKind`, `ScrMessageKind`, `ScrBytesElem`, `SCR_CLOSURE_KIND_*`, the `%ScrArr` spare flags) are checked against their C declarations by `packages/compiler/src/backend/llvm/runtime-registries.test.ts`. A new mirrored enum or flag set gets a check there, and C code names flag bits instead of writing their values.
-
-Before taking a number in a pinned registry, run `node scripts/registry-claims.mjs`: it lists the diagnostic codes and pinned handle tags that open pull requests claim and reports collisions; `--check` reports only collisions with the current branch and exits 1 when there is one.
-
-## Whole-program facts
-
-A rule that turns on for a whole program, file or shape because of one occurrence somewhere in it is a cliff: an unrelated line changes how other code compiles. Decide a fact from the syntax, symbols or types of the value or site it concerns, never from a file's raw text or from an identifier's spelling. When a fact has to be program-wide, register it in `packages/compiler/src/program-facts.ts`, which lists every such fact and every scan over the program's source files; `program-facts.test.ts` fails on a scan that is not registered there.
 
 ## Where things live
 
@@ -113,27 +73,17 @@ The Node.js compatibility system is an implementation inventory and planning too
 - `internal/compatibility/node-v24.json` pins the Node release, commit, official API inputs, and documentation URLs. The pinned Node API is the denominator.
 - Node's official documentation defines the public API hierarchy and stability metadata. Consult Node source when the docs do not fully specify behavior.
 - Running the pinned Node release is the behavior oracle for differential tests.
-- Compiler source and `packages/compiler/surface-manifest.json`, augmented by the static-support overlay (`internal/compatibility/static-support.json` and the per-module files it indexes), define static-native support.
+- Compiler source and `packages/compiler/surface-manifest.json`, augmented by `internal/compatibility/static-support.json`, define static-native support.
+- `internal/compatibility/dynamic-support.json` defines dynamic-island modules, exports, members, explicit stubs, globals, and policies. It also generates the runtime builtin registry.
 - Test evidence determines positive behavioral claims. Source manifests alone do not prove Node-compatible behavior.
 
-Compatibility describes native compilation. There is no runtime JavaScript engine tier. `island-served` is the one explicit exception to "native compilation": it records that an island build answers an API through the Node island scriptc already embeds, and is never a native support claim.
-
-### Adding a row
-
-Each shared table is one file per builtin module, loaded by a small index. Add a row to the module's file, not to the index:
-
-- `internal/compatibility/static-support.json` indexes `static-support/chapter-policies.json` and `static-support/{evidence,features,dedicated}/<module>.json`. A feature row goes in `features/<chapter>.json`, a dedicated lowering row in `dedicated/<chapter>.json` (`_unassigned.json` when it names no chapter), and an evidence map entry in `evidence/<module>.json`. The index names directories, so a new module is a new file with no index edit.
-- `packages/compiler/src/ir/builtin-signatures.ts` indexes `builtin-signatures/<prefix>.ts`, one file per builtin-name prefix (`fs.`, `http.`, `dyn.`, `string.`, ...). Add the call slot to its prefix's file. A new prefix also needs its import and spread in the index.
-- `packages/compiler/src/ir/builtin-never-throw.ts` indexes `builtin-never-throw/<prefix>.ts` the same way.
-
-A branch or pull request written before the split is rehomed mechanically: `node scripts/rehome-split-tables.mjs --pr NUMBER --write` takes its edits to the old single files and re-applies them to the per-module files, reporting any row it cannot place. Then run the table's gates (`pnpm node-compat --local` for static-support; a compiler build and the builtin tests for the compiler tables).
+Treat static-native and dynamic-island compatibility independently. Support in one tier says nothing about the other, and `--dynamic` does not turn an unsupported typed call into a supported static call.
 
 ### Status contract
 
 - `supported` — broadly implemented. This requires test evidence.
 - `partial` — a useful implemented subset. This requires test evidence, but evidence may cover an API family rather than every documented overload.
-- `island-served` — in an island build, a Node island answers this API; a build without islands keeps its refusal. This requires test evidence and is not native support. Do not infer it from an island being present: only an island-specific implementation path with differential tests earns it.
-- `refused` — a named compiler diagnostic exists. Never infer this status from absence.
+- `refused` — a named compiler diagnostic or explicit dynamic throwing or rejecting stub exists. Never infer this status from absence.
 - `not-implemented` — no implementation claim. Its verification basis decides whether it is ready to implement or must first be investigated.
 - `by-design` — intentionally outside a scriptc execution model. This requires an explicit implementation-owned architectural policy.
 - `unreviewed` — no compatibility subsystem owns a reliable classification. Do not treat this as unsupported or as an implementation ticket.
@@ -146,23 +96,20 @@ Chapter rows are generated summaries of their descendants, never independent sup
 Read a row's verification basis before acting:
 
 - `test-backed` — mapped to implementation and relevant tests. Audit the exact overload or behavior before broadening a `partial` claim.
-- `island-test-backed` — mapped to an island-specific implementation path and differential tests that run under the pinned Node and as a compiled island binary; the evidence names the tests, and a build without islands keeps the refusal.
 - `explicit-refusal` — source-verified refusal boundary.
-- `verified-absence` — a test confirms absence: an implementation-owned manifest entry names the diagnostics snapshot (or runtime presence test) that pins the refusal a use of the API gets.
+- `verified-absence` — a runtime presence test confirms absence.
 - `declared-gap` — an implementation-owned manifest explicitly declares the gap; it is ready for implementation.
 - `registry-gap` — no implementation registry entry matched. Verify the gap before implementing: it may be an incomplete manifest or symbol match.
 - `architectural-policy` — explicit intentional exclusion.
 - `unreviewed`, `not-applicable`, and `derived` retain the meanings above.
 
-`pnpm node-compat:backlog` emits native compilation work. Its actions are:
+`pnpm node-compat:backlog` emits tier-specific work. Its actions are:
 
 - `verify-gap` — investigate a registry gap first; this is not yet an implementation ticket.
 - `implement` — implement a declared or verified gap.
 - `replace-refusal` — add support where an explicit refusal currently exists.
 - `audit-partial` — identify and implement missing behavior in a tested subset, or tighten an overbroad mapping.
 - `classify` — establish ownership and evidence for an unreviewed row.
-
-`island-served` rows emit no action: the island already answers them, so they are neither native implementation work nor a refusal to replace. Native support for them would still be a separate, explicitly justified change.
 
 Backlog priority is a heuristic based on Node stability: stable APIs are raised, release-candidate or unrated APIs remain normal, and experimental, deprecated, and legacy APIs are lowered. It is not a product roadmap.
 
@@ -173,7 +120,7 @@ Useful queue filters compose:
 ```bash
 pnpm node-compat:backlog --action=implement --priority=high
 pnpm node-compat:backlog --action=verify-gap --chapter=assert
-pnpm node-compat:backlog --tier=static --format=tsv
+pnpm node-compat:backlog --tier=dynamic --format=tsv
 ```
 
 ### Generated files
@@ -182,17 +129,14 @@ Never hand-edit these files:
 
 - `packages/compiler/surface-manifest.json`
 - `internal/compatibility/generated/node-v24-internal.json`
-- `internal/compatibility/generated/node-v24-refusals.json`
-- `packages/experimental/refusals.json`
+- `internal/compatibility/generated/node-v24-backlog.json`
 - `docs/src/generated/node-v24-compatibility.json`
+- `docs/src/generated/node-v24-compatibility-meta.json`
+- `packages/runtime/src/scr_island_manifest.h`
 
-The refusal table and its published copy are written by the compatibility generator.
+Change compiler decision sources or the implementation-owned compatibility manifests, then regenerate. Use `pnpm manifest` when compiler decision tables change and `pnpm node-compat` whenever the Node pin, compatibility manifests, compiler surface manifest, or dynamic registry changes.
 
-Change compiler decision sources or the implementation-owned compatibility manifests, then regenerate. Use `pnpm manifest` when compiler decision tables change and `pnpm node-compat` whenever the Node pin, compatibility manifests, compiler surface manifest, changes. `pnpm node-compat --local` reclassifies the committed ledger without fetching Node's docs; it writes the same files as `pnpm node-compat` while the Node pin is unchanged.
-
-Never resolve a merge conflict in these files by hand. Resolve the source conflicts, then run `node scripts/regen-generated.mjs`: it takes the merged-in branch's version of each conflicted generated file, regenerates all of them from the merged sources, and stages the ones that conflicted.
-
-The public docs artifact must not expose repository test paths, internal source identifiers, engineering evidence bookkeeping, documentation/metadata headings, command-line or configuration-only entries, or rows that are N/A in the native tier. Those remain in the complete internal census under `internal/compatibility/generated/`.
+The public docs artifact must not expose repository test paths, internal source identifiers, engineering evidence bookkeeping, documentation/metadata headings, command-line or configuration-only entries, or rows that are N/A in both tiers. Those remain in the complete internal census under `internal/compatibility/generated/`.
 
 ### Landing compatibility work
 
@@ -200,12 +144,12 @@ For each API family:
 
 1. Start from the backlog action and verification basis. Verify every `registry-gap` before assuming code is missing.
 2. Read the pinned Node documentation, stability metadata, relevant Node source when needed, and existing scriptc implementation paths.
-3. Define the native compilation scope.
+3. Decide static-native and dynamic-island scope separately.
 4. Implement the smallest coherent behavior family. Preserve explicit refusals for unimplemented forms rather than silently diverging.
-5. Add differential evidence that executes under Node and as a compiled binary. Cover stdout, stderr, exit status, success behavior, and important error shapes. A load-only export check does not prove behavior.
+5. Add differential evidence that executes under Node and as a compiled binary. Cover stdout, stderr, exit status, success behavior, and important error shapes. Dynamic-island work needs island-executed differential fixtures; a load-only export check does not prove behavior.
 6. Update the implementation-owned source or manifest. Positive `supported` and `partial` mappings must name existing test evidence.
 7. Run `pnpm manifest` if compiler surface tables changed, then run `pnpm node-compat`. Never patch generated JSON or headers.
-8. Inspect the internal ledger and public artifact diff, and compare `pnpm node-compat:backlog` output before and after. Confirm the intended API family changed and unrelated rows did not.
+8. Inspect the internal ledger, public artifact, and backlog diff. Confirm the intended API family changed and unrelated rows did not.
 9. Run focused tests, `pnpm node-compat:check`, and the full validation gate required for the change. If docs output changed, also run the docs gate.
 
 Compatibility commands:
@@ -236,26 +180,12 @@ The docs site is a standalone pnpm workspace under `docs/`. It uses Next.js App 
 - Use `diff` fences for additions and removals.
 - Use HTML `<dl>/<dt>/<dd>` for flag and subcommand references.
 
-### Limitations page partials
-
-`docs/content/docs/limitations.mdx` holds only the frontmatter, the headings, the anchor spans, and one `<include>` line per partial. The text lives in `docs/content/limitations/`:
-
-- A labeled bullet (`- **Crypto:** ...`) is `docs/content/limitations/<section>/<label>.mdx`, for example `builtin-apis/crypto.mdx`. Edit that file to change the bullet.
-- The other text of a section (paragraphs, code blocks, unlabeled lists) is `docs/content/limitations/<section>.mdx`; text before the first heading is `introduction.mdx`.
-- `<section>` and `<label>` are the heading and label text in lowercase with each run of other characters replaced by `-`.
-- Write one sentence per line; a bullet's continuation lines are indented two spaces. Markdown joins the lines, and edits to different sentences don't conflict. `pnpm lint` fails on a line that holds two sentences, and `node docs/scripts/limitations-partials.mjs fix` splits such lines.
-- To add a bullet, add its file and an include line at its position in `limitations.mdx`, with a blank line on each side. Consecutive bullet includes render as one list.
-- To add a section, add the heading to `limitations.mdx` and include the section's partial below it.
-
-`node scripts/limitations-partials.mjs join` (from `docs/`) prints the page with its partials inlined. For a branch that still edits the single-file page, run `node scripts/limitations-partials.mjs merge <base> <theirs>`, where `<theirs>` is the branch's `limitations.mdx` and `<base>` is that file at the branch's merge base. It merges the branch's changes into the partials, or writes `docs/limitations.merged.mdx` with conflict markers to resolve and pass to `split`.
-
 ### Adding a docs page
 
 1. Add `docs/content/docs/<topic>.mdx` with a `title` in YAML frontmatter. Geistdocs renders the page title, so do not duplicate it as a Markdown H1. `index.mdx` is served at `/docs`; other pages are served at `/docs/<topic>`.
 2. Add the topic to `docs/content/docs/meta.json` to set sidebar order and groups.
 3. Add the slug to `PAGE_TITLES` in `docs/src/lib/page-titles.ts` for the existing social image routes.
-4. Add the page's href, title, and heading anchors to `docs/test/fixtures/migration-baseline.json` so the route tests cover it; pages added after the migration have no `legacy` URL.
-5. Keep internal links on the canonical `/docs` paths. Redirect retired public URLs in `docs/next.config.mjs`.
+4. Keep internal links on the canonical `/docs` paths. Redirect retired public URLs in `docs/next.config.mjs`.
 
 ### Docs development and verification
 
@@ -271,7 +201,3 @@ NEXT_DIST_DIR=.next-check pnpm check
 ## Releases
 
 Releases are maintainer-run; see [RELEASING.md](./RELEASING.md).
-
-## Pinned downloads and actions
-
-Every toolchain archive that CI, the release jobs or the Sandbox image download (LLVM, Node, Zig, the LLVM apt key) has its SHA-256 in `scripts/toolchain.sha256`, and the code that downloads it runs `scripts/verify-toolchain.sh` on the file before using it. A version bump adds the new archive's digest to that file, taken from the publisher's signed checksum list and checked against a download. GitHub Actions are referenced by commit with the version in a trailing comment (`uses: owner/action@<40 hex digits> # v1.2.3`); Dependabot proposes the updates. Every workflow sets top-level `permissions`, and a job that needs more than reading the repository declares it. `tests/harness/ci-supply-chain.test.ts` enforces all three.

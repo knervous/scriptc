@@ -1,3 +1,4 @@
+// This file was modified from scriptc (Apache-2.0); see MODIFICATIONS.md.
 /* Error objects: the runtime-provided root of the `extends Error` class
  * hierarchy (layout/vtable contract in scr_runtime.h). Everything here
  * mirrors what the compiler emits for its own hierarchy classes — retain
@@ -179,7 +180,7 @@ static void scr_aggregate_reld(void *obj) {
 
 /* Defaults cover only the instants before main() stamps the program's real
  * preorder intervals; release is permanent. */
-SCR_TL ScrVt scr_error_vts[SCR_ERR_COUNT] = {
+ScrVt scr_error_vts[SCR_ERR_COUNT] = {
     {0, 8, &scr_error_reld}, /* Error */
     {1, 1, &scr_error_reld}, /* TypeError */
     {2, 2, &scr_error_reld}, /* RangeError */
@@ -259,15 +260,28 @@ ScrError *scr_error_new(int kind, ScrStr *message) {
   return e;
 }
 
-static SCR_TL ScrStr *(*scr_error_message_reader)(ScrError *);
-static SCR_TL ScrStr *(*scr_error_name_reader)(ScrError *);
+/* The program's readers for an error whose name or message is not its own (a class getter, prototype data): each
+ * consumes its error and answers the property as a checked-dynamic value, +1 (a getter-only or setter-only accessor
+ * reads as undefined, which no string holds), or NULL with an exception pending. */
+static SCR_TL ScrDyn *(*scr_error_message_reader)(ScrError *);
+static SCR_TL ScrDyn *(*scr_error_name_reader)(ScrError *);
 
-void scr_error_install_message_reader(ScrStr *(*reader)(ScrError *)) {
+void scr_error_install_message_view(ScrDyn *(*reader)(ScrError *)) {
   scr_error_message_reader = reader;
 }
 
-void scr_error_install_name_reader(ScrStr *(*reader)(ScrError *)) {
+void scr_error_install_name_view(ScrDyn *(*reader)(ScrError *)) {
   scr_error_name_reader = reader;
+}
+
+/* A read property as Error.prototype.toString takes it: undefined is "Error" for the name and "" for the message,
+ * anything else its ToString. Consumes `view`; NULL (an exception pending) passes through. */
+static ScrStr *scr_error_view_string(ScrDyn *view, bool name) {
+  if (!view) return NULL;
+  ScrStr *out = view->kind == SCR_DYN_UNDEF ? (name ? scr_str_new("Error", 5) : scr_str_new("", 0))
+                                            : scr_dyn_to_string(view, NULL);
+  scr_dyn_release(view);
+  return out;
 }
 
 ScrStr *scr_error_default_name(const ScrError *e) {
@@ -323,9 +337,9 @@ ScrStr *scr_error_to_string(ScrError *e) {
   // Accessors execute with a clear cell, and cannot replace that error.
   ScrCaught *pending = scr_exc_pending() ? scr_exc_take() : NULL;
   ScrStr *name = !e->name_present && scr_error_name_reader
-    ? scr_error_name_reader(scr_error_retain(e)) : scr_str_retain(e->name);
+    ? scr_error_view_string(scr_error_name_reader(scr_error_retain(e)), true) : scr_str_retain(e->name);
   ScrStr *message = scr_exc_pending() ? NULL : !e->message_present && scr_error_message_reader
-    ? scr_error_message_reader(scr_error_retain(e)) : scr_str_retain(e->message);
+    ? scr_error_view_string(scr_error_message_reader(scr_error_retain(e)), false) : scr_str_retain(e->message);
   if (pending) {
     if (scr_exc_pending()) {
       scr_exc_clear();

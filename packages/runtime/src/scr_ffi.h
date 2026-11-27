@@ -1,3 +1,4 @@
+// This file was modified from scriptc (Apache-2.0); see MODIFICATIONS.md.
 /* scriptc runtime — outbound FFI retained callbacks (scr_ffi.c). Included by
  * scr_runtime.h, which says where new declarations go. */
 #ifndef SCR_FFI_H
@@ -36,9 +37,9 @@ typedef struct ScrFfiTable {
   size_t retired_len;
   size_t retired_cap;
   size_t queued;
-  /* Reserved process-loop identity captured by queued calls. Executables use
-   * one global loop today; library mode can make this per instance later
-   * without changing the post/call ABI. */
+  /* The owning runtime instance's queue (scr_ffi_queue.c), set when the
+   * script thread registers a foreign callback and captured by each queued
+   * call: a foreign thread posts to the instance that owns the callback. */
   void *loop;
   /* Optional format-5 teardown. NULL keeps format-4 tables on the compact
    * always-linked path; foreign tables point into scr_ffi_queue.c. */
@@ -46,6 +47,25 @@ typedef struct ScrFfiTable {
 } ScrFfiTable;
 
 void scr_ffi_link(ScrFfiTable *table);
+
+/* The remote inbox (scr_ffi_queue.c): another thread's way into a runtime
+ * instance's loop. scr_instance_remote() answers the calling instance's
+ * inbox (installing its loop hook); scr_remote_post(remote, task, arg), from
+ * any thread, runs task(arg) on that instance's thread at its next loop turn
+ * (a macrotask) and wakes the loop: through the inbox's pipe, and through the
+ * waker an embedder set with scr_remote_set_wake (a loop that sleeps
+ * elsewhere, as scriptc-host's does). scr_remote_hold(+1/-1), on the owning
+ * thread, keeps the loop alive while something will post later (a pending
+ * Atomics.waitAsync). A post after the instance stopped is dropped. */
+void *scr_instance_remote(void);
+/* Runs the calling thread's loop to exhaustion after its programs' entries
+ * returned (compiled with nativeEntry.runsLoop false: pieces sharing this
+ * thread), reporting an uncaught throw or unhandled rejection as a program's
+ * main does; answers the exit code. */
+int scr_thread_run_loop(void);
+void scr_remote_post(void *remote, void (*task)(void *), void *arg);
+void scr_remote_hold(int delta);
+void scr_remote_set_wake(void (*wake)(void *), void *ctx);
 void scr_ffi_retain(ScrFfiTable *table, ScrClosure *callback);
 void scr_ffi_retain_foreign(ScrFfiTable *table, ScrClosure *callback);
 /* Raw singleton registration, split around the native set call:

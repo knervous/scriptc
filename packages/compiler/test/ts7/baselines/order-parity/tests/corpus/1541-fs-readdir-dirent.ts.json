@@ -1,6 +1,0 @@
-{
- "order": [
-  "<repo>/tests/corpus/1541-fs-readdir-dirent.ts"
- ],
- "diags": []
-}

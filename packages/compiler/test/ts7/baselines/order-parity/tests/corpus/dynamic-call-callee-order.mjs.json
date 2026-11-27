@@ -1,6 +1,0 @@
-{
- "order": [
-  "<repo>/tests/corpus/dynamic-call-callee-order.mjs"
- ],
- "diags": []
-}

@@ -1,6 +1,0 @@
-{
- "order": [
-  "<repo>/tests/corpus/2194-ambient-undef-chains.ts"
- ],
- "diags": []
-}

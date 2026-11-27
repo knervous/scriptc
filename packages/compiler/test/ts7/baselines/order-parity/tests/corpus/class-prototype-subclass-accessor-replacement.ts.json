@@ -1,6 +1,0 @@
-{
- "order": [
-  "<repo>/tests/corpus/class-prototype-subclass-accessor-replacement.ts"
- ],
- "diags": []
-}

@@ -1,6 +1,0 @@
-{
- "order": [
-  "<repo>/tests/corpus/2821-array-optional-numeric-comparisons.ts"
- ],
- "diags": []
-}

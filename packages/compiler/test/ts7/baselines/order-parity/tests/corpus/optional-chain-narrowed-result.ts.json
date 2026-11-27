@@ -1,6 +1,0 @@
-{
- "order": [
-  "<repo>/tests/corpus/optional-chain-narrowed-result.ts"
- ],
- "diags": []
-}

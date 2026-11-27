@@ -1,0 +1,9 @@
+{
+  "compilerOptions": {
+    "strict": true,
+    "paths": {
+      "purelib": ["../purelib/src/index.ts"],
+      "impurelib": ["../impurelib/src/index.ts"]
+    }
+  }
+}

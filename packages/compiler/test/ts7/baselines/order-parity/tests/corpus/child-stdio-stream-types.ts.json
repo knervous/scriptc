@@ -1,6 +1,0 @@
-{
- "order": [
-  "<repo>/tests/corpus/child-stdio-stream-types.ts"
- ],
- "diags": []
-}

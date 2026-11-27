@@ -1,3 +1,4 @@
+// This file was modified from scriptc (Apache-2.0); see MODIFICATIONS.md.
 /* Async runtime: stackful fibers, promises, and a dependency-free event
  * loop (microtask queue + timer min-heap).
  *
@@ -1266,7 +1267,9 @@ static void scr_async_prom_dropped(ScrPromise *p) {
  * active slot, the snapshot RC pair, enter/restore, and the
  * switch/spawn/destroy wiring. */
 static SCR_TL ScrAlsCtx *scr_als_main_slot = NULL;
-#ifdef SCR_WORKERS
+#if defined(SCR_THREAD_INSTANCES) || defined(SCR_WORKERS)
+/* NULL stands for &scr_als_main_slot (a thread-local's address is not a
+ * constant initializer); scr_als_slot() resolves it. */
 SCR_TL ScrAlsCtx **scr_als_active;
 ScrAlsCtx **scr_als_slot(void) {
   return scr_als_active ? scr_als_active : &scr_als_main_slot;
@@ -1499,6 +1502,10 @@ static void scr_fiber_keep_abandoned(ScrFiber *fiber) {
 static SCR_TL ScrFiber *scr_stackless_fibers;
 #endif
 
+/* True while executing on an async fiber (vs the main stack). The island
+ * sizes its engine stack budget per stack: fibers are small and fixed,
+ * the main stack is the process's megabytes (scr_island.c isl_entry). */
+bool scr_on_fiber(void) { return scr_current != NULL; }
 void *scr_fiber_self(void) { return scr_current; }
 
 #ifndef __wasi__
@@ -1641,6 +1648,8 @@ static SCR_TL unsigned long scr_timer_seq = 0;
  * and by ref/unref. */
 static SCR_TL size_t scr_reffed_timers = 0;
 
+/* Exported: the island's timer machinery (scr_web.c) shares this clock so
+ * its deadlines are comparable with the loop's. */
 double scr_now_ms(void) {
   struct timespec ts;
   clock_gettime(CLOCK_MONOTONIC, &ts);
@@ -1995,6 +2004,10 @@ double scr_set_interval(ScrClosure *cb, double ms) {
   return (double)id;
 }
 
+/* A one-shot timer WITH a clear handle — the island's setTimeout (its
+ * clearTimeout must cancel, unlike the static surface's clear-less
+ * setTimeout). Rides the interval id space so scr_clear_interval serves
+ * both; repeat_ms 0 keeps it one-shot at the firing site. */
 SCR_TL void (*scr_mt_abort_timeout_arm)(ScrClosure *cb, double ms) = NULL;
 SCR_TL int scr_mt_wait_state = 0;
 
@@ -2246,6 +2259,10 @@ void scr_nticks_teardown(void) {
   scr_nt_tail = NULL;
 }
 
+/* Releases every armed timer — the island teardown calls this before the
+ * engine dies so closures holding engine callbacks free first and the
+ * counting allocator's zero-live audit holds (the loop only exits with
+ * entries still armed on the uncaught/unhandled paths). */
 static void scr_immediates_teardown(void);
 void scr_timers_teardown(void) {
 #ifdef SCR_NODE_ISLANDS
@@ -2451,14 +2468,16 @@ static SCR_TL void *scr_main_fake_stack; /* fake-stack slot for the main context
 #endif
 
 #ifdef _WIN32
-/* The current context's handle, converting the main thread to a fiber on
- * first need (SwitchToFiber requires the caller BE a fiber; the runtime is
- * single-threaded, so one lazy conversion covers the process). Also the
+/* The current context's handle, converting the thread to a fiber on first
+ * need (SwitchToFiber requires the caller BE a fiber). One lazy conversion
+ * per runtime instance: under SCR_THREAD_INSTANCES each thread running
+ * compiled code converts its own (a thread that is not a fiber holds 0x1E00
+ * where its fiber data would be, and SwitchToFiber writes through it). Also the
  * loop-home keeper: whenever main is the caller this IS scr_loop_ctx's
  * value — assigned at the conversion so parked fibers can always switch
  * back to it. */
 static void *scr_win_self(void) {
-  static bool converted = false;
+  static SCR_TL bool converted = false;
   if (!converted) {
     scr_loop_ctx = ConvertThreadToFiber(NULL);
     if (scr_loop_ctx == NULL) {
@@ -4090,6 +4109,10 @@ void scr_promise_rethrow_top_level(ScrPromise *p) {
   if (p->state == SCR_PROM_REJECTED) scr_promise_rethrow(p);
 }
 
+
+
+
+
 /* Fulfillment storers, called by the compiled trampolines / resolve thunks. */
 void scr_promise_fulfill_f64(ScrPromise *p, double v) {
   if (p->state != SCR_PROM_PENDING) return; /* first settle wins */
@@ -4160,6 +4183,14 @@ ScrStr *scr_await_str(ScrPromise *p) {
   return scr_await_settled(p) && p->payload ? scr_str_retain((ScrStr *)p->payload) : NULL;
 }
 
+/* REJECTS `p` with the exception pending in the ACTIVE cell (moved out —
+ * the cell resets, so the caller returns to the engine/loop with a clean
+ * cell) and wakes waiters; the rejection enters the unhandled ledger like
+ * any other. The island → static promise bridge's rejection half: its
+ * settle callback converts the engine reason into a pending exception
+ * (the exception bridge's one conversion), then lands it here. A no-op
+ * with nothing pending; an already-settled `p` just clears the cell
+ * (first settle wins, like resolve-then-throw). */
 void scr_promise_reject_pending(ScrPromise *p) {
   if (!scr_exc_pending()) return;
   if (p->state == SCR_PROM_PENDING) {
@@ -5421,10 +5452,12 @@ typedef struct ScrCryptoBytesOp {
 } ScrCryptoBytesOp;
 
 static SCR_TL ScrCryptoBytesOp *scr_crypto_bytes_head = NULL;
-#ifdef SCR_WORKERS
+#if defined(SCR_THREAD_INSTANCES) || defined(SCR_WORKERS)
+/* NULL stands for &scr_crypto_bytes_head (a thread-local's address is not a
+ * constant initializer); the append resolves it. */
 static SCR_TL ScrCryptoBytesOp **scr_crypto_bytes_tail;
 #else
-static SCR_TL ScrCryptoBytesOp **scr_crypto_bytes_tail = &scr_crypto_bytes_head;
+static ScrCryptoBytesOp **scr_crypto_bytes_tail = &scr_crypto_bytes_head;
 #endif
 static SCR_TL size_t scr_crypto_bytes_pending_count = 0;
 static SCR_TL ScrCryptoBytesOp *scr_crypto_bytes_last = NULL; /* the newest entry */
@@ -5488,6 +5521,9 @@ void scr_crypto_defer_bytes(ScrBytes *value, ScrError *error, ScrClosure *cb, Sc
   op->cb = cb;
   op->fn = fn;
   op->next = NULL;
+#if defined(SCR_THREAD_INSTANCES)
+  if (scr_crypto_bytes_tail == NULL) scr_crypto_bytes_tail = &scr_crypto_bytes_head;
+#endif
   *scr_crypto_bytes_tail = op;
   scr_crypto_bytes_tail = &op->next;
   scr_crypto_bytes_last = op;
@@ -5955,6 +5991,26 @@ static void scr_resume_fiber(ScrFiber *f) {
  * wakeups/second. The dedicated poll(2) sleep needs no cap — it waits on
  * the wake pipe and fd 0 directly. */
 #define SCR_SIGNAL_POLL_MS 50.0
+
+/* The external io hook (scr_runtime.h): the dynamic island registers
+ * engine-job draining + fetch transfer polling here. Static builds never
+ * set it — both slots stay NULL and the loop is byte-identical in
+ * behavior. */
+static SCR_TL bool (*scr_io_pending_fn)(void) = NULL;
+static SCR_TL void (*scr_io_poll_fn)(double max_wait_ms) = NULL;
+
+void scr_loop_set_io(bool (*pending)(void), void (*poll)(double)) {
+  scr_io_pending_fn = pending;
+  scr_io_poll_fn = poll;
+}
+
+/* The island's earliest armed timer deadline (HUGE_VAL when none): caps
+ * the sleep below so an armed AbortSignal.timeout fires on time while
+ * the loop waits on socket readiness — without keeping the loop alive by
+ * itself (the liveness test never consults it, Node's unref'd timer). */
+static SCR_TL double (*scr_island_deadline_fn)(void) = NULL;
+
+void scr_loop_set_island_deadline(double (*fn)(void)) { scr_island_deadline_fn = fn; }
 
 /* The net hook (scr_net.c, when linked — the events-hook shape):
  * `pending` keeps the loop alive while servers/sockets are live,
@@ -7041,6 +7097,72 @@ static bool scr_loop_run_checkpoint(void) {
   return true;
 }
 
+/* The timers phase: every timer due at `now` and armed before `seq_bound`
+ * (the turn's timer snapshot; ~0UL for none), in deadline order, until
+ * one queues microtasks (the turn drains them before more timers). True when
+ * a callback threw (the exception is pending; main handles it). This fork
+ * runs it from the turn's timers phase and from its owed timers phase. */
+static bool scr_run_due_timers(double now, unsigned long seq_bound) {
+  while (scr_ntimers > 0 && scr_timers[0].deadline_ms <= now && scr_timers[0].seq < seq_bound) {
+    ScrTimer t = scr_timer_pop();
+    /* Timer callbacks are plain sync closures, run on the main stack.
+     * An interval entry is OUT of the heap while its callback runs;
+     * clearInterval(its own id) from inside sets the firing flag and
+     * the re-arm below drops it instead. A throw kills the interval
+     * with the program (Node: the uncaught exception ends the process
+     * before any rescheduled tick could run). */
+    if (t.id != 0) {
+      scr_firing_id = t.id;
+      scr_firing_cleared = false;
+      scr_firing_reffed = t.reffed; /* unref/ref during the callback lands here */
+      scr_firing_refresh = false;
+    }
+    double started = t.id != 0 && t.repeat_ms > 0 ? scr_now_ms() : 0;
+    ScrAsyncExecState async_prev = scr_async_fire_begin(t.async_ids);
+    ((void (*)(ScrClosure *))t.cb->fn)(t.cb);
+    /* The after hook runs before the destruction decision: it can refresh
+     * the still-firing timer, and the entry then keeps the ids it re-arms
+     * with instead of having them freed underneath it. */
+    scr_async_fire_after(t.async_ids, async_prev);
+    bool keep_ids =
+        t.id != 0 && !scr_firing_cleared && (t.repeat_ms > 0 || scr_firing_refresh);
+    if (t.id != 0 && t.repeat_ms > 0 && !scr_firing_cleared) {
+      /* Re-arm relative to the time the callback started, as Node's
+       * listOnTimeout does (getLibuvNow() before _onTimeout): a slow
+       * callback does not push the next tick back by its own duration.
+       * One slower than the interval makes the next tick due on the next
+       * turn, without catch-up bursts. The ref state carries across
+       * ticks (a self-unref'd interval stays unref'd). */
+      ScrTimer again = {started + t.repeat_ms, scr_timer_seq++, t.cb, t.repeat_ms, t.id,
+                        scr_firing_reffed, t.delay_ms, t.async_ids};
+      scr_timer_push(again);
+    } else if (t.id != 0 && scr_firing_refresh && !scr_firing_cleared) {
+      /* refresh() from inside the one-shot's own callback: re-arm to
+       * now + the original delay, ref state carried (Node's
+       * Timeout.refresh — the timer fires again). */
+      ScrTimer again = {scr_now_ms() + t.delay_ms, scr_timer_seq++, t.cb, 0, t.id,
+                        scr_firing_reffed, t.delay_ms, t.async_ids};
+      scr_timer_push(again);
+    } else {
+      scr_closure_release(t.cb);
+    }
+    if (!keep_ids) {
+      /* Nothing re-armed: the resource is done. Clear the firing id before
+       * the destroy hook so a refresh there cannot target a timer that no
+       * longer exists (its ids are freed next). */
+      scr_firing_id = 0;
+      scr_async_fire_destroy(t.async_ids);
+    }
+    scr_firing_id = 0;
+    if (scr_exc_pending()) return true; /* uncaught throw in a callback: main handles it */
+    /* Node loaded during this callback: its loop takes over (the caller returns). */
+    if (SCR_PASS_HANDED_OVER()) break;
+    /* Drain ticks and microtasks, and report the rejections the callback
+     * left, before more timers (Node's runNextTicks between timers). */
+    if (scr_ready_len > 0 || scr_nt_head != NULL || scr_nunhandled > 0 || scr_rjh_pending()) break;
+  }
+  return false;
+}
 /* Defined beside the death rule at the end of the pass (the 'beforeExit'
  * branch re-tests it after listeners ran). */
 static bool scr_loop_has_reffed_work(void);
@@ -7053,6 +7175,14 @@ static bool scr_loop_run_pass(ScrPromise *top_level, bool first_checkpoint) {
    * scheduled during the body exactly once, at startup — differentially
    * pinned. Every later checkpoint drains ticks first. */
   bool rejection_failed = false;
+  /* A dispatch station (or the io poll) fired since the quiescent point and
+   * restarted the turn for its microtasks (station_round), so the timers
+   * phase is owed before the stations run again (timers_owed). Without it a
+   * loop whose stations fire on every turn -- a stream of replies each
+   * starting the next, a host io poll that runs a frame each turn -- never
+   * reaches its timers: Node's every loop iteration has a timers phase. */
+  bool station_round = false;
+  bool timers_owed = false;
   /* Timers armed during a turn belong to the NEXT turn's timers phase, not
    * this one, with one boundary: the turn's STARTUP CHECKPOINT. Node's loop
    * fixes the timers phase's set when it enters it, and the ticks/microtasks
@@ -7077,6 +7207,10 @@ static bool scr_loop_run_pass(ScrPromise *top_level, bool first_checkpoint) {
   for (;;) {
     if (SCR_PASS_HANDED_OVER()) return rejection_failed;
     if (top_level != NULL && top_level->state == SCR_PROM_REJECTED) break;
+    if (station_round) {
+      station_round = false;
+      timers_owed = true;
+    }
     /* process.nextTick callbacks BEFORE promise jobs (Node's checkpoint
      * order): the tick queue to exhaustion, then the microtask queue to
      * exhaustion, and back while either has work — a microtask's
@@ -7133,6 +7267,17 @@ static bool scr_loop_run_pass(ScrPromise *top_level, bool first_checkpoint) {
      * here would walk the whole live heap every turn, which is precisely
      * what the generations exist to avoid. No-op on an empty buffer. */
     scr_cyc_collect_scheduled();
+    /* The owed timers phase (station_round above): the timers due now run
+     * before the stations dispatch again. Not while immediates wait: those
+     * (the check phase) come first after an I/O callback, as in Node. */
+    if (timers_owed) {
+      timers_owed = false;
+      if (scr_pending_immediates == 0 && scr_ntimers > 0 && scr_timers[0].deadline_ms <= scr_now_ms()) {
+        if (scr_run_due_timers(scr_now_ms(), ~0UL)) return false; /* uncaught throw in a callback */
+        continue;
+      }
+    }
+    station_round = true;
     /* Completed callback-style worker jobs are delivered on the main
      * runtime thread. A worker may have finished while synchronous user code
      * occupied that thread. Deliver exactly one completion per checkpoint:
@@ -7254,6 +7399,7 @@ static bool scr_loop_run_pass(ScrPromise *top_level, bool first_checkpoint) {
           /* spawn failures settle regardless: their 'error' is a
            * next-tick event, delivered even on an unref'd child */
           scr_loop_children->failed_pending() ||
+          (scr_io_pending_fn != NULL && scr_io_pending_fn()) ||
           (scr_events_pending_fn != NULL && scr_events_pending_fn()) ||
           (scr_net_pending_fn != NULL && scr_net_pending_fn()) ||
           (scr_dgram_pending_fn != NULL && scr_dgram_pending_fn()) ||
@@ -7278,6 +7424,7 @@ static bool scr_loop_run_pass(ScrPromise *top_level, bool first_checkpoint) {
     if (SCR_PASS_HANDED_OVER()) return rejection_failed; /* never wait once Node's loop does */
     bool kids = scr_loop_children != NULL && scr_loop_children->pending();
     bool kids_reffed = scr_loop_children != NULL && scr_loop_children->reffed_pending();
+    bool io = scr_io_pending_fn != NULL && scr_io_pending_fn();
     /* exec/execFile's timeout: the deadline keeps the loop alive and wakes
      * it, like Node's setTimeout timer. */
     double kids_deadline =
@@ -7308,9 +7455,9 @@ static bool scr_loop_run_pass(ScrPromise *top_level, bool first_checkpoint) {
      * while the loop runs (kids drives the sweeps and sleeps above) but
      * only reffed ones keep the process alive. */
 #ifdef SCR_NODE_ISLANDS
-    if (scr_reffed_timers == 0 && scr_reffed_immediates == 0 && !kids_reffed && kids_deadline < 0 && !events && !net && !dgram && !watch && !ffi && !renames && !crypto && !workers && !islands) {
+    if (scr_reffed_timers == 0 && scr_reffed_immediates == 0 && !kids_reffed && kids_deadline < 0 && !io && !events && !net && !dgram && !watch && !ffi && !renames && !crypto && !workers && !islands) {
 #else
-    if (scr_reffed_timers == 0 && scr_reffed_immediates == 0 && !kids_reffed && kids_deadline < 0 && !events && !net && !dgram && !watch && !ffi && !renames && !crypto && !workers) {
+    if (scr_reffed_timers == 0 && scr_reffed_immediates == 0 && !kids_reffed && kids_deadline < 0 && !io && !events && !net && !dgram && !watch && !ffi && !renames && !crypto && !workers) {
 #endif
       /* Out of ref'd work: Node emits 'beforeExit' here — the per-thread
        * loop's exhaustion, so a worker's own loop emits it too — with
@@ -7366,6 +7513,12 @@ static bool scr_loop_run_pass(ScrPromise *top_level, bool first_checkpoint) {
     if (renames && renames_fd < 0 && (!renames_wait || kids) && due > now + SCR_CHILD_POLL_MS) {
       due = now + SCR_CHILD_POLL_MS;
     }
+    /* An armed island timer (AbortSignal.timeout) caps the sleep: it must
+     * fire on time even while the poller waits on socket readiness. */
+    if (scr_island_deadline_fn != NULL) {
+      double isl_due = scr_island_deadline_fn();
+      if (isl_due < due) due = isl_due;
+    }
     /* Pending immediates are always-ready work: no sleep — run due timers
      * (Node's timers phase precedes check), then the check phase below. */
     if (scr_pending_immediates > 0) due = now;
@@ -7417,18 +7570,29 @@ static bool scr_loop_run_pass(ScrPromise *top_level, bool first_checkpoint) {
      * With island units linked the loop's own poll takes the sleep
      * instead, and it watches the island wake fd too. */
     bool island_wake = scr_ni_remote_pollfd() >= 0;
-    if (workers && scr_workers_wait_fn && !islands && !island_wake && !kids && !evw && !net_io && !dgram && !watch_io && !ffi && !renames && !crypto) {
+    if (workers && scr_workers_wait_fn && !islands && !island_wake && !io && !kids && !evw && !net_io && !dgram && !watch_io && !ffi && !renames && !crypto) {
 #else
-    if (workers && scr_workers_wait_fn && !kids && !evw && !net_io && !dgram && !watch_io && !ffi && !renames && !crypto) {
+    if (workers && scr_workers_wait_fn && !io && !kids && !evw && !net_io && !dgram && !watch_io && !ffi && !renames && !crypto) {
 #endif
       scr_workers_wait_fn(due > now ? due - now : 0);
       now = scr_now_ms();
     } else
 #endif
+    if (io) {
+      if (kids && due > now + SCR_CHILD_POLL_MS) due = now + SCR_CHILD_POLL_MS;
+      /* Signals/stdin/net can't wake curl's fd wait (and its poll retries
+       * on EINTR), so they re-impose a coarser cap — bounded Ctrl-C and
+       * socket latency during a fetch, without the reap-granularity
+       * cost. */
+      else if ((evw || net_io || dgram || watch || ffi || workers) && due > now + SCR_SIGNAL_POLL_MS) due = now + SCR_SIGNAL_POLL_MS;
+      scr_io_poll_fn(due > now ? due - now : 0);
+      now = scr_now_ms();
+      if (scr_ready_len > 0) continue; /* io callbacks woke fibers */
+    }
 #ifdef SCR_NODE_ISLANDS
-    if (evw || net_io || dgram || watch_io || ffi || workers || islands || renames_fd >= 0) {
+    else if (evw || net_io || dgram || watch_io || ffi || workers || islands || renames_fd >= 0) {
 #else
-    if (evw || net_io || dgram || watch_io || ffi || workers || renames_fd >= 0) {
+    else if (evw || net_io || dgram || watch_io || ffi || workers || renames_fd >= 0) {
 #endif
 #if defined(_WIN32) || defined(__wasi__)
       /* The win32 arm, and WASI hosts whose poll_oneoff adapters do not
@@ -7598,65 +7762,10 @@ static bool scr_loop_run_pass(ScrPromise *top_level, bool first_checkpoint) {
     if (scr_ntimers > 0 && scr_timers[0].deadline_ms <= now &&
         scr_timers[0].seq < timer_seq_at_turn_start)
       SCR_PASS_PHASE(SCR_PASS_TIMERS);
-    while (scr_ntimers > 0 && scr_timers[0].deadline_ms <= now &&
-           scr_timers[0].seq < timer_seq_at_turn_start) {
-      ScrTimer t = scr_timer_pop();
-      /* Timer callbacks are plain sync closures, run on the main stack.
-       * An interval entry is OUT of the heap while its callback runs;
-       * clearInterval(its own id) from inside sets the firing flag and
-       * the re-arm below drops it instead. A throw kills the interval
-       * with the program (Node: the uncaught exception ends the process
-       * before any rescheduled tick could run). */
-      if (t.id != 0) {
-        scr_firing_id = t.id;
-        scr_firing_cleared = false;
-        scr_firing_reffed = t.reffed; /* unref/ref during the callback lands here */
-        scr_firing_refresh = false;
-      }
-      double started = t.id != 0 && t.repeat_ms > 0 ? scr_now_ms() : 0;
-      ScrAsyncExecState async_prev = scr_async_fire_begin(t.async_ids);
-      ((void (*)(ScrClosure *))t.cb->fn)(t.cb);
-      /* The after hook runs before the destruction decision: it can refresh
-       * the still-firing timer, and the entry then keeps the ids it re-arms
-       * with instead of having them freed underneath it. */
-      scr_async_fire_after(t.async_ids, async_prev);
-      bool keep_ids =
-          t.id != 0 && !scr_firing_cleared && (t.repeat_ms > 0 || scr_firing_refresh);
-      if (t.id != 0 && t.repeat_ms > 0 && !scr_firing_cleared) {
-        /* Re-arm relative to the time the callback started, as Node's
-         * listOnTimeout does (getLibuvNow() before _onTimeout): a slow
-         * callback does not push the next tick back by its own duration.
-         * One slower than the interval makes the next tick due on the next
-         * turn, without catch-up bursts. The ref state carries across
-         * ticks (a self-unref'd interval stays unref'd). */
-        ScrTimer again = {started + t.repeat_ms, scr_timer_seq++, t.cb, t.repeat_ms, t.id,
-                          scr_firing_reffed, t.delay_ms, t.async_ids};
-        scr_timer_push(again);
-      } else if (t.id != 0 && scr_firing_refresh && !scr_firing_cleared) {
-        /* refresh() from inside the one-shot's own callback: re-arm to
-         * now + the original delay, ref state carried (Node's
-         * Timeout.refresh — the timer fires again). */
-        ScrTimer again = {scr_now_ms() + t.delay_ms, scr_timer_seq++, t.cb, 0, t.id,
-                          scr_firing_reffed, t.delay_ms, t.async_ids};
-        scr_timer_push(again);
-      } else {
-        scr_closure_release(t.cb);
-      }
-      if (!keep_ids) {
-        /* Nothing re-armed: the resource is done. Clear the firing id before
-         * the destroy hook so a refresh there cannot target a timer that no
-         * longer exists (its ids are freed next). */
-        scr_firing_id = 0;
-        scr_async_fire_destroy(t.async_ids);
-      }
-      scr_firing_id = 0;
-      if (scr_exc_pending()) return false; /* uncaught throw in a callback: main handles it */
-      if (SCR_PASS_HANDED_OVER()) return rejection_failed;
-      /* Drain ticks and microtasks, and report the rejections the callback
-       * left, before more timers (Node's runNextTicks between timers). */
-      if (scr_ready_len > 0 || scr_nt_head != NULL || scr_nunhandled > 0 || scr_rjh_pending())
-        break;
-    }
+    /* Only the timers armed before this turn's snapshot (upstream's turn cutoff). */
+    if (scr_run_due_timers(now, timer_seq_at_turn_start)) return false; /* uncaught throw in a callback: main handles it */
+    /* Node loaded during this turn: its loop takes over (scr_loop_run). */
+    if (SCR_PASS_HANDED_OVER()) return rejection_failed;
     /* The check phase: immediates queued BEFORE this phase started run
      * now, FIFO; ones a callback queues wait for the next turn (the end
      * snapshot — Node's once-per-turn rule, so a setImmediate chain can't
@@ -7890,6 +7999,20 @@ bool scr_loop_run(ScrPromise *top_level) {
   return rejection_failed;
 }
 
+/* The island's half of the unhandled-rejection report (scr_island.c
+ * registers it at engine boot): called with print=true when the static
+ * ledger below reported nothing — one report, one voice, like Node's
+ * first-unhandled-rejection death. Returns whether the island had any.
+ * Static builds never set it. */
+static SCR_TL bool (*scr_island_rejections_fn)(bool print) = NULL;
+static SCR_TL int (*scr_island_jobs_drain_fn)(void) = NULL;
+
+void scr_loop_set_island_rejections(bool (*fn)(bool print),
+                                    int (*drain_jobs)(void)) {
+  scr_island_rejections_fn = fn;
+  scr_island_jobs_drain_fn = drain_jobs;
+}
+
 /* ── process.on('unhandledRejection') ─────────────────────────────────
  * Dyn listeners are called per never-observed rejection at the completed
  * nextTick/microtask checkpoint. A registered listener suppresses the
@@ -7938,6 +8061,16 @@ static bool scr_unhandled_print_dyn(const ScrDyn *d) {
  * Snapshot the ledger: a listener can reject another promise, but that
  * new rejection belongs to the NEXT checkpoint rather than this report. */
 bool scr_report_unhandled_rejections(void) {
+  /* Static fibers drain before engine jobs in this runtime's documented
+   * island ordering. Complete BOTH halves of that microtask checkpoint
+   * before deciding either rejection ledger; engine reactions can attach
+   * a handler to a rejection that would otherwise look unhandled here.
+   * A host callback can wake a static fiber/tick, in which case the loop
+   * must drain that work before reporting too. */
+  if (scr_island_jobs_drain_fn != NULL) {
+    scr_island_jobs_drain_fn();
+    if (scr_ready_len > 0 || scr_nt_head != NULL) return false;
+  }
   bool any = false;
   bool crashed = false;
   size_t report_count = scr_nunhandled;
@@ -8021,6 +8154,10 @@ bool scr_report_unhandled_rejections(void) {
   if (crashed) {
     scr_exc_print_uncaught();
     return true;
+  }
+  if (scr_island_rejections_fn != NULL) {
+    bool island = scr_island_rejections_fn(!any);
+    any = any || island;
   }
   /* main returns 1 on a reported rejection — the 'exit' listeners (atexit)
    * must see that code, like Node's. */
@@ -9349,6 +9486,25 @@ static void scr_async_gen_resume_ready(ScrGen *g) {
   }
   scr_gen_release(g);
 }
+
+#if !defined(__wasi__)
+/* scr_runtime.h: the loop that the pieces on this thread share, run after
+ * their entries returned, with main's verdicts (an uncaught throw, unhandled
+ * rejections) and its exit code. */
+int scr_thread_run_loop(void) {
+  bool rejection = scr_loop_run(NULL);
+  if (scr_exc_pending()) {
+    scr_exc_print_uncaught();
+    return scr_exit_code_hint_get();
+  }
+  if (rejection) {
+    scr_discard_unhandled_rejections();
+    return scr_exit_code_hint_get();
+  }
+  (void)scr_report_unhandled_rejections();
+  return scr_exit_code_hint_get();
+}
+#endif
 
 #ifdef SCR_WORKERS
 static void scr_context_ready_discard(void) {

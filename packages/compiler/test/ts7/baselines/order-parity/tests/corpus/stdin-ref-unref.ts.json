@@ -1,6 +1,0 @@
-{
- "order": [
-  "<repo>/tests/corpus/stdin-ref-unref.ts"
- ],
- "diags": []
-}

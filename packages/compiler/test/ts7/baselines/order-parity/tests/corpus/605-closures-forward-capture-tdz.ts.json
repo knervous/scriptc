@@ -1,6 +1,0 @@
-{
- "order": [
-  "<repo>/tests/corpus/605-closures-forward-capture-tdz.ts"
- ],
- "diags": []
-}

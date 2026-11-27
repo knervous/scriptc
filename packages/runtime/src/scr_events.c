@@ -1,3 +1,4 @@
+// This file was modified from scriptc (Apache-2.0); see MODIFICATIONS.md.
 /* Process events and stdin streaming — the OPTIONAL half of the event
  * loop: signal handlers (named process.on/once/off signal handlers), the
  * process 'exit' event, and the piped-stdin surface ('data'/'end'/'error'
@@ -111,9 +112,14 @@ typedef struct ScrSigReg {
  * _XOPEN_SOURCE. Unknown SIG-prefixed names use the unwatched slot zero. */
 #define SCR_SIG_MAX 32
 
-static ScrSigReg *scr_sig_regs = NULL;
-static uint64_t scr_sig_id = 0;
-static size_t scr_sig_watched = 0; /* watched signal COUNT (regs) */
+static SCR_TL ScrSigReg *scr_sig_regs = NULL;
+static SCR_TL uint64_t scr_sig_id = 0;
+static SCR_TL size_t scr_sig_watched = 0; /* watched signal COUNT (regs) */
+/* The handler's flags and wake pipe are the PROCESS's (a signal's disposition
+ * is process-wide and its handler runs on whatever thread the kernel picks),
+ * so they stay shared under SCR_THREAD_INSTANCES; listener registrations are
+ * the instance's. Signals are the process's: whichever instance watches a
+ * signal and drains first dispatches it. */
 static volatile sig_atomic_t scr_sig_flag[SCR_SIG_MAX];
 static volatile sig_atomic_t scr_sig_any = 0;
 static int scr_wake_pipe[2] = {-1, -1};

@@ -1,3 +1,4 @@
+// This file was modified from scriptc (Apache-2.0); see MODIFICATIONS.md.
 import { arrayOf, BOOL, DYN, F64, STRING, VOID } from "../ir.js";
 import { defineLibFnSignatures } from "./shared.js";
 
@@ -25,7 +26,8 @@ export const rlSignatures = defineLibFnSignatures({
    * (0 'line', 1 'close', 2 'pause', 3 'resume', 4 'error') and the
    * listener (moves). rl.iterOpen/iterNext/iterReturn: the async
    * iterator — iterNext answers promise<dyn> of the line or undefined. */
-  "rl.create": { argTypes: [F64], result: F64 },
+  // This fork's frontend emits rl.create with no operands (stdin/stdout, see emitIoLibCall) besides upstream's form.
+  "rl.create": { argTypes: [], result: F64 },
   "rl.createSignal": { argTypes: [F64], result: F64 },
   "rl.question": { argTypes: [F64, STRING, null], result: VOID },
   "rl.questionAsync": { argTypes: [F64, STRING], result: { kind: "promise", inner: STRING } },
@@ -130,4 +132,6 @@ export const rlSignatures = defineLibFnSignatures({
   "rl.uiClearScreenDown": { argTypes: [F64], result: VOID },
   "rl.uiRollback": { argTypes: [F64], result: VOID },
   "rl.uiCommit": { argTypes: [F64], result: { kind: "promise", inner: VOID } },
+/** This fork's frontend: a zero-argument 'close' listener (moves); the LLVM lane lowers it as rl.on. */
+"rl.onClose": { argTypes: [F64, null], result: VOID },
 });

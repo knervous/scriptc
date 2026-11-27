@@ -1,6 +1,0 @@
-{
- "order": [
-  "<repo>/tests/corpus/9960-held-constructor-new-unreached.ts"
- ],
- "diags": []
-}

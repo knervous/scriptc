@@ -1,7 +1,0 @@
-{
- "order": [
-  "<repo>/tests/corpus/collection-ingestion-protocol/source.js",
-  "<repo>/tests/corpus/collection-ingestion-protocol/main.ts"
- ],
- "diags": []
-}

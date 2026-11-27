@@ -1,6 +1,0 @@
-{
- "order": [
-  "<repo>/tests/corpus/stream-reason-value-reaches-listeners.ts"
- ],
- "diags": []
-}

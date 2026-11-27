@@ -1,6 +1,9 @@
+// This file was modified from scriptc (Apache-2.0); see MODIFICATIONS.md.
 import { arrayClassDescriptor } from "./classes.js";
 import { mangleRecordNew } from "../mangle.js";
 import { emitBigIntWrap } from "./bigint-wrap.js";
+import { FORK_LIB_CALL_DYN_RESULTS, padForkLibCall, widenedForkLibCallResult } from "../../ir/fork-lib-calls.js";
+import { libFnSignatures } from "../../ir/builtin-signatures.js";
 import { emitBorrowedInput, emitBorrowedInputs } from "./borrowed-inputs.js";
 import { borrowsIteratorInputs, borrowsJsonInputs } from "./checked-value-lifetimes.js";
 import { emitTlsLibCall } from "./lib-tls.js";
@@ -8,16 +11,18 @@ import { emitHttp2LibCall } from "./lib-http2.js";
 import { emitDatagramLibCall } from "./lib-datagram.js";
 import { emitClusterLibCall } from "./lib-cluster.js";
 import { emitTestLibCall } from "./lib-test.js";
+import { emitHostModuleCall } from "./host-modules.js";
 import { FN_ATTRS, arrNewCall, releaseSym, traceArg, vAdapters } from "./shapes.js";
 /* Focused LLVM library-call emission extracted from emitter.ts. */
 import { InternalCompilerError } from "../../errors.js";
+import { BOOL } from "../../ir/ir.js";
 import { nodeThrowExpr } from "../../ir/build.js";
 
 import { MAY_THROW_LIB_FNS } from "../../ir/builtin-effects.js";
-import { BYTES_ELEMENT_SIZE, F64, type IrExpr, type IrType } from "../../ir/ir.js";
+import { BYTES_ELEMENT_SIZE, DYN, F64, type IrExpr, type IrType } from "../../ir/ir.js";
 import type { IrLibFn } from "../../ir/builtin-signatures.js";
 import { LlvmUnsupportedError } from "./unsupported.js";
-import { emitJsLibCall } from "./jsval.js";
+import { emitJsLibCall } from "./jsword.js";
 import { classCaseEntries } from "../../ir/class-case.js";
 import type { LlvmEmitterContext, LibCallExpr, LibCallPrefix, LlValue } from "./expr-context.js";
 import {
@@ -30,9 +35,10 @@ import {
 import { isDynUndefined } from "../../ir/runtime-features.js";
 import { everyStmtList } from "../../ir/traverse.js";
 import { DYN_KIND } from "./dyn.js";
+import { emitNativeDynLibCall } from "./lib-native-dyn.js";
 import { typedRefRecipe } from "./expr-calls.js";
 import { CLASS_KEY_LEN_MIX, CLASS_VALUE_SLOT_MIX, classKeyHash } from "../../ir/class-key-index.js";
-import { caBytes, callRuntime, ptr } from "./lib-abi.js";
+import { caBytes, callRuntime, ptr, rawBytes } from "./lib-abi.js";
 import { emitInlineAtomicsOp } from "./expr-bytes.js";
 import { regexLiteralCaptures } from "./regex-matchers.js";
 import { registerReplay } from "./emit-journal.js";
@@ -62,6 +68,18 @@ export function emitAssertInspectLibCall(host: LlvmEmitterContext, e: LibCallExp
 
 export function emitIoLibCall(host: LlvmEmitterContext, e: LibCallExpr): LlValue {
   const B = host.B;
+  // This fork's frontend keeps the earlier readline contract: rl.create with no operands is
+  // createInterface({ input: process.stdin, output: process.stdout }) (mode 4: stdout output, Node's default
+  // crlfDelay of 100), and rl.onClose(handle, cb) is a 'close' listener (event 1, RL_EV_CLOSE, not once).
+  if (e.fn === "rl.create" && e.args.length === 0) {
+    const num = (value: number): IrExpr => ({ kind: "numLit", value, type: F64, loc: e.loc });
+    return emitIoLibCall(host, { ...e, args: [num(4), num(100)] });
+  }
+  if (e.fn === "rl.onClose") {
+    const event: IrExpr = { kind: "numLit", value: 1, type: F64, loc: e.loc };
+    const once: IrExpr = { kind: "boolLit", value: false, type: BOOL, loc: e.loc };
+    return emitIoLibCall(host, { ...e, fn: "rl.on", args: [e.args[0]!, event, e.args[1]!, once] });
+  }
   if (e.fn === "rl.create" || e.fn === "rl.createSignal") {
     // readline interface handles are runtime IDs (doubles); an open
     // interface on stdin holds the loop. The mode literal says which
@@ -232,6 +250,17 @@ export function emitIoLibCall(host: LlvmEmitterContext, e: LibCallExpr): LlValue
 
 export function emitGenericLibCall(host: LlvmEmitterContext, e: LibCallExpr): LlValue {
   const B = host.B;
+  if (e.fn === "dyn.promiseAll" && e.args.length === 1) {
+    // This fork's frontend passes no `then` reader (upstream's second operand): a NULL reader reads each entry's
+    // `then` itself.
+    const entries = host.emitExpr(e.args[0]!);
+    host.declare(`declare ptr @scr_dyn_promise_all(ptr, ptr)`);
+    const t = B.tmp();
+    B.line(`${t} = call ptr @scr_dyn_promise_all(ptr ${entries.name}, ptr null)`);
+    const out = host.own({ name: t, type: e.type });
+    if (MAY_THROW_LIB_FNS.has(e.fn)) host.emitPendingCheck();
+    return out;
+  }
   // The generic emitter registrations queue the maxListeners leak warning
   // for the next tick like emitter.on (lib-process.ts).
   if (e.fn === "emitter.onFlex" || e.fn === "emitter.onAny") host.usesTimers = true;
@@ -1336,7 +1365,7 @@ export function emitGenericLibCall(host: LlvmEmitterContext, e: LibCallExpr): Ll
  * produces for this argument alone (`new Date(ms).getTime()`, a
  * time-value local's read) passes the function's time value and creates
  * no Date object. */
-function emitDateTimeArg(host: LlvmEmitterContext, date: IrExpr): string {
+export function emitDateTimeArg(host: LlvmEmitterContext, date: IrExpr): string {
   // A time-value local's read is its time value itself.
   if (date.kind === "libCall" && date.fn === "date.fromTime")
     return host.emitExpr(date.args[0]!).name;
@@ -1558,6 +1587,26 @@ function emitTypedRegexReplace(host: LlvmEmitterContext, e: LibCallExpr): LlValu
 }
 
 export function emitLibCall(host: LlvmEmitterContext, e: LibCallExpr): LlValue {
+  // This fork's frontend builds some calls with their shorter operand lists: upstream's operands (fork-lib-calls.ts).
+  const padded = padForkLibCall(e);
+  if (padded !== null) e = { ...e, args: padded };
+  if (FORK_LIB_CALL_DYN_RESULTS.has(e.fn) && e.type.kind !== "dyn") {
+    // Upstream's runtime answers a checked-dynamic value (emitter.names: an array that may hold symbols; dc.chanName:
+    // a channel name that may be a symbol); the fork's frontend types the call narrower, so the dyn value converts
+    // through the checked conversion to that type.
+    const names = emitLibCall(host, { ...e, type: DYN });
+    const t = host.B.tmp();
+    host.B.line(`${t} = call ptr @${host.dyn.dynCheckHelper(e.type)}(ptr ${names.name}, ptr null)`);
+    host.emitPendingCheck();
+    return host.own({ name: t, type: e.type });
+  }
+  const sig = libFnSignatures()[e.fn as keyof ReturnType<typeof libFnSignatures>] as { result: IrType } | undefined;
+  const widened = sig ? widenedForkLibCallResult(e, sig.result) : null;
+  if (widened !== null) {
+    // A statement the fork's frontend builds with no result: upstream's entry point answers one, unused here.
+    emitLibCall(host, { ...e, type: widened });
+    return { name: "", type: e.type };
+  }
   if (USES_TIMERS_LIB_FNS.has(e.fn)) host.usesTimers = true;
   // A Promise static with a foreign constructor creates promises whose
   // jobs and unhandled-rejection accounting need the event loop.
@@ -1567,6 +1616,14 @@ export function emitLibCall(host: LlvmEmitterContext, e: LibCallExpr): LlValue {
     if (typed) return typed;
   }
   if (e.fn === "process.nextTick") return host.emitAsyncContextLibCall(e);
+  // typeof of a number slot (browser targets): WasmGC's slot may hold an undefined typed-array read; an LLVM f64
+  // never does, so it is "number" once the operand has been evaluated.
+  if (e.fn === "num.typeof") {
+    host.emitExpr(e.args[0]!);
+    return host.emitExpr({ kind: "strLit", value: "number", type: e.type, loc: e.loc });
+  }
+  const nativeDyn = emitNativeDynLibCall(host, e);
+  if (nativeDyn) return nativeDyn;
   if (
     e.fn === "sp.pipeline" ||
     e.fn.startsWith("sp.pipelineStages") ||
@@ -1739,6 +1796,7 @@ export function emitLibCall(host: LlvmEmitterContext, e: LibCallExpr): LlValue {
   switch (prefix) {
     case "fetch":
     case "abort":
+    case "island":
     case "json":
       return host.emitWebLibCall(e);
     case "dyn":
@@ -1867,6 +1925,11 @@ export function emitLibCall(host: LlvmEmitterContext, e: LibCallExpr): LlValue {
     case "mime":
     case "sqlite":
       return host.emitGenericLibCall(e);
+    // The record.* forms of the native dyn model lower in lib-native-dyn.ts (emitLibCall asks it first).
+    case "record":
+      throw new InternalCompilerError(`llvm emitter bug: ${e.fn} has no LLVM lowering`);
+    case "host":
+      return emitHostModuleCall(host, e);
     case "nodeIsland":
       return host.emitGenericLibCall(e);
     // Primitive wrapper objects (scr_js_wrapper.c).

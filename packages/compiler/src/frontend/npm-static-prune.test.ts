@@ -4,13 +4,8 @@ import { checkPreflight, loadProgram } from "./program-node.js";
 
 const fixtureRoot = join(import.meta.dirname, "../../../../tests/fixtures/npm-static");
 
-function moduleOrder(
-  entry: string,
-  packages: string | string[],
-): { files: string[]; diagnostics: string[] } {
-  const load = loadProgram(join(fixtureRoot, entry), {
-    npmStatic: typeof packages === "string" ? [packages] : packages,
-  });
+function moduleOrder(entry: string, packages: string | string[]): { files: string[]; diagnostics: string[] } {
+  const load = loadProgram(join(fixtureRoot, entry), { npmStatic: typeof packages === "string" ? [packages] : packages });
   try {
     const diagnostics = checkPreflight(load);
     return {
@@ -50,11 +45,7 @@ describe("npm static namespace re-export pruning", () => {
   });
 
   test("a dependency cycle inherits an impure sibling before pruning a namespace re-export", () => {
-    const { files, diagnostics } = moduleOrder("cycle-cli.ts", [
-      "cycle-a",
-      "cycle-b",
-      "cycle-impure",
-    ]);
+    const { files, diagnostics } = moduleOrder("cycle-cli.ts", ["cycle-a", "cycle-b", "cycle-impure"]);
     expect(diagnostics).toEqual([]);
     expect(files.some((file) => file.endsWith("/cycle-b/spare.js"))).toBe(true);
     expect(files.some((file) => file.endsWith("/cycle-impure/index.js"))).toBe(true);
@@ -63,19 +54,42 @@ describe("npm static namespace re-export pruning", () => {
     const { files, diagnostics } = moduleOrder("selectivebarrel-cli.ts", "selectivebarrel");
     expect(diagnostics).toEqual([]);
     expect(files.some((file) => file.endsWith("/selectivebarrel/spare.js"))).toBe(false);
-    for (const name of [
-      "feature.js",
-      "effects/start.js",
-      "bridge.js",
-      "loop-a.js",
-      "loop-b.js",
-      "nested/custom.init.js",
-      "braced/a.js",
-    ]) {
-      expect(
-        files.some((file) => file.endsWith(`/selectivebarrel/${name}`)),
-        name,
-      ).toBe(true);
+    for (const name of ["feature.js", "effects/start.js", "bridge.js", "loop-a.js", "loop-b.js", "nested/custom.init.js", "braced/a.js"]) {
+      expect(files.some((file) => file.endsWith(`/selectivebarrel/${name}`)), name).toBe(true);
     }
+  });
+
+});
+
+describe("source package re-export pruning", () => {
+  const sourceRoot = join(import.meta.dirname, "../../../../tests/fixtures/source-sideeffects");
+  const order = (): string[] => {
+    const load = loadProgram(join(sourceRoot, "app/main.ts"), {});
+    try {
+      expect(checkPreflight(load).map((d) => d.code)).toEqual([]);
+      return load.moduleOrder.map((sf) => sf.fileName);
+    } finally {
+      load.dispose();
+    }
+  };
+  const has = (files: string[], tail: string): boolean => files.some((file) => file.endsWith(tail));
+
+  test("a sideEffects-free source package drops unused named and namespace re-exports with their trees", () => {
+    const files = order();
+    for (const kept of ["/purelib/src/index.ts", "/purelib/src/used.ts", "/purelib/src/helper.ts"]) expect(has(files, kept), kept).toBe(true);
+    for (const dropped of ["/purelib/src/spare.ts", "/purelib/src/deep.ts", "/purelib/src/ns.ts"]) expect(has(files, dropped), dropped).toBe(false);
+  });
+
+  test("a nested barrel forwards only the names asked of it", () => {
+    const files = order();
+    expect(has(files, "/purelib/src/group/index.ts")).toBe(true);
+    expect(has(files, "/purelib/src/group/a.ts")).toBe(true);
+    expect(has(files, "/purelib/src/group/b.ts")).toBe(false);
+  });
+
+  test("a source package without sideEffects metadata keeps every module it re-exports", () => {
+    const files = order();
+    expect(has(files, "/impurelib/src/kept.ts")).toBe(true);
+    expect(has(files, "/impurelib/src/other.ts")).toBe(true);
   });
 });

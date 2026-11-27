@@ -1,7 +1,6 @@
-import * as posix from "node:path/posix";
-import * as win32 from "node:path/win32";
+// This file was modified from scriptc (Apache-2.0); see MODIFICATIONS.md.
+import { createHash } from "node:crypto";
 import { InternalCompilerError } from "../../errors.js";
-import { tsgoPath } from "../ts7/session-path.js";
 
 /** The owner of the names keyedHelperName hands out. */
 export interface KeyedNameOwner {
@@ -11,7 +10,7 @@ export interface KeyedNameOwner {
 }
 
 /** 48 bits of two FNV-1a hashes of `key`, as 12 hex digits. */
-function keyHash(key: string): string {
+export function keyHash(key: string): string {
   let a = 0x811c9dc5;
   let b = 0x01000193 ^ 0x5bd1e995;
   for (let i = 0; i < key.length; i++) {
@@ -38,11 +37,12 @@ function checkHash(key: string): number {
 export function keyedHelperName(
   owner: KeyedNameOwner,
   prefix: string,
-  key: string,
+  rawKey: string,
   separator = ".",
 ): string {
-  const name = `${prefix}${separator}${keyHash(key)}`;
-  const check = checkHash(key);
+  const key = stableFileName(rawKey);
+  const name = `${prefix}${separator}${keyHash(`${prefix}|${key}`)}`;
+  const check = checkHash(`${prefix}|${key}`);
   const previous = owner.keyedNameKeys.get(name);
   if (previous === undefined) owner.keyedNameKeys.set(name, check);
   else if (previous !== check)
@@ -50,25 +50,70 @@ export function keyedHelperName(
   return name;
 }
 
-/** The number in the `%m<number>.` tag of the module named `fileName`: a
- * 32-bit FNV-1a hash of the name, so a module keeps its tag when other
- * modules are added, removed or reordered. A number in `taken` moves to the
- * next free one, which keeps tags distinct. */
-export function moduleTagNumber(fileName: string, taken: ReadonlySet<number>): number {
-  let h = 0x811c9dc5;
-  for (let i = 0; i < fileName.length; i++) h = Math.imul(h ^ fileName.charCodeAt(i), 0x01000193);
-  let n = h >>> 0;
-  while (taken.has(n)) n = (n + 1) >>> 0;
-  return n;
+/** A checked id for a registry entry interned by `key`: `<prefix><hash of key>`, the same id whichever order the program
+ * reaches the entry in. `owners` maps each id to a second hash of its key; two keys sharing an id throw. */
+export function keyedId(owners: Map<string, number>, prefix: string, rawKey: string): string {
+  const key = stableFileName(rawKey);
+  const id = `${prefix}${keyHash(`${prefix}|${key}`)}`;
+  const check = checkHash(key);
+  const previous = owners.get(id);
+  if (previous === undefined) owners.set(id, check);
+  else if (previous !== check) throw new InternalCompilerError(`registry id ${id} is shared by two keys`);
+  return id;
 }
 
-/** The path of `file` relative to the directory `from`, with `/` separators
- * on every platform, so names built from it match across hosts. */
-export function portableRelativePath(
-  from: string,
-  file: string,
-  platform: NodeJS.Platform = process.platform,
-): string {
-  const path = platform === "win32" ? win32.relative(from, file) : posix.relative(from, file);
-  return tsgoPath(path, platform);
+/** The compiler package's own directory (its ambient declarations live there), as `<scriptc>/` in a key. */
+const COMPILER_DIR = (() => {
+  try {
+    const url = new URL("../../../", import.meta.url);
+    return url.protocol === "file:" ? decodeURIComponent(url.pathname) : "";
+  } catch {
+    return "";
+  }
+})();
+
+/** The directory the program's own sources share (the checkout), dropped from keys: see setStableNameFiles. */
+let checkoutPrefix = "";
+
+const withoutMirror = (file: string): string => file.replace(/\.wasmgc-[A-Za-z0-9_-]*/g, ".wasmgc");
+
+/**
+ * Sets the checkout a program's keys are relative to: the longest directory the program's own sources share, with
+ * packages (anything under node_modules/) and the compiler's ambient files left out. A key then names a file the same
+ * way in every checkout of the same tree, so the names and ids made from it -- and the orders that follow them (a
+ * union's arms are kept in the order of their keys) -- do not depend on where the tree lives.
+ */
+export function setStableNameFiles(files: readonly string[]): void {
+  const own = files.map(withoutMirror).filter((f) => f.startsWith("/") && !f.includes("/node_modules/") && !(COMPILER_DIR && f.startsWith(COMPILER_DIR)));
+  if (own.length === 0) { checkoutPrefix = ""; return; }
+  let prefix = own[0]!.slice(0, own[0]!.lastIndexOf("/") + 1);
+  for (const f of own) while (prefix && !f.startsWith(prefix)) prefix = prefix.slice(0, prefix.lastIndexOf("/", prefix.length - 2) + 1);
+  checkoutPrefix = prefix.length > 1 ? prefix : "";
+}
+
+/** Separate compilation: keys are relative to the object root, whatever files one object's program holds, so every
+ * object names a keyed helper alike. */
+export function setStableNameRoot(root: string): void {
+  checkoutPrefix = root.endsWith("/") ? root : `${root}/`;
+}
+
+/**
+ * A key's paths as they read in any checkout: without the private mirror directory a build compiles from
+ * (`.wasmgc-entry<pid>`), with the compiler's own files as `<scriptc>/`, a package's as `node_modules/<package path>`,
+ * and the program's own relative to the checkout (setStableNameFiles), so names derived from it agree between builds
+ * and between checkouts.
+ */
+export function stableFileName(file: string): string {
+  let key = withoutMirror(file);
+  if (COMPILER_DIR) key = key.split(COMPILER_DIR).join("<scriptc>/");
+  key = key.replace(/(?:\/[^/|\s"'`:]+)*\/node_modules\//g, "node_modules/");
+  if (checkoutPrefix) key = key.split(checkoutPrefix).join("");
+  return key;
+}
+
+/** A module namespace's opaque runtime id under stripSourceSites (`m:<hash>`): the hash of its `file:` id as it reads
+ * in any checkout (stableFileName), so a build is reproducible whatever private mirror (`.wasmgc-entry<pid>`) or
+ * checkout it compiled from. The type mapper's text and the emitter's runtime id both take it. */
+export function opaqueModuleId(id: string): string {
+  return `m:${createHash("sha256").update(stableFileName(id)).digest("hex").slice(0, 12)}`;
 }

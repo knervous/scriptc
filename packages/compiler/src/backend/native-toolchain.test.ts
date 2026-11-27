@@ -333,6 +333,7 @@ test.skipIf(
         cPath,
         outPath: join(dir, "host"),
         cacheIdentity: TEST_CACHE_IDENTITY,
+        dynamic: true,
         net: true,
         http: true,
         tls: true,
@@ -342,13 +343,18 @@ test.skipIf(
         // reusable independently of the output path.
         systemLibraries: ["m"],
       });
+      const hostEngine = (await readdir(vendorRoot)).find((name) =>
+        name.startsWith("3c8f3d689539-plain-"),
+      );
       const hostTls = (await readdir(vendorRoot)).find((name) => name.startsWith("mbedtls-"));
+      expect(hostEngine).toBeDefined();
       expect(hostTls).toBeDefined();
 
       process.env["SCRIPTC_CC"] = "zigcc";
       const zigOptions = {
         cPath,
         cacheIdentity: TEST_CACHE_IDENTITY,
+        dynamic: true,
         net: true,
         http: true,
         tls: true,
@@ -358,6 +364,9 @@ test.skipIf(
       await compileC({ ...zigOptions, outPath: join(dir, "zig-first") });
 
       let vendorEntries = await readdir(vendorRoot);
+      expect(vendorEntries.filter((name) => name.startsWith("3c8f3d689539-plain-"))).toHaveLength(
+        2,
+      );
       expect(vendorEntries.filter((name) => name.startsWith("mbedtls-")).length).toBe(2);
       // Host clang and Zig each materialize their own vendored zlib object
       // family in the shared vendor root.
@@ -366,11 +375,21 @@ test.skipIf(
       // use the separately keyed Zig archive instead of repairing or consuming
       // the host-clang entry.
       await writeFile(
+        join(vendorRoot, hostEngine!, "libqjs.a"),
+        "host archive intentionally invalid\n",
+      );
+      await writeFile(
         join(vendorRoot, hostTls!, "libmbedtls.a"),
         "host archive intentionally invalid\n",
       );
       await compileC({ ...zigOptions, outPath: join(dir, "zig-second") });
       vendorEntries = await readdir(vendorRoot);
+      expect(vendorEntries.filter((name) => name.startsWith("3c8f3d689539-plain-"))).toHaveLength(
+        2,
+      );
+      expect(await readFile(join(vendorRoot, hostEngine!, "libqjs.a"), "utf8")).toBe(
+        "host archive intentionally invalid\n",
+      );
       expect(await readFile(join(vendorRoot, hostTls!, "libmbedtls.a"), "utf8")).toBe(
         "host archive intentionally invalid\n",
       );
@@ -779,7 +798,7 @@ exec "$@"
       cPath,
       outPath: join(dir, "second"),
       cacheIdentity: TEST_CACHE_IDENTITY,
-      tls: true,
+      dynamic: true,
     });
     expect((await readFile(ccacheLog, "utf8")).trim()).not.toBe("");
   } finally {
@@ -2341,20 +2360,25 @@ test("native cache warming seeds exact runtime and vendor families without compl
     process.env["SCRIPTC_CACHE_DIR"] = cacheRoot;
     delete process.env["SCRIPTC_TEST_VENDOR_CACHE_DIR"];
     delete process.env["SCRIPTC_NO_CACHE"];
-    const warmed = await warmNativeCaches({ profiles: ["runtime", "tls"] });
+    const warmed = await warmNativeCaches({ profiles: ["runtime", "tls", "dynamic"] });
     expect(warmed.cacheRoot).toBe(cacheRoot);
-    expect(warmed.profiles.map(({ profile }) => profile)).toEqual(["runtime", "tls"]);
+    expect(warmed.profiles.map(({ profile }) => profile)).toEqual(["runtime", "tls", "dynamic"]);
     expect(warmed.profiles.every(({ elapsedMs }) => elapsedMs >= 0)).toBe(true);
     expect(
       (await readdir(join(cacheRoot, "obj"), { withFileTypes: true })).filter((e) =>
         e.isDirectory(),
       ),
-    ).toHaveLength(2);
+    ).toHaveLength(3);
     expect(await readdir(join(cacheRoot, "bin")).catch(() => [])).toEqual([]);
     const vendorEntries = await readdir(vendorCacheRoot);
     const tlsEntry = vendorEntries.find((name) => name.startsWith("mbedtls-"));
+    const engineEntry = vendorEntries.find((name) => name.startsWith("3c8f3d689539-plain-"));
     expect(tlsEntry).toBeDefined();
+    expect(engineEntry).toBeDefined();
     expect((await stat(join(vendorCacheRoot, tlsEntry!, "libmbedtls.a.sha256"))).isFile()).toBe(
+      true,
+    );
+    expect((await stat(join(vendorCacheRoot, engineEntry!, "libqjs.a.sha256"))).isFile()).toBe(
       true,
     );
   } finally {
@@ -2382,26 +2406,28 @@ test("damaged shared vendor archives are rejected and rebuilt before linking", a
     delete process.env["SCRIPTC_NO_CACHE"];
     delete process.env["SCRIPTC_TEST_VENDOR_CACHE_DIR"];
     await writeFile(cPath, "int main(void) { return 0; }\n");
-    await warmNativeCaches({ profiles: ["tls"] });
+    await warmNativeCaches({ profiles: ["dynamic"] });
 
     const vendorRoot = join(cacheRoot, "vendor");
-    const tlsDir = (await readdir(vendorRoot)).find((name) => name.startsWith("mbedtls-"));
-    expect(tlsDir).toBeDefined();
-    const tlsArchive = join(vendorRoot, tlsDir!, "libmbedtls.a");
-    expect((await stat(`${tlsArchive}.sha256`)).isFile()).toBe(true);
-    await writeFile(tlsArchive, corruption);
+    const engineDir = (await readdir(vendorRoot)).find((name) =>
+      name.startsWith("3c8f3d689539-plain-"),
+    );
+    expect(engineDir).toBeDefined();
+    const engineArchive = join(vendorRoot, engineDir!, "libqjs.a");
+    expect((await stat(`${engineArchive}.sha256`)).isFile()).toBe(true);
+    await writeFile(engineArchive, corruption);
 
     await compileC({
       cPath,
       outPath,
       cacheIdentity: TEST_CACHE_IDENTITY,
-      tls: true,
+      dynamic: true,
     });
 
     expect((await stat(outPath)).isFile()).toBe(true);
-    const repaired = await readFile(tlsArchive);
+    const repaired = await readFile(engineArchive);
     expect(repaired).not.toEqual(corruption);
-    expect((await readFile(`${tlsArchive}.sha256`, "utf8")).trim()).toBe(
+    expect((await readFile(`${engineArchive}.sha256`, "utf8")).trim()).toBe(
       createHash("sha256").update(repaired).digest("hex"),
     );
   } finally {
@@ -2414,7 +2440,7 @@ test("damaged shared vendor archives are rejected and rebuilt before linking", a
   }
 }, 300_000);
 
-test("TLS builds promote staged vendor archives before bounded LRU eviction", async () => {
+test("dynamic builds promote staged vendor archives before bounded LRU eviction", async () => {
   const dir = await mkdtemp(join(tmpdir(), "scriptc-vendor-lru-"));
   scratch.push(dir);
   const cacheRoot = join(dir, "cache");
@@ -2430,19 +2456,21 @@ test("TLS builds promote staged vendor archives before bounded LRU eviction", as
     delete process.env["SCRIPTC_CACHE_MAX_MB"];
     delete process.env["SCRIPTC_TEST_VENDOR_CACHE_DIR"];
     await writeFile(cPath, "int main(void) { return 0; }\n");
-    await warmNativeCaches({ profiles: ["tls"] });
+    await warmNativeCaches({ profiles: ["dynamic"] });
 
     const vendorRoot = join(cacheRoot, "vendor");
-    const tlsDir = (await readdir(vendorRoot)).find((name) => name.startsWith("mbedtls-"));
-    expect(tlsDir).toBeDefined();
-    const tlsArchive = join(vendorRoot, tlsDir!, "libmbedtls.a");
+    const engineDir = (await readdir(vendorRoot)).find((name) =>
+      name.startsWith("3c8f3d689539-plain-"),
+    );
+    expect(engineDir).toBeDefined();
+    const engineArchive = join(vendorRoot, engineDir!, "libqjs.a");
     const initialBytes = await cacheTreeBytes(cacheRoot);
     const capMb = Math.max(4, Math.ceil((initialBytes * 2) / (1024 * 1024)));
     const filler = join(cacheRoot, "filler.bin");
     const staleArchiveTime = new Date("2000-01-01T00:00:00.000Z");
     const fillerTime = new Date("2001-01-01T00:00:00.000Z");
     await writeFile(filler, Buffer.alloc(capMb * 1024 * 1024));
-    await utimes(tlsArchive, staleArchiveTime, staleArchiveTime);
+    await utimes(engineArchive, staleArchiveTime, staleArchiveTime);
     await utimes(filler, fillerTime, fillerTime);
     process.env["SCRIPTC_CACHE_MAX_MB"] = String(capMb);
 
@@ -2450,11 +2478,11 @@ test("TLS builds promote staged vendor archives before bounded LRU eviction", as
       cPath,
       outPath,
       cacheIdentity: TEST_CACHE_IDENTITY,
-      tls: true,
+      dynamic: true,
     });
 
     expect((await stat(outPath)).isFile()).toBe(true);
-    expect((await stat(tlsArchive)).mtimeMs).toBeGreaterThan(fillerTime.getTime());
+    expect((await stat(engineArchive)).mtimeMs).toBeGreaterThan(fillerTime.getTime());
     expect(await cacheTreeBytes(cacheRoot)).toBeLessThanOrEqual(capMb * 1024 * 1024);
   } finally {
     if (oldCacheDir === undefined) delete process.env["SCRIPTC_CACHE_DIR"];
@@ -2906,8 +2934,7 @@ test.skipIf(process.platform === "win32")(
     expect(realClang).toBeDefined();
 
     const waitForSignal = async (): Promise<void> => {
-      // A cold runtime compile shares CPUs with the full Sandbox gate.
-      const deadline = Date.now() + 60_000;
+      const deadline = Date.now() + 10_000;
       while (!existsSync(signal)) {
         if (Date.now() > deadline) throw new Error("timed out waiting for final compilation");
         await new Promise((resolveWait) => setTimeout(resolveWait, 10));

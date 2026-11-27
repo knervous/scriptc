@@ -1,6 +1,0 @@
-{
- "order": [
-  "<repo>/tests/corpus/4884-await-call-unhandled-sibling.ts"
- ],
- "diags": []
-}

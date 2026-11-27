@@ -1,3 +1,4 @@
+// This file was modified from scriptc (Apache-2.0); see MODIFICATIONS.md.
 /* Focused LLVM expression emission extracted from emitter.ts. */
 import {
   emitInlineArrayGet,
@@ -6,6 +7,7 @@ import {
   inlineFieldTail,
 } from "./inline-arrays.js";
 import { InternalCompilerError } from "../../errors.js";
+import { runtimeModuleId } from "../../frontend/browser-target.js";
 import { matchStringSelfConcat, undefinedArmTag } from "../../ir/analysis.js";
 import {
   isRefCounted,
@@ -163,7 +165,7 @@ export function emitLiteralExpr(
       return host.own({ name: host.retainFrame(sym, e.type), type: e.type });
     }
     case "moduleNsRef": {
-      const sym = host.internLiteral(`module:${e.moduleId}`);
+      const sym = host.internLiteral(`module:${runtimeModuleId(e.moduleId)}`);
       return host.own({ name: host.retainFrame(sym, e.type), type: e.type });
     }
     case "unitLit":
@@ -2012,6 +2014,12 @@ export function emitRecordLitFields(
   const B = host.B;
   const shapeId = (e.type as IrType & { kind: "record" }).shapeId;
   for (const f of e.fields) {
+    if (f.drop) {
+      // A mapping-dropped field (the fork's frontend): the initializer runs in its source-order slot, effects
+      // included, and its result releases with the statement frame instead of storing.
+      host.emitExpr(f.value);
+      continue;
+    }
     const v = host.emitFieldValue(
       f.value,
       f.overflow !== true && host.recordFieldInline(shapeId, f.name),

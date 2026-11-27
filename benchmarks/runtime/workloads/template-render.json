@@ -1,7 +1,0 @@
-{
-  "entry": "workloads/template-render.ts",
-  "args": [
-    "1"
-  ],
-  "scaleArg": 0
-}

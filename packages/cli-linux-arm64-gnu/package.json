@@ -1,6 +1,6 @@
 {
   "name": "@scriptc/cli-linux-arm64-gnu",
-  "version": "0.4.17",
+  "version": "0.2.4",
   "description": "Native scriptc compiler for linux-arm64-gnu",
   "license": "Apache-2.0",
   "homepage": "https://scriptc.dev",
@@ -18,13 +18,9 @@
   "files": [
     "dist"
   ],
-  "dependencies": {
-    "@scriptc/llvm-linux-arm64-gnu": "workspace:*",
-    "@scriptc/runtime-linux-arm64-gnu": "workspace:*"
-  },
   "scripts": {
     "build": "node -e \"\"",
-    "build:native": "node --max-old-space-size=8192 --import tsx ../../scripts/build-native-cli.mts dist --platform-packages",
+    "build:native": "node --max-old-space-size=8192 --import tsx ../../scripts/build-native-cli.mts dist",
     "prepack": "node ../../scripts/verify-native-cli.mjs ."
   },
   "publishConfig": {

@@ -1,6 +1,0 @@
-{
- "order": [
-  "<repo>/tests/corpus/compat-http-client-connect-untyped.ts"
- ],
- "diags": []
-}

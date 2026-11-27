@@ -1,6 +1,0 @@
-{
- "order": [
-  "<repo>/tests/corpus/tuple-undefined-element-materialized.ts"
- ],
- "diags": []
-}

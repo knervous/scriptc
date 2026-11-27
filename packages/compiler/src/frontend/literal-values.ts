@@ -1,3 +1,4 @@
+// This file was modified from scriptc (Apache-2.0); see MODIFICATIONS.md.
 import * as ts from "./ts7/adapter.js";
 import type { UnionLiteral } from "./union-discriminants.js";
 
@@ -10,8 +11,7 @@ export function literalValues(type: ts.Type): UnionLiteral[] | null {
       const value = (part as ts.NumberLiteralType).value;
       if (!Number.isFinite(value)) return null;
       values.push(value);
-    } else if (part.flags & ts.TypeFlags.BooleanLiteral)
-      values.push((part as ts.BooleanLiteralType).value);
+    } else if (part.flags & ts.TypeFlags.BooleanLiteral) values.push((part as ts.BooleanLiteralType).value);
     else return null;
   }
   return values.length > 0 ? values : null;

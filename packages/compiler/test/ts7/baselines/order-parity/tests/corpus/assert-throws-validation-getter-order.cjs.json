@@ -1,6 +1,0 @@
-{
- "order": [
-  "<repo>/tests/corpus/assert-throws-validation-getter-order.cjs"
- ],
- "diags": []
-}

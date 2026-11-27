@@ -1,6 +1,0 @@
-{
- "order": [
-  "<repo>/tests/corpus/755-cycle-async-promise.ts"
- ],
- "diags": []
-}

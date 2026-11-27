@@ -1,6 +1,0 @@
-{
- "order": [
-  "<repo>/tests/corpus/2913-builtin-callable-alias.ts"
- ],
- "diags": []
-}

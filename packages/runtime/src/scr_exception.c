@@ -1,3 +1,4 @@
+// This file was modified from scriptc (Apache-2.0); see MODIFICATIONS.md.
 /* The in-flight exception cell (see scr_runtime.h). One cell per execution
  * context — the main stack plus one per fiber (scr_async.c swaps the active
  * cell on fiber switches) — never a stack of cells: JS has exactly one
@@ -43,7 +44,7 @@ static SCR_TL ScrExcCell scr_main_exc; /* fiber zero (the main stack) */
 /* The active cell is exported so executables can test its kind inline at
  * every exception poll and call scr_exc_pending only on the slow path; the
  * kind is the cell's first field. */
-#if (defined(SCR_LIB) && defined(SCR_THREAD_INSTANCES)) || defined(SCR_WORKERS)
+#if defined(SCR_THREAD_INSTANCES) || defined(SCR_WORKERS)
 /* A thread-local pointer cannot be initialized with &scr_main_exc — the
  * address of a thread-local is not a constant expression — so NULL stands
  * for the main cell and every read resolves it. Worker executables also
@@ -112,7 +113,7 @@ void scr_exc_cell_changed(void) {
 
 void scr_exc_alert_thread_exit(void) {}
 #define SCR_EXC_RAISED() scr_exc_flag_pending(true)
-#elif defined(SCR_WORKERS) && !defined(SCR_LIB)
+#elif (defined(SCR_WORKERS) || defined(SCR_THREAD_INSTANCES)) && !defined(SCR_LIB)
 /* The process-wide exception alert, tested inline by every emitted pending
  * check in worker executables: one ordinary load, where reading the active
  * cell would be a thread-local access (a call on Darwin). It counts the
@@ -127,6 +128,11 @@ void scr_exc_alert_thread_exit(void) {}
  * thread costs the others slow-path calls only until it is caught. Only its
  * owner changes a thread's share, so a thread's own raise is visible to all
  * of its later checks. */
+/* This fork's thread-instanced executables (a threaded native program's
+ * pieces, one runtime instance per thread) test the same word: their active
+ * cell is thread-local, which the emitted checks would otherwise reach
+ * through a runtime call and a TLS lookup per check. They have no contexts
+ * to stop, so a thread's share follows its active cell alone. */
 _Alignas(64) _Atomic uint32_t scr_exc_alert = 0;
 static SCR_TL bool scr_exc_alerted;
 
@@ -148,7 +154,11 @@ static void scr_exc_alert_drop(void) {
 
 /* The active cell, or the context's stop state, may have changed. */
 void scr_exc_cell_changed(void) {
+#ifdef SCR_WORKERS
   if (SCR_EXC_CUR()->kind != SCR_EXC_NONE || !scr_context_quiet()) scr_exc_alert_raise();
+#else
+  if (SCR_EXC_CUR()->kind != SCR_EXC_NONE) scr_exc_alert_raise();
+#endif
   else scr_exc_alert_drop();
 }
 
@@ -542,7 +552,7 @@ bool(scr_exc_pending)(void) {
 #if defined(SCR_WORKERS) && !defined(SCR_LIB) && defined(SCR_EXC_FLAG)
   /* The pending bit is exact; settling it here is only a safety net. */
   scr_exc_flag_pending(pending);
-#elif defined(SCR_WORKERS) && !defined(SCR_LIB)
+#elif (defined(SCR_WORKERS) || defined(SCR_THREAD_INSTANCES)) && !defined(SCR_LIB)
   /* The slow path of the alert test: settle this thread's share. */
   if (pending != scr_exc_alerted) scr_exc_cell_changed();
 #endif

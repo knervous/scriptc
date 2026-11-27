@@ -1,3 +1,4 @@
+// @dynamic
 // Math.random values cannot be compared against Node — assert the contract
 // instead: every draw is a number in [0, 1).
 let ok = true;

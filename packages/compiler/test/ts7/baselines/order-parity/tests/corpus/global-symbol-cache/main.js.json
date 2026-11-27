@@ -1,7 +1,0 @@
-{
- "order": [
-  "<repo>/tests/corpus/global-symbol-cache/remote.js",
-  "<repo>/tests/corpus/global-symbol-cache/main.js"
- ],
- "diags": []
-}

@@ -1,6 +1,0 @@
-{
- "order": [
-  "<repo>/tests/corpus/listener-cycle-emitter-subclass-owner.ts"
- ],
- "diags": []
-}

@@ -1,19 +1,8 @@
-import type {
-  TypePatchCommandRequest,
-  TypePatchCommandResult,
-} from "../frontend/type-patches/command.js";
-import type {
-  AnalyzeOptions,
-  AnalyzeResult,
-  CompileLibraryOptions,
-  CompileLibraryResult,
-  CompileRequestOptions,
-  CompileRequestResult,
-} from "../compile-types.js";
-import type { NativeOptimization } from "../backend/optimization.js";
+// This file was modified from scriptc (Apache-2.0); see MODIFICATIONS.md.
+import type { AnalyzeOptions, AnalyzeResult, CompileLibraryOptions, CompileLibraryResult, CompileRequestOptions, CompileRequestResult } from "../compile-types.js";
 import type { ProvenanceSources } from "../frontend/provenance-registry.js";
 
-export type NativeCacheWarmProfile = "runtime" | "tls";
+export type NativeCacheWarmProfile = "runtime" | "tls" | "dynamic";
 
 /** Only host operations vary between the seed and installed compiler. */
 export interface CliHost {
@@ -24,20 +13,9 @@ export interface CliHost {
   compileLibrary: (options: CompileLibraryOptions) => Promise<CompileLibraryResult>;
   resolveProvenanceSources: (entry: string) => Promise<ProvenanceSources>;
   warmNativeCaches: (options: {
-    optimization?: NativeOptimization;
+    optimization?: "release" | "dev";
     sanitize: boolean;
     profiles?: NativeCacheWarmProfile[];
-  }) => Promise<{
-    cacheRoot: string;
-    profiles: { profile: NativeCacheWarmProfile; elapsedMs: number }[];
-  }>;
-  /** Merges raw or indexed profiles into one indexed profile; a sparse one
-   * leaves out functions that never ran. */
-  mergeProfiles: (outputPath: string, inputPaths: string[], sparse: boolean) => Promise<void>;
-  /** `scriptc types patch|list` (frontend/type-patches/command.ts). */
-  typePatches: (request: TypePatchCommandRequest) => Promise<TypePatchCommandResult>;
+  }) => Promise<{ cacheRoot: string; profiles: { profile: NativeCacheWarmProfile; elapsedMs: number }[] }>;
   run: (binary: string) => Promise<number>;
-  /** The executable and arguments that run this same compiler with the command-line arguments
-   * `args`; `scriptc mcp` runs each tool call this way. */
-  reinvoke: (args: string[]) => { file: string; args: string[] };
 }

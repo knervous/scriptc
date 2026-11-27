@@ -1,3 +1,4 @@
+// This file was modified from scriptc (Apache-2.0); see MODIFICATIONS.md.
 import { abortSignatures } from "./builtin-signatures/abort.js";
 import { ahSignatures } from "./builtin-signatures/ah.js";
 import { alsSignatures } from "./builtin-signatures/als.js";
@@ -41,12 +42,14 @@ import { fsSignatures } from "./builtin-signatures/fs.js";
 import { fspSignatures } from "./builtin-signatures/fsp.js";
 import { globalSignatures } from "./builtin-signatures/global.js";
 import { handleSignatures } from "./builtin-signatures/handle.js";
+import { hostSignatures } from "./builtin-signatures/host.js";
 import { httpSignatures } from "./builtin-signatures/http.js";
 import { http2Signatures } from "./builtin-signatures/http2.js";
 import { httpsSignatures } from "./builtin-signatures/https.js";
 import { icuSignatures } from "./builtin-signatures/icu.js";
 import { inspSignatures } from "./builtin-signatures/insp.js";
 import { intlSignatures } from "./builtin-signatures/intl.js";
+import { islandSignatures } from "./builtin-signatures/island.js";
 import { iteratorSignatures } from "./builtin-signatures/iterator.js";
 import { jsSignatures } from "./builtin-signatures/js.js";
 import { jsonSignatures } from "./builtin-signatures/json.js";
@@ -162,12 +165,14 @@ function buildLibFnSignatures() {
     ...fspSignatures,
     ...globalSignatures,
     ...handleSignatures,
+    ...hostSignatures,
     ...httpSignatures,
     ...http2Signatures,
     ...httpsSignatures,
     ...icuSignatures,
     ...inspSignatures,
     ...intlSignatures,
+    ...islandSignatures,
     ...iteratorSignatures,
     ...jsSignatures,
     ...jsonSignatures,

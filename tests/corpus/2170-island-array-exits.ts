@@ -1,3 +1,4 @@
+// @dynamic
 // Element access, .length, method calls, and element writes on ISLAND
 // values whose declared type is an ARRAY (or a tuple / keyed record) —
 // the SC9001 arrayGet/arrIntrinsic-on-jsval ICE family. The unchecked-

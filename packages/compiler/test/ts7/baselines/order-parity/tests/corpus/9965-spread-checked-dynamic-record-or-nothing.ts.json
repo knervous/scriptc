@@ -1,6 +1,0 @@
-{
- "order": [
-  "<repo>/tests/corpus/9965-spread-checked-dynamic-record-or-nothing.ts"
- ],
- "diags": []
-}

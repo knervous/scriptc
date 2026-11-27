@@ -22,6 +22,7 @@ import {
 import { deserializeModule, serializeModule } from "./serialize.js";
 import { assignLegacyTiers } from "./tiers.js";
 import { validateModule } from "./validate.js";
+import { trapUnimplementedVirtualCalls } from "../frontend/lowering/unimplemented-virtual.js";
 
 const loc = { file: "numeric-read.ts", start: 0, end: 0 };
 
@@ -563,7 +564,8 @@ test("record validation refreshes field types and missing members between invoca
   ]);
   mod.records![0]!.fields = [];
   expect(validateModule(mod).map((error) => error.message)).toEqual([
-    'in main: shape row has no field "value"',
+    // This fork's recordGet message names the shape's fields.
+    'in main: shape row has no field "value" (fields: )',
     'in main: shape row has no field "value"',
     'in main: shape row has no field "value"',
   ]);
@@ -798,6 +800,44 @@ test("virtual-call validation preserves each call site's diagnostic and excludes
     [2, "in caller1: virtualCall Base.run: no concrete override below the static class"],
     [2, "in caller1: virtualCall Base.run: no implementation function exists"],
   ]);
+});
+
+test("a virtual call nothing in the program implements becomes a fenced direct call (a piece built from part of a library)", () => {
+  const mod = virtualCallModule();
+  // The concrete subclasses are outside this program, and so is the unrelated class.
+  mod.classes = mod.classes!.filter((cls) => cls.name === "Base");
+  mod.functions = mod.functions.filter((fn) => !fn.name.endsWith(".run"));
+  expect(validateModule(mod).length).toBeGreaterThan(0);
+  expect(trapUnimplementedVirtualCalls(mod)).toBe(2);
+  expect(validateModule(mod)).toEqual([]);
+  const trap = mod.functions.find((fn) => fn.name === "%Base.run%unimplemented")!;
+  expect(trap.body).toMatchObject([{ kind: "runtimeFence", code: "SC9003" }]);
+});
+
+test("an unimplemented virtual call with a class that can be instantiated is a compiler gap, not a proven-dead call", () => {
+  const mod = virtualCallModule();
+  // First is concrete and in the program, but its implementation is missing.
+  mod.classes = mod.classes!.filter((cls) => cls.name === "Base" || cls.name === "First");
+  mod.functions = mod.functions.filter((fn) => !fn.name.endsWith(".run"));
+  expect(trapUnimplementedVirtualCalls(mod)).toBe(2);
+  const trap = mod.functions.find((fn) => fn.name === "%Base.run%unimplemented")!;
+  expect(trap.body).toMatchObject([{ kind: "runtimeFence", code: "SC9001" }]);
+});
+
+test("a concrete subclass the program never constructs makes the unimplemented call proven-dead (its overrides were pruned)", () => {
+  const mod = virtualCallModule();
+  // First is concrete and in the program, but no reachable code constructs it, so reachability dropped its override.
+  mod.classes = mod.classes!.filter((cls) => cls.name === "Base" || cls.name === "First");
+  mod.functions = mod.functions.filter((fn) => !fn.name.endsWith(".run"));
+  expect(trapUnimplementedVirtualCalls(mod, new Set(["First"]))).toBe(2);
+  const trap = mod.functions.find((fn) => fn.name === "%Base.run%unimplemented")!;
+  expect(trap.body).toMatchObject([{ kind: "runtimeFence", code: "SC9003" }]);
+});
+
+test("a virtual call some class implements is left as it is", () => {
+  const mod = virtualCallModule();
+  expect(trapUnimplementedVirtualCalls(mod)).toBe(0);
+  expect(validateModule(mod)).toEqual([]);
 });
 
 test("closed virtual-call target sets name distinct related implementations", () => {
@@ -1401,13 +1441,7 @@ test("TDZ globals require guarded pointer storage and round-trip initialization"
   expect(validateModule(mod)).toEqual([]);
   expect(deserializeModule(serializeModule(mod))).toEqual(mod);
   mod.globals[0]!.type = F64;
-  expect(
-    validateModule(mod).some((error) =>
-      error.message.includes(
-        'TDZ global "value" must have record, function, or checked-value storage',
-      ),
-    ),
-  ).toBe(true);
+  expect(validateModule(mod).some((error) => error.message.includes('TDZ global "value" must have record, function, union, or checked-value storage'))).toBe(true);
 });
 
 test("legacy const TDZ declarations remain readable", () => {
@@ -1826,7 +1860,7 @@ test("function result views preserve the parameter ABI and reject reversed covar
     if (variant === "parameter") type.params[0] = STRING;
     if (variant === "arity") type.params.push(F64);
     if (variant === "rest") type.rest = true;
-    if (variant === "rest-abi") type.restAbi = "typed";
+    if (variant === "rest-abi") type.restAbi = "jsval";
     if (variant === "arguments") type.argumentsAll = true;
     if (variant === "return") type.ret = F64;
     if (variant === "unrelated") type.ret = { kind: "object", className: "Other" };

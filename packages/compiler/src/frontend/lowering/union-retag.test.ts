@@ -1,100 +1,43 @@
 import { describe, expect, test } from "vitest";
-import {
-  BOOL,
-  DYN,
-  F64,
-  NULL_T,
-  STRING,
-  UNDEFINED_T,
-  VOID,
-  typeEquals,
-  typeKey,
-} from "../../ir/ir.js";
+import { BOOL, F64, NULL_T, STRING, UNDEFINED_T, typeEquals, typeKey } from "../../ir/ir.js";
 import type { IrRecordShape, IrType, IrUnionDef, SrcLoc } from "../../ir/ir.js";
-import {
-  planUnionRetag,
-  buildUnionRetag,
-  identityRetagTags,
-  planRecordUnionLift,
-  planRecordUnionWrap,
-} from "./union-retag.js";
+import { planUnionRetag, buildUnionRetag, planRecordUnionWrap } from "./union-retag.js";
 import type { UnionRetagArm } from "./union-retag.js";
 import type { WidthLift } from "./width-lift.js";
 
 const loc: SrcLoc = { file: "retag.ts", start: 0, end: 1 };
 const record = (shapeId: string): IrType => ({ kind: "record", shapeId });
 
-function fixture(
-  fieldType: IrType = STRING,
-  values: (string | number | boolean)[] = ["left", "right"],
-) {
+function fixture(fieldType: IrType = STRING, values: (string | number | boolean)[] = ["left", "right"]) {
   const shapes: IrRecordShape[] = [
-    {
-      id: "r0",
-      fields: [
-        { name: "kind", type: fieldType },
-        { name: "left", type: F64 },
-        { name: "right", type: F64 },
-      ],
-    },
-    {
-      id: "r1",
-      fields: [
-        { name: "kind", type: fieldType },
-        { name: "left", type: F64 },
-      ],
-    },
-    {
-      id: "r2",
-      fields: [
-        { name: "kind", type: fieldType },
-        { name: "right", type: F64 },
-      ],
-    },
+    { id: "r0", fields: [{ name: "kind", type: fieldType }, { name: "left", type: F64 }, { name: "right", type: F64 }] },
+    { id: "r1", fields: [{ name: "kind", type: fieldType }, { name: "left", type: F64 }] },
+    { id: "r2", fields: [{ name: "kind", type: fieldType }, { name: "right", type: F64 }] },
   ];
   const from: IrUnionDef = {
-    id: "u0",
-    arms: [record("r0"), UNDEFINED_T],
+    id: "u0", arms: [record("r0"), UNDEFINED_T],
     discriminant: { field: "kind", cases: [{ tag: 0, values }] },
   };
   const to: IrUnionDef = {
-    id: "u1",
-    arms: [record("r1"), record("r2"), UNDEFINED_T],
-    discriminant: {
-      field: "kind",
-      cases: [
-        { tag: 0, values: [values[0]!] },
-        { tag: 1, values: [values[1]!] },
-      ],
-    },
+    id: "u1", arms: [record("r1"), record("r2"), UNDEFINED_T],
+    discriminant: { field: "kind", cases: [{ tag: 0, values: [values[0]!] }, { tag: 1, values: [values[1]!] }] },
   };
   const shapeOf = (id: string) => shapes.find((shape) => shape.id === id);
   const lift = (source: IrType, target: IrType): WidthLift | null => {
     if (typeEquals(source, target)) return { how: "copy" };
     if (source.kind === "record" && target.kind === "record") {
-      const src = shapeOf(source.shapeId),
-        dst = shapeOf(target.shapeId);
-      if (
-        src &&
-        dst &&
-        dst.fields.every((field) =>
-          src.fields.some((old) => old.name === field.name && typeEquals(old.type, field.type)),
-        )
-      ) {
+      const src = shapeOf(source.shapeId), dst = shapeOf(target.shapeId);
+      if (src && dst && dst.fields.every((field) => src.fields.some((old) => old.name === field.name && typeEquals(old.type, field.type)))) {
         return { how: "width" };
       }
     }
     if (target.kind === "union") {
-      const candidates = to.arms
-        .map((arm, tag) => ({ arm, tag }))
-        .filter(({ arm }) => lift(source, arm) !== null);
-      if (candidates.length === 1)
-        return { how: "liftWrap", tag: candidates[0]!.tag, arm: candidates[0]!.arm };
+      const candidates = to.arms.map((arm, tag) => ({ arm, tag })).filter(({ arm }) => lift(source, arm) !== null);
+      if (candidates.length === 1) return { how: "liftWrap", tag: candidates[0]!.tag, arm: candidates[0]!.arm };
     }
     return null;
   };
-  const plan = (trappable?: ReadonlySet<number>) =>
-    planUnionRetag(from, to, shapeOf, lift, trappable);
+  const plan = (trappable?: ReadonlySet<number>) => planUnionRetag(from, to, shapeOf, lift, trappable);
   return { from, to, shapes, shapeOf, lift, plan };
 }
 
@@ -107,31 +50,21 @@ function split(plan: UnionRetagArm[] | null) {
 
 describe("record conversion with shared layouts", () => {
   test.each([
-    [STRING, ["binary", "logical"]],
-    [F64, [0, 1]],
-    [BOOL, [false, true]],
-  ] as [IrType, (string | number | boolean)[]][])(
-    "selects %j variants by their value",
-    (type, values) => {
-      const f = fixture(type, values);
-      f.shapes[2]!.fields = f.shapes[1]!.fields.slice();
-      expect(planRecordUnionWrap(f.shapes[1]!, f.to, f.shapeOf)).toEqual({
-        field: "kind",
-        fieldType: type,
-        routes: [
-          { tag: 0, lift: { how: "copy" }, values: [values[0]] },
-          { tag: 1, lift: { how: "width" }, values: [values[1]] },
-        ],
-      });
-      // Re-read registry definitions: a later field incompatibility must
-      // invalidate a previously possible shared-layout conversion.
-      f.shapes[2]!.fields = [
-        { name: "kind", type },
-        { name: "left", type: STRING },
-      ];
-      expect(planRecordUnionWrap(f.shapes[1]!, f.to, f.shapeOf)).toBeNull();
-    },
-  );
+    [STRING, ["binary", "logical"]], [F64, [0, 1]], [BOOL, [false, true]],
+  ] as [IrType, (string | number | boolean)[]][])("selects %j variants by their value", (type, values) => {
+    const f = fixture(type, values);
+    f.shapes[2]!.fields = f.shapes[1]!.fields.slice();
+    expect(planRecordUnionWrap(f.shapes[1]!, f.to, f.shapeOf)).toEqual({
+      field: "kind", fieldType: type, routes: [
+        { tag: 0, lift: { how: "copy" }, values: [values[0]] },
+        { tag: 1, lift: { how: "width" }, values: [values[1]] },
+      ],
+    });
+    // Re-read registry definitions: a later field incompatibility must
+    // invalidate a previously possible shared-layout conversion.
+    f.shapes[2]!.fields = [{ name: "kind", type }, { name: "left", type: STRING }];
+    expect(planRecordUnionWrap(f.shapes[1]!, f.to, f.shapeOf)).toBeNull();
+  });
 
   test("requires unambiguous literal ownership and matching field order", () => {
     const f = fixture();
@@ -142,74 +75,20 @@ describe("record conversion with shared layouts", () => {
     f.shapes[2]!.fields.reverse();
     expect(planRecordUnionWrap(f.shapes[1]!, f.to, f.shapeOf)).toBeNull();
   });
-
-  test("routes a record that fits several arms by its discriminant", () => {
-    const f = fixture();
-    expect(planRecordUnionLift(f.shapes[0]!, f.to, f.shapeOf, f.lift)).toEqual({
-      field: "kind",
-      fieldType: STRING,
-      routes: [
-        { tag: 0, lift: { how: "width" }, values: ["left"] },
-        { tag: 1, lift: { how: "width" }, values: ["right"] },
-      ],
-    });
-    // Without the discriminant field, or without an arm it converts into,
-    // there is no route.
-    const unnamed: IrRecordShape = { id: "r3", fields: f.shapes[0]!.fields.slice(1) };
-    expect(planRecordUnionLift(unnamed, f.to, f.shapeOf, f.lift)).toBeNull();
-    const unrelated: IrRecordShape = {
-      id: "r4",
-      fields: [
-        { name: "kind", type: STRING },
-        { name: "other", type: F64 },
-      ],
-    };
-    expect(planRecordUnionLift(unrelated, f.to, f.shapeOf, f.lift)).toBeNull();
-  });
 });
 
 describe("union conversion planning", () => {
   test("matches large unions in source order, including duplicate destination arms", () => {
     const arms: IrType[] = Array.from({ length: 48 }, (_, index) => record(`r${index}`));
     const from: IrUnionDef = { id: "large-from", arms };
-    const to: IrUnionDef = {
-      id: "large-to",
-      arms: [record("r7"), ...arms.slice().reverse(), record("r7")],
-    };
-    const plan = planUnionRetag(
-      from,
-      to,
-      () => undefined,
-      () => null,
-    );
-    expect(plan).toEqual(
-      arms.map((source) => ({
-        kind: "direct",
-        route: {
-          tag: to.arms.findIndex((arm) => typeEquals(arm, source)),
-          lift: { how: "copy" },
-          values: [],
-        },
-      })),
-    );
+    const to: IrUnionDef = { id: "large-to", arms: [record("r7"), ...arms.slice().reverse(), record("r7")] };
+    const plan = planUnionRetag(from, to, () => undefined, () => null);
+    expect(plan).toEqual(arms.map((source) => ({
+      kind: "direct", route: { tag: to.arms.findIndex((arm) => typeEquals(arm, source)), lift: { how: "copy" }, values: [] },
+    })));
     to.arms = to.arms.filter((arm) => !typeEquals(arm, arms[11]!));
-    expect(
-      planUnionRetag(
-        from,
-        to,
-        () => undefined,
-        () => null,
-      ),
-    ).toBeNull();
-    expect(
-      planUnionRetag(
-        from,
-        to,
-        () => undefined,
-        () => null,
-        new Set([11]),
-      )?.[11],
-    ).toEqual({ kind: "trap" });
+    expect(planUnionRetag(from, to, () => undefined, () => null)).toBeNull();
+    expect(planUnionRetag(from, to, () => undefined, () => null, new Set([11]))?.[11]).toEqual({ kind: "trap" });
   });
 
   test("checks exact ABI equality within type-key collisions", () => {
@@ -220,26 +99,12 @@ describe("union conversion planning", () => {
     const padding: IrType[] = Array.from({ length: 12 }, (_, index) => record(`r${index}`));
     const from: IrUnionDef = { id: "collision-from", arms: [fixed, withArguments, ...padding] };
     const to: IrUnionDef = { id: "collision-to", arms: [withArguments, fixed, ...padding] };
-    expect(
-      planUnionRetag(
-        from,
-        to,
-        () => undefined,
-        () => null,
-      )?.slice(0, 2),
-    ).toEqual([
+    expect(planUnionRetag(from, to, () => undefined, () => null)?.slice(0, 2)).toEqual([
       { kind: "direct", route: { tag: 1, lift: { how: "copy" }, values: [] } },
       { kind: "direct", route: { tag: 0, lift: { how: "copy" }, values: [] } },
     ]);
     to.arms.splice(1, 1);
-    expect(
-      planUnionRetag(
-        from,
-        to,
-        () => undefined,
-        () => null,
-      ),
-    ).toBeNull();
+    expect(planUnionRetag(from, to, () => undefined, () => null)).toBeNull();
   });
 
   test("splits one source layout by semantic kind", () => {
@@ -251,28 +116,16 @@ describe("union conversion planning", () => {
       { tag: 0, lift: { how: "width" }, values: ["left"] },
       { tag: 1, lift: { how: "width" }, values: ["right"] },
     ]);
-    expect(f.plan()![1]).toEqual({
-      kind: "direct",
-      route: { tag: 2, lift: { how: "copy" }, values: [] },
-    });
+    expect(f.plan()![1]).toEqual({ kind: "direct", route: { tag: 2, lift: { how: "copy" }, values: [] } });
   });
 
   test.each([
-    [F64, [0, -1]],
-    [F64, [1.5, 2.5]],
-    [BOOL, [false, true]],
-    [STRING, ["constructor", "__proto__"]],
-    [STRING, ["\u0000", '"\\\n']],
-  ] as [IrType, (string | number | boolean)[]][])(
-    "supports literal comparisons for %j",
-    (type, values) => {
-      const f = fixture(type, values);
-      expect(split(f.plan()).routes.map((route) => route.values)).toEqual([
-        [values[0]],
-        [values[1]],
-      ]);
-    },
-  );
+    [F64, [0, -1]], [F64, [1.5, 2.5]], [BOOL, [false, true]],
+    [STRING, ["constructor", "__proto__"]], [STRING, ["\u0000", '"\\\n']],
+  ] as [IrType, (string | number | boolean)[]][])("supports literal comparisons for %j", (type, values) => {
+    const f = fixture(type, values);
+    expect(split(f.plan()).routes.map((route) => route.values)).toEqual([[values[0]], [values[1]]]);
+  });
 
   test("uses semantic routes even when an exact storage arm exists", () => {
     const f = fixture();
@@ -288,8 +141,7 @@ describe("union conversion planning", () => {
     f.to.discriminant!.cases[0]!.values = ["other"];
     f.to.discriminant!.cases[1]!.values = ["left"];
     expect(f.plan()![0]).toEqual({
-      kind: "direct",
-      route: { tag: 1, lift: { how: "copy" }, values: ["left", "right"] },
+      kind: "direct", route: { tag: 1, lift: { how: "copy" }, values: ["left", "right"] },
     });
   });
 
@@ -315,8 +167,7 @@ describe("union conversion planning", () => {
     f.to.discriminant!.cases[0]!.values.push("right");
     f.to.discriminant!.cases[1]!.values = ["unused"];
     expect(f.plan()![0]).toEqual({
-      kind: "direct",
-      route: { tag: 0, lift: { how: "width" }, values: ["left", "right"] },
+      kind: "direct", route: { tag: 0, lift: { how: "width" }, values: ["left", "right"] },
     });
   });
 
@@ -329,13 +180,11 @@ describe("union conversion planning", () => {
   test("validates every selected layout before succeeding", () => {
     const f = fixture();
     const calls: string[] = [];
-    expect(
-      planUnionRetag(f.from, f.to, f.shapeOf, (source, target) => {
-        if (target.kind !== "record") return null;
-        calls.push(target.shapeId);
-        return target.shapeId === "r2" ? null : f.lift(source, target);
-      }),
-    ).toBeNull();
+    expect(planUnionRetag(f.from, f.to, f.shapeOf, (source, target) => {
+      if (target.kind !== "record") return null;
+      calls.push(target.shapeId);
+      return target.shapeId === "r2" ? null : f.lift(source, target);
+    })).toBeNull();
     expect(calls).toEqual(["r1", "r2"]);
   });
 
@@ -370,29 +219,6 @@ describe("union conversion planning", () => {
     expect(f.plan()).toBeNull();
   });
 
-  test("an arm that enters the destination by its own discriminant takes that plan", () => {
-    // The source keeps no discriminant (one of its arms lacks the member,
-    // or it is a record beside a unit), the destination does, and the
-    // record alone has no unique arm: its own plan is the route by the
-    // discriminant's value.
-    const f = fixture();
-    delete f.from.discriminant;
-    const route: WidthLift = { how: "discriminantRoute" };
-    const lift = (source: IrType, target: IrType): WidthLift | null =>
-      source.kind === "record" && target.kind === "union" ? route : f.lift(source, target);
-    expect(planUnionRetag(f.from, f.to, f.shapeOf, lift)).toEqual([
-      { kind: "own", lift: route },
-      { kind: "direct", route: { tag: 2, lift: { how: "copy" }, values: [] } },
-    ]);
-    // A unit the destination has no arm for still traps beside it.
-    f.from.arms.push(NULL_T);
-    expect(planUnionRetag(f.from, f.to, f.shapeOf, lift)!.at(-1)).toEqual({ kind: "trap" });
-    // An arm the site's type excludes traps before its plan is asked.
-    expect(planUnionRetag(f.from, f.to, f.shapeOf, lift, new Set([0]))![0]).toEqual({
-      kind: "trap",
-    });
-  });
-
   test("does not match differently named discriminants", () => {
     const f = fixture();
     f.to.discriminant!.field = "mode";
@@ -404,10 +230,7 @@ describe("union conversion planning", () => {
     delete f.from.discriminant;
     delete f.to.discriminant;
     f.to.arms[1] = record("r0");
-    expect(f.plan()![0]).toEqual({
-      kind: "direct",
-      route: { tag: 1, lift: { how: "copy" }, values: [] },
-    });
+    expect(f.plan()![0]).toEqual({ kind: "direct", route: { tag: 1, lift: { how: "copy" }, values: [] } });
   });
 
   test("stranded units trap and matching units retain their destination tags", () => {
@@ -415,10 +238,7 @@ describe("union conversion planning", () => {
     f.from.arms.push(NULL_T);
     expect(f.plan()!.at(-1)).toEqual({ kind: "trap" });
     f.to.arms.push(NULL_T);
-    expect(f.plan()!.at(-1)).toEqual({
-      kind: "direct",
-      route: { tag: 3, lift: { how: "copy" }, values: [] },
-    });
+    expect(f.plan()!.at(-1)).toEqual({ kind: "direct", route: { tag: 3, lift: { how: "copy" }, values: [] } });
   });
 
   test("stranded non-unit arms require site-specific checker evidence", () => {
@@ -432,16 +252,10 @@ describe("union conversion planning", () => {
   test("does not plan a width helper for a record the checker proved absent", () => {
     const f = fixture();
     let calls = 0;
-    const plan = planUnionRetag(
-      f.from,
-      f.to,
-      f.shapeOf,
-      (src, dst) => {
-        calls++;
-        return f.lift(src, dst);
-      },
-      new Set([0]),
-    );
+    const plan = planUnionRetag(f.from, f.to, f.shapeOf, (src, dst) => {
+      calls++;
+      return f.lift(src, dst);
+    }, new Set([0]));
     expect(plan![0]).toEqual({ kind: "trap" });
     expect(calls).toBe(0);
   });
@@ -450,48 +264,25 @@ describe("union conversion planning", () => {
     const f = fixture();
     f.from.arms.push(F64);
     f.to.arms.push(F64);
-    expect(f.plan(new Set([2]))!.at(-1)).toEqual({
-      kind: "direct",
-      route: { tag: 3, lift: { how: "copy" }, values: [] },
-    });
+    expect(f.plan(new Set([2]))!.at(-1)).toEqual({ kind: "direct", route: { tag: 3, lift: { how: "copy" }, values: [] } });
   });
 
-  test.each([
-    ["1", 1, F64],
-    ["true", true, BOOL],
-  ] as [string, number | boolean, IrType][])(
+  test.each([["1", 1, F64], ["true", true, BOOL]] as [string, number | boolean, IrType][])(
     "distinguishes %s from a scalar discriminator with the same spelling",
     (text, scalar, scalarType) => {
       const f = fixture();
       const other: IrRecordShape = {
-        id: "r3",
-        fields: [
-          { name: "kind", type: scalarType },
-          { name: "left", type: F64 },
-          { name: "right", type: F64 },
-        ],
+        id: "r3", fields: [{ name: "kind", type: scalarType }, { name: "left", type: F64 }, { name: "right", type: F64 }],
       };
       f.shapes.push(other);
       f.shapes[2]!.fields[0]!.type = scalarType;
       f.from.arms = [record("r0"), record("r3"), UNDEFINED_T];
-      f.from.discriminant!.cases = [
-        { tag: 0, values: [text] },
-        { tag: 1, values: [scalar] },
-      ];
-      f.to.discriminant!.cases = [
-        { tag: 0, values: [text] },
-        { tag: 1, values: [scalar] },
-      ];
+      f.from.discriminant!.cases = [{ tag: 0, values: [text] }, { tag: 1, values: [scalar] }];
+      f.to.discriminant!.cases = [{ tag: 0, values: [text] }, { tag: 1, values: [scalar] }];
       const plan = f.plan();
       expect(plan).not.toBeNull();
-      expect(plan![0]).toEqual({
-        kind: "direct",
-        route: { tag: 0, lift: { how: "width" }, values: [text] },
-      });
-      expect(plan![1]).toEqual({
-        kind: "direct",
-        route: { tag: 1, lift: { how: "width" }, values: [scalar] },
-      });
+      expect(plan![0]).toEqual({ kind: "direct", route: { tag: 0, lift: { how: "width" }, values: [text] } });
+      expect(plan![1]).toEqual({ kind: "direct", route: { tag: 1, lift: { how: "width" }, values: [scalar] } });
     },
   );
 
@@ -501,10 +292,7 @@ describe("union conversion planning", () => {
     f.from.discriminant!.cases[0]!.tag = 1;
     f.from.discriminant!.cases.push({ tag: 0, values: ["left"] });
     let calls = 0;
-    const plan = planUnionRetag(f.from, f.to, f.shapeOf, (src, dst) => {
-      calls++;
-      return f.lift(src, dst);
-    });
+    const plan = planUnionRetag(f.from, f.to, f.shapeOf, (src, dst) => { calls++; return f.lift(src, dst); });
     expect(plan).toBeNull();
     expect(calls).toBe(0);
   });
@@ -551,14 +339,7 @@ describe("discriminator metadata validation", () => {
     });
     test(`${side}: refuses a missing shape`, () => {
       const f = fixture();
-      expect(
-        planUnionRetag(
-          f.from,
-          f.to,
-          (id) => (id === (side === "from" ? "r0" : "r1") ? undefined : f.shapeOf(id)),
-          f.lift,
-        ),
-      ).toBeNull();
+      expect(planUnionRetag(f.from, f.to, (id) => id === (side === "from" ? "r0" : "r1") ? undefined : f.shapeOf(id), f.lift)).toBeNull();
     });
     for (const tag of [-1, 0.5, 99, Number.NaN]) {
       test(`${side}: refuses invalid tag ${tag}`, () => {
@@ -596,10 +377,7 @@ describe("discriminator metadata validation", () => {
     for (const accessor of ["get", "set"]) {
       test(`refuses ${accessor} accessor in shape ${shapeIndex}`, () => {
         const f = fixture();
-        f.shapes[shapeIndex]!.fields.push({
-          name: `%${accessor}:kind`,
-          type: { kind: "func", params: [], ret: STRING },
-        });
+        f.shapes[shapeIndex]!.fields.push({ name: `%${accessor}:kind`, type: { kind: "func", params: [], ret: STRING } });
         expect(f.plan()).toBeNull();
       });
     }
@@ -607,383 +385,54 @@ describe("discriminator metadata validation", () => {
 });
 
 describe("retag IR construction", () => {
-  test.each([
-    [STRING, ["left", "right"], "strEq"],
-    [F64, [0, 1], "bin"],
-    [BOOL, [false, true], "bin"],
-  ] as const)("reads %j discriminator with its source layout", (fieldType, values, comparison) => {
-    const f = fixture(fieldType, [...values]);
-    const uses: { how: string; src: IrType; dst: IrType }[] = [];
-    const fn = buildUnionRetag(
-      "retag",
-      f.from,
-      f.to,
-      f.plan()!,
-      loc,
-      (lift, value, dst) => {
+  test.each([[STRING, ["left", "right"], "strEq"], [F64, [0, 1], "bin"], [BOOL, [false, true], "bin"]] as const)(
+    "reads %j discriminator with its source layout",
+    (fieldType, values, comparison) => {
+      const f = fixture(fieldType, [...values]);
+      const uses: { how: string; src: IrType; dst: IrType }[] = [];
+      const fn = buildUnionRetag("retag", f.from, f.to, f.plan()!, loc, (lift, value, dst) => {
         uses.push({ how: lift.how, src: value.type, dst });
         return { kind: "varRef", localId: "converted", type: dst, loc };
-      },
-      () => "source",
-    );
-    const branch = fn.body[0]!;
-    if (branch.kind !== "if") throw new Error("missing source tag branch");
-    expect(branch.cond.kind).toBe("unionIsTag");
-    const read = branch.then[0]!;
-    if (read.kind !== "varDecl" || read.init?.kind !== "recordGet")
-      throw new Error("missing field capture");
-    expect(read.init.shapeId).toBe("r0");
-    expect(read.init.type).toEqual(fieldType);
-    for (const item of branch.then.slice(1, 3)) {
-      if (item.kind !== "if") throw new Error("missing literal dispatch");
-      expect(item.cond.kind).toBe(comparison);
-      const returned = item.then[0]!;
-      if (returned.kind !== "return" || returned.value?.kind !== "unionWrap")
-        throw new Error("missing destination wrap");
-      expect(returned.value.unionId).toBe("u1");
-    }
-    expect(uses).toEqual([
-      { how: "width", src: record("r0"), dst: record("r1") },
-      { how: "width", src: record("r0"), dst: record("r2") },
-      { how: "copy", src: UNDEFINED_T, dst: UNDEFINED_T },
-    ]);
-    expect(branch.then.at(-1)?.kind).toBe("throw");
-    expect(fn.body.at(-1)?.kind).toBe("throw");
-    expect(fn.locals.filter((local) => local.name === "kind")).toHaveLength(1);
-  });
-
-  test("an arm with a plan of its own converts its payload into the destination union", () => {
-    const f = fixture();
-    delete f.from.discriminant;
-    const route: WidthLift = { how: "discriminantRoute" };
-    const plan: UnionRetagArm[] = [
-      { kind: "own", lift: route },
-      { kind: "direct", route: { tag: 2, lift: { how: "copy" }, values: [] } },
-    ];
-    const uses: { how: string; src: IrType; dst: IrType }[] = [];
-    const fn = buildUnionRetag(
-      "retag",
-      f.from,
-      f.to,
-      plan,
-      loc,
-      (lift, value, dst) => {
-        uses.push({ how: lift.how, src: value.type, dst });
-        return { kind: "varRef", localId: "converted", type: dst, loc };
-      },
-      () => "source",
-    );
-    const branch = fn.body[0]!;
-    if (branch.kind !== "if") throw new Error("missing source tag branch");
-    expect(branch.cond.kind).toBe("unionIsTag");
-    const returned = branch.then[0]!;
-    if (returned.kind !== "return" || returned.value?.kind !== "varRef")
-      throw new Error("missing converted payload");
-    // No wrap: the arm's own plan already answers a value of the union.
-    expect(returned.value.type).toEqual({ kind: "union", unionId: "u1" });
-    expect(uses[0]).toEqual({
-      how: "discriminantRoute",
-      src: record("r0"),
-      dst: { kind: "union", unionId: "u1" },
-    });
-  });
+      }, () => "source");
+      const branch = fn.body[0]!;
+      if (branch.kind !== "if") throw new Error("missing source tag branch");
+      expect(branch.cond.kind).toBe("unionIsTag");
+      const read = branch.then[0]!;
+      if (read.kind !== "varDecl" || read.init?.kind !== "recordGet") throw new Error("missing field capture");
+      expect(read.init.shapeId).toBe("r0");
+      expect(read.init.type).toEqual(fieldType);
+      for (const item of branch.then.slice(1, 3)) {
+        if (item.kind !== "if") throw new Error("missing literal dispatch");
+        expect(item.cond.kind).toBe(comparison);
+        const returned = item.then[0]!;
+        if (returned.kind !== "return" || returned.value?.kind !== "unionWrap") throw new Error("missing destination wrap");
+        expect(returned.value.unionId).toBe("u1");
+      }
+      expect(uses).toEqual([
+        { how: "width", src: record("r0"), dst: record("r1") },
+        { how: "width", src: record("r0"), dst: record("r2") },
+        { how: "copy", src: UNDEFINED_T, dst: UNDEFINED_T },
+      ]);
+      expect(branch.then.at(-1)?.kind).toBe("throw");
+      expect(fn.body.at(-1)?.kind).toBe("throw");
+      expect(fn.locals.filter((local) => local.name === "kind")).toHaveLength(1);
+    },
+  );
 
   test("emits a catchable TypeError for a stranded arm", () => {
     const f = fixture();
     f.from.arms.push(NULL_T);
-    const fn = buildUnionRetag(
-      "retag",
-      f.from,
-      f.to,
-      f.plan()!,
-      loc,
-      (_, value) => value,
-      () => "source",
-    );
+    const fn = buildUnionRetag("retag", f.from, f.to, f.plan()!, loc, (_, value) => value, () => "source");
     const branch = fn.body[2]!;
     if (branch.kind !== "if") throw new Error("missing trap branch");
     const thrown = branch.then[0]!;
-    if (thrown.kind !== "throw" || thrown.value.kind !== "libCall")
-      throw new Error("missing TypeError");
+    if (thrown.kind !== "throw" || thrown.value.kind !== "libCall") throw new Error("missing TypeError");
     expect(thrown.value.type).toEqual({ kind: "object", className: "%TypeError" });
-    expect(thrown.value.args[0]).toMatchObject({
-      value: expect.stringContaining("null is not representable"),
-    });
-  });
-
-  test("keeps the input when every arm has the same tag and type", () => {
-    const from: IrUnionDef = { id: "narrow", arms: [record("r0"), UNDEFINED_T] };
-    const to: IrUnionDef = { id: "wide", arms: [record("r0"), UNDEFINED_T, F64] };
-    const lifts: string[] = [];
-    const fn = buildUnionRetag(
-      "retag",
-      from,
-      to,
-      planUnionRetag(
-        from,
-        to,
-        () => undefined,
-        () => null,
-      )!,
-      loc,
-      (lift, value) => {
-        lifts.push(lift.how);
-        return value;
-      },
-      () => "source",
-    );
-    expect(lifts).toEqual([]);
-    expect(fn.body).toHaveLength(1);
-    const returned = fn.body[0]!;
-    if (returned.kind !== "return" || returned.value?.kind !== "unionRetype")
-      throw new Error("missing retype");
-    expect(returned.value).toMatchObject({ fromId: "narrow", unionId: "wide", tags: [0, 1] });
-    expect(returned.value.value).toMatchObject({ kind: "varRef", localId: "u.0" });
-  });
-
-  test("tests identity arms together and rebuilds renumbered arms", () => {
-    const from: IrUnionDef = { id: "narrow", arms: [record("r0"), STRING, UNDEFINED_T] };
-    const to: IrUnionDef = { id: "wide", arms: [record("r0"), F64, UNDEFINED_T, STRING] };
-    const plan = planUnionRetag(
-      from,
-      to,
-      () => undefined,
-      () => null,
-    )!;
-    const lifts: string[] = [];
-    const fn = buildUnionRetag(
-      "retag",
-      from,
-      to,
-      plan,
-      loc,
-      (lift, value) => {
-        lifts.push(`${lift.how}:${value.type.kind}`);
-        return value;
-      },
-      () => "source",
-    );
-    expect(lifts).toEqual(["copy:string"]);
-    const shared = fn.body[0]!;
-    if (shared.kind !== "if" || shared.cond.kind !== "logical")
-      throw new Error("missing grouped identity test");
-    expect(shared.cond.left).toMatchObject({ kind: "unionIsTag", tag: 0 });
-    expect(shared.cond.right).toMatchObject({ kind: "unionIsTag", tag: 2 });
-    expect(shared.then[0]).toMatchObject({
-      kind: "return",
-      value: { kind: "unionRetype", tags: [0, 2] },
-    });
-    const rebuilt = fn.body[1]!;
-    if (rebuilt.kind !== "if") throw new Error("missing renumbered arm");
-    expect(rebuilt.cond).toMatchObject({ kind: "unionIsTag", tag: 1 });
-    expect(rebuilt.then[0]).toMatchObject({
-      kind: "return",
-      value: { kind: "unionWrap", unionId: "wide", tag: 3 },
-    });
-    expect(fn.body).toHaveLength(3);
-    expect(fn.body.at(-1)?.kind).toBe("throw");
+    expect(thrown.value.args[0]).toMatchObject({ value: expect.stringContaining("null is not representable") });
   });
 
   test("refuses an incomplete build plan", () => {
     const f = fixture();
-    expect(() =>
-      buildUnionRetag(
-        "broken",
-        f.from,
-        f.to,
-        [],
-        loc,
-        (_, value) => value,
-        () => "",
-      ),
-    ).toThrow("incomplete union retag plan");
-  });
-});
-
-describe("promise payload widening", () => {
-  const promise = (inner: IrType): IrType => ({ kind: "promise", inner });
-  const from: IrUnionDef = { id: "pw0", arms: [promise(VOID), UNDEFINED_T] };
-  const pairLift = (to: IrUnionDef) => {
-    const lift = (src: IrType, dst: IrType): WidthLift | null => {
-      if (typeEquals(src, dst)) return { how: "copy" };
-      if (dst.kind === "promise" && src.kind === "promise") return { how: "promiseWiden" };
-      if (dst.kind !== "union") return null;
-      const candidates = to.arms
-        .map((arm, tag) => ({ arm, tag }))
-        .filter(({ arm }) => lift(src, arm) !== null);
-      return candidates.length === 1
-        ? { how: "liftWrap", tag: candidates[0]!.tag, arm: candidates[0]!.arm }
-        : null;
-    };
-    return lift;
-  };
-
-  test("maps the promise arm through the payload widening", () => {
-    const to: IrUnionDef = { id: "pw1", arms: [promise(DYN), UNDEFINED_T] };
-    expect(planUnionRetag(from, to, () => undefined, pairLift(to))).toEqual([
-      { kind: "direct", route: { tag: 0, lift: { how: "promiseWiden" }, values: [] } },
-      { kind: "direct", route: { tag: 1, lift: { how: "copy" }, values: [] } },
-    ]);
-  });
-
-  test("two destination promise arms stay ambiguous", () => {
-    const to: IrUnionDef = { id: "pw2", arms: [promise(DYN), promise(STRING), UNDEFINED_T] };
-    expect(planUnionRetag(from, to, () => undefined, pairLift(to))).toBeNull();
-  });
-
-  test("an equal promise arm keeps the identity copy", () => {
-    const to: IrUnionDef = { id: "pw3", arms: [promise(VOID), UNDEFINED_T] };
-    expect(planUnionRetag(from, to, () => undefined, pairLift(to))).toEqual([
-      { kind: "direct", route: { tag: 0, lift: { how: "copy" }, values: [] } },
-      { kind: "direct", route: { tag: 1, lift: { how: "copy" }, values: [] } },
-    ]);
-    expect(
-      identityRetagTags(
-        from,
-        to,
-        planUnionRetag(from, to, () => undefined, pairLift(to))!,
-      ),
-    ).toEqual([0, 1]);
-  });
-});
-
-describe("checked arm conversion", () => {
-  const narrow = record("n");
-  const wide = record("w");
-  const wide2 = record("w2");
-  const from: IrUnionDef = { id: "cu0", arms: [narrow, UNDEFINED_T] };
-  const shapes: IrRecordShape[] = [
-    { id: "n", fields: [{ name: "role", type: STRING }] },
-    {
-      id: "w",
-      fields: [
-        { name: "role", type: STRING },
-        { name: "content", type: STRING },
-      ],
-    },
-    {
-      id: "w2",
-      fields: [
-        { name: "role", type: STRING },
-        { name: "timestamp", type: F64 },
-      ],
-    },
-  ];
-  const shapeOf = (id: string) => shapes.find((shape) => shape.id === id);
-  const lift = (source: IrType, target: IrType): WidthLift | null =>
-    typeEquals(source, target) ? { how: "copy" } : null;
-  const checkedLift = (source: IrType, target: IrType): WidthLift | null =>
-    source.kind === "record" && target.kind === "record" && !typeEquals(source, target)
-      ? { how: "checkedWiden" }
-      : null;
-
-  test("a narrower record arm enters the one wider arm by the checked lift", () => {
-    const to: IrUnionDef = { id: "cu1", arms: [wide, UNDEFINED_T] };
-    expect(planUnionRetag(from, to, shapeOf, lift, undefined, undefined, checkedLift)).toEqual([
-      { kind: "direct", route: { tag: 0, lift: { how: "checkedWiden" }, values: [] } },
-      { kind: "direct", route: { tag: 1, lift: { how: "copy" }, values: [] } },
-    ]);
-    // The ordinary plan is unchanged: a caller that does not ask the second
-    // question still refuses the conversion.
-    expect(planUnionRetag(from, to, shapeOf, lift)).toBeNull();
-  });
-
-  test("two destination arms accepting the checked lift stay ambiguous", () => {
-    const to: IrUnionDef = { id: "cu2", arms: [wide, wide2, UNDEFINED_T] };
-    expect(planUnionRetag(from, to, shapeOf, lift, undefined, undefined, checkedLift)).toBeNull();
-  });
-
-  test("an arm the ordinary width reaches keeps the checked lift off another arm", () => {
-    const to: IrUnionDef = { id: "cu4", arms: [wide, wide2, UNDEFINED_T] };
-    const widthToW = (source: IrType, target: IrType): WidthLift | null =>
-      typeEquals(source, target)
-        ? { how: "copy" }
-        : target.kind === "record" && target.shapeId === "w"
-          ? { how: "width" }
-          : null;
-    const checkedToW2 = (source: IrType, target: IrType): WidthLift | null =>
-      target.kind === "record" && target.shapeId === "w2" ? { how: "checkedWiden" } : null;
-    expect(
-      planUnionRetag(from, to, shapeOf, widthToW, undefined, undefined, checkedToW2),
-    ).toBeNull();
-  });
-
-  test("an exact arm still wins over the checked lift", () => {
-    const to: IrUnionDef = { id: "cu3", arms: [narrow, wide, UNDEFINED_T] };
-    expect(planUnionRetag(from, to, shapeOf, lift, undefined, undefined, checkedLift)).toEqual([
-      { kind: "direct", route: { tag: 0, lift: { how: "copy" }, values: [] } },
-      { kind: "direct", route: { tag: 2, lift: { how: "copy" }, values: [] } },
-    ]);
-  });
-});
-
-describe("class routes from a stored base arm", () => {
-  const animal: IrType & { kind: "object" } = { kind: "object", className: "Animal" };
-  const dog: IrType & { kind: "object" } = { kind: "object", className: "Dog" };
-  const cat: IrType & { kind: "object" } = { kind: "object", className: "Cat" };
-  const source: IrUnionDef = { id: "cu0", arms: [animal, F64] };
-  const target: IrUnionDef = { id: "cu1", arms: [dog, F64] };
-  const routes = new Map([[0, [{ tag: 0, arm: dog }]]]);
-  const plan = (to: IrUnionDef = target) =>
-    planUnionRetag(
-      source,
-      to,
-      () => undefined,
-      () => null,
-      undefined,
-      routes,
-    );
-
-  test("plans a class test in place of the base arm's identity", () => {
-    expect(plan()).toEqual([
-      { kind: "classRoute", routes: [{ tag: 0, arm: dog }] },
-      { kind: "direct", route: { tag: 1, lift: { how: "copy" }, values: [] } },
-    ]);
-  });
-
-  test("declines when the destination arm is not the routed class", () => {
-    const other: IrUnionDef = { id: "cu2", arms: [cat, F64] };
-    expect(plan(other)).toBeNull();
-  });
-
-  test("declines when the routed class has no destination arm", () => {
-    const absent: IrUnionDef = { id: "cu3", arms: [F64] };
-    expect(plan(absent)).toBeNull();
-  });
-
-  test("builds the class test, the checked downcast and the trap after it", () => {
-    const fn = buildUnionRetag(
-      "retag",
-      source,
-      target,
-      plan()!,
-      loc,
-      (_, value) => value,
-      () => "source",
-    );
-    const branch = fn.body[1]!;
-    if (branch.kind !== "if") throw new Error("missing class route branch");
-    expect(branch.cond).toMatchObject({ kind: "unionIsTag", tag: 0 });
-    expect(branch.then[0]).toMatchObject({
-      kind: "if",
-      cond: { kind: "instanceOf", className: "Dog" },
-      then: [
-        {
-          kind: "return",
-          value: {
-            kind: "unionWrap",
-            unionId: "cu1",
-            tag: 0,
-            value: { kind: "downcast", type: { kind: "object", className: "Dog" } },
-          },
-        },
-      ],
-    });
-    const thrown = branch.then[1]!;
-    if (thrown.kind !== "throw" || thrown.value.kind !== "libCall")
-      throw new Error("missing TypeError after the class tests");
-    expect(thrown.value.args[0]).toMatchObject({
-      value: expect.stringContaining("is not representable in the target union"),
-    });
+    expect(() => buildUnionRetag("broken", f.from, f.to, [], loc, (_, value) => value, () => "")).toThrow("incomplete union retag plan");
   });
 });

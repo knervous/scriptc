@@ -1,387 +1,35 @@
+// This file was modified from scriptc (Apache-2.0); see MODIFICATIONS.md.
 import { AstDecodeError } from "./ast-bytes.js";
-import {
-  AstKind,
-  AstModifierFlags,
-  AstNodeFlags,
-  KIND_NODE_LIST,
-  astChildOrder,
-} from "./ast-schema.generated.js";
+import { AstKind, AstModifierFlags, AstNodeFlags, KIND_NODE_LIST, astChildOrder } from "./ast-schema.generated.js";
 import { astLineOfPosition, astLineStarts, astSkipTrivia } from "./ast-text.js";
-import {
-  AstWireFile,
-  PREORDER_LIST,
-  parseAstNodeHandle,
-  type AstFileReference,
-  type AstNodeHandle,
-} from "./ast-wire.js";
-import type { ImportClause, SourceFile } from "./ast-types.js";
+import { AstWireFile, PREORDER_LIST, parseAstNodeHandle, type AstFileReference } from "./ast-wire.js";
+import type { SourceFile } from "./ast-types.js";
 import { SyntaxKind, NodeFlags } from "./enums.js";
 
-/** Receives every read of a source file's raw text, with the file's name and
- * the text that was read. The tokens of a file are what the checker and the
- * syntax tree carry; anything a reader takes from the text beside them (the
- * spelling between two tokens, a comment, a line number, whether a word
- * occurs anywhere) is reported here, so a cache can tell an edit that leaves
- * every such answer unchanged from one that does not.
- *
- * A reader that says what it derives is reported precisely: a `range` of the
- * text (a node's own text, its leading trivia), the line and character of a
- * `position`, or the answer of a predicate over the text or a range of it
- * (`fact`; `start` is negative for the whole text). Every other read of the
- * text is `whole`: the reader may depend on any of it.
- *
- * A pass that compiles a file in another form says how the form is made
- * from the text (`rewrite`, SourceTextRewrite): `rewritten` is the form,
- * and reads of a syntax tree that holds it are reads of that form. */
-export interface SourceTextObserver {
-  whole(fileName: string): void;
-  rewrite(fileName: string, text: string, rewrite: SourceTextRewrite, rewritten: string): void;
-  range(fileName: string, text: string, start: number, end: number, span: SourceTextSpan): void;
-  position(fileName: string, text: string, position: number): void;
-  fact(
-    fileName: string,
-    text: string,
-    predicate: SourceTextPredicate,
-    result: boolean,
-    start: number,
-    end: number,
-    span: SourceTextSpan,
-  ): void;
-}
-
-/** Where the two offsets of a range stand among the tokens. An offset is
- * either the start of a token or the place the token before it ended (a
- * node's `pos` and `end`); where two tokens touch, and at the start of the
- * file, one number is both, and only the reader knows which it means. Bit 0
- * is set when the range starts at a token's start, bit 1 when it ends at
- * one. */
-export type SourceTextSpan = 0 | 1 | 2 | 3;
-/** From a token's start to a token's end: a node's own text. */
-export const TOKEN_SPAN: SourceTextSpan = 1;
-/** From the end of the token before a node (its `pos`) to a token's end: a
- * node's text with its leading comments and whitespace. */
-export const FULL_SPAN: SourceTextSpan = 0;
-/** From the end of the token before a node (its `pos`) to a token's start:
- * the comments and whitespace that lead up to that token. */
-export const LEADING_SPAN: SourceTextSpan = 2;
-/** From a token's start to a later token's start: text with the comments,
- * whitespace and separators that follow it, up to the next thing. */
-export const UP_TO_TOKEN_SPAN: SourceTextSpan = 3;
-
-/** A form of a source file that keeps every offset of its text: the text of
- * each of `blanks` replaced by spaces (line breaks stay), and `tail`
- * appended on lines of its own. `blanks` holds `start, end` pairs in order,
- * apart from each other, each offset anchored as a range's are
- * (SourceTextSpan): doubled, plus one when it is the start of a token rather
- * than the place the token before it ended. A token-equivalent version of
- * the file has the same form: its tokens place the blanks, and `tail` is
- * text the rewriter made from the tokens. */
-export interface SourceTextRewrite {
-  blanks: number[];
-  tail: string;
-}
-
-/** `text` in the form `rewrite` describes (SourceTextRewrite). */
-export function rewrittenSourceText(text: string, rewrite: SourceTextRewrite): string {
-  const { blanks, tail } = rewrite;
-  let out = "";
-  let at = 0;
-  for (let index = 0; index + 1 < blanks.length; index += 2) {
-    const start = blanks[index]! >> 1;
-    const end = blanks[index + 1]! >> 1;
-    out += text.slice(at, start);
-    for (let offset = start; offset < end; offset++) {
-      const code = text.charCodeAt(offset);
-      out += code === 10 || code === 13 ? text[offset] : " ";
-    }
-    at = end;
-  }
-  out += text.slice(at);
-  return tail === "" ? out : `${out}${out.endsWith("\n") ? "" : "\n"}${tail}`;
-}
-
-/** Where the tail of `rewrite` starts in the form of `text`: after the line
- * break that ends the text, which the form adds when the text has none. */
-export function rewrittenTailStart(text: string, rewrite: SourceTextRewrite): number {
-  return rewrite.tail === "" || text.endsWith("\n") ? text.length : text.length + 1;
-}
-
-/** One span of a rewrite's blanks, before it is anchored. */
-export interface SourceTextBlank {
-  start: number;
-  end: number;
-  span: SourceTextSpan;
-}
-
-/** The text of source file `sf` with `blanks` blanked and `tail` appended
- * (SourceTextRewrite), reported as that rewrite instead of a read of the
- * text: the caller takes nothing else from it. Blanks that start inside an
- * earlier one are dropped. */
-export function sourceTextRewritten(
-  sf: AstNode,
-  blanks: readonly SourceTextBlank[],
-  tail: string,
-): string {
-  const anchored: number[] = [];
-  let at = 0;
-  for (const blank of [...blanks].sort((a, b) => a.start - b.start)) {
-    if (blank.start < at || blank.end < blank.start) continue;
-    anchored.push(blank.start * 2 + (blank.span & 1), blank.end * 2 + ((blank.span >> 1) & 1));
-    at = blank.end;
-  }
-  const rewrite: SourceTextRewrite = { blanks: anchored, tail };
-  const file = treeOf(sf);
-  const text = file === undefined ? (sf.text ?? "") : file.sourceText();
-  const rewritten = rewrittenSourceText(text, rewrite);
-  if (sourceTextObserver !== undefined && file !== undefined)
-    sourceTextObserver.rewrite(file.root.fileName, text, rewrite, rewritten);
-  return rewritten;
-}
-
-/** A question about text that can be asked again of another version of it:
- * whether it includes `needle`, or whether the regular expression `source`
- * with `flags` matches it. */
-export type SourceTextPredicate =
-  | { kind: "includes"; needle: string }
-  | { kind: "matches"; source: string; flags: string };
-
-/** The function that answers `predicate` over a text. */
-export function sourceTextPredicateTest(predicate: SourceTextPredicate): (text: string) => boolean {
-  if (predicate.kind === "includes") return (text) => text.includes(predicate.needle);
-  const pattern = new RegExp(predicate.source, predicate.flags);
-  return (text) => pattern.test(text);
-}
-
-let sourceTextObserver: SourceTextObserver | undefined;
-
-/** Installs the observer of raw source text reads (SourceTextObserver). */
-export function observeSourceText(observer: SourceTextObserver | undefined): void {
-  sourceTextObserver = observer;
-}
-
-/** The installed observer of raw source text reads. */
-export function observedSourceText(): SourceTextObserver | undefined {
-  return sourceTextObserver;
-}
-
-/** The syntax tree file of source file `sf`, or undefined for a source
- * file that is not one of this layer's trees (a stand-in a test passes):
- * such a file has only its `text`, and nothing observes reads of it. */
-function treeOf(sf: AstNode): AstFile | undefined {
-  const file: AstFile | undefined = sf.file;
-  return file !== undefined && file.isSourceFile() ? file : undefined;
-}
-
-function includesPredicate(
-  sf: AstNode,
-  needle: string,
-  start: number,
-  end: number,
-  span: SourceTextSpan,
-): boolean {
-  const file = treeOf(sf);
-  const text = file === undefined ? (sf.text ?? "") : file.sourceText();
-  const result = (start < 0 ? text : text.substring(start, end)).includes(needle);
-  if (sourceTextObserver !== undefined && file !== undefined)
-    sourceTextObserver.fact(
-      file.root.fileName,
-      text,
-      { kind: "includes", needle },
-      result,
-      start,
-      end,
-      span,
-    );
-  return result;
-}
-
-function matchesPredicate(
-  sf: AstNode,
-  pattern: RegExp,
-  start: number,
-  end: number,
-  span: SourceTextSpan,
-): boolean {
-  // The pattern carries no state between calls.
-  if (pattern.global || pattern.sticky)
-    throw new Error("a source text pattern takes no g or y flag");
-  const file = treeOf(sf);
-  const text = file === undefined ? (sf.text ?? "") : file.sourceText();
-  const result = pattern.test(start < 0 ? text : text.substring(start, end));
-  if (sourceTextObserver !== undefined && file !== undefined)
-    sourceTextObserver.fact(
-      file.root.fileName,
-      text,
-      { kind: "matches", source: pattern.source, flags: pattern.flags },
-      result,
-      start,
-      end,
-      span,
-    );
-  return result;
-}
-
-/** Whether the text of source file `sf` includes `needle`, reported as that
- * fact instead of a read of the whole text. */
-export function sourceTextIncludes(sf: AstNode, needle: string): boolean {
-  return includesPredicate(sf, needle, -1, -1, TOKEN_SPAN);
-}
-
-/** Whether `pattern` (without the g and y flags) matches the text of source
- * file `sf`, reported as that fact instead of a read of the whole text. */
-export function sourceTextMatches(sf: AstNode, pattern: RegExp): boolean {
-  return matchesPredicate(sf, pattern, -1, -1, TOKEN_SPAN);
-}
-
-/** sourceTextIncludes over the text from `start` to `end` (offsets as for
- * sourceTextRange): the answer is reported, not the range's text. */
-export function sourceTextRangeIncludes(
-  sf: AstNode,
-  start: number,
-  end: number,
-  needle: string,
-  span: SourceTextSpan = TOKEN_SPAN,
-): boolean {
-  return includesPredicate(sf, needle, start, end, span);
-}
-
-/** sourceTextMatches over the text from `start` to `end` (offsets as for
- * sourceTextRange): the answer is reported, not the range's text. */
-export function sourceTextRangeMatches(
-  sf: AstNode,
-  start: number,
-  end: number,
-  pattern: RegExp,
-  span: SourceTextSpan = TOKEN_SPAN,
-): boolean {
-  return matchesPredicate(sf, pattern, start, end, span);
-}
-
-/** The text of source file `sf` from `start` to `end`, reported as a read of
- * that range. `span` says where the offsets stand among the tokens; an
- * offset that is not where it says has no counterpart in an edited version
- * of the file, and the read then counts as one of the whole text when a
- * cache replays it. */
-export function sourceTextRange(
-  sf: AstNode,
-  start: number,
-  end: number,
-  span: SourceTextSpan = TOKEN_SPAN,
-): string {
-  const file = treeOf(sf);
-  if (file === undefined) return (sf.text ?? "").substring(start, end);
-  file.noteTextRange(start, end, span);
-  return file.sourceText().substring(start, end);
-}
-
-/** The text of source file `sf` for a consumer that carries it and derives
- * nothing from it: the build's record of its sources (diagnostic frames,
- * debug information, the cache's copy), and content digests that key a
- * memo. Not reported. A consumer that inspects the text reads `sf.text`. */
-export function carriedSourceText(sf: AstNode): string {
-  return treeOf(sf)?.sourceText() ?? sf.text ?? "";
-}
-
-/** A list of child nodes with the list's own position, the shape of tsc-ts's
- * NodeList. The file keeps the nodes array, not this object: each read of a
- * list field returns a new AstNodeList over the same array, so `nodes` keeps
- * its identity and a decoded file holds no list objects. The position is
- * decoded from the wire when it is read; most readers only use `nodes`. */
-/** An import clause's `phaseModifier` for TypeScript 7.1's `import source`,
- * which TypeScript 7.0's syntax kinds have no keyword for. */
-export const SOURCE_PHASE_MODIFIER = -1;
-
-/** Whether `clause` is an `import source` clause (`SOURCE_PHASE_MODIFIER`). */
-export function isSourcePhaseImport(clause: ImportClause | undefined): boolean {
-  if (clause === undefined) return false;
-  const phase: number | undefined = clause.phaseModifier;
-  return phase === SOURCE_PHASE_MODIFIER;
-}
-
-export class AstNodeList<T extends AstNode = AstNode> {
-  constructor(
-    private readonly wire: AstWireFile,
-    private readonly index: number,
-    readonly nodes: readonly T[],
-  ) {}
-
-  get pos(): number {
-    return this.wire.pos(this.index) >>> 0;
-  }
-
-  get end(): number {
-    return this.wire.end(this.index) >>> 0;
-  }
-
-  /** Whether a comma follows the last node before the list's end. */
-  hasTrailingComma(): boolean {
-    const last = this.nodes[this.nodes.length - 1];
-    if (last === undefined) return false;
-    const text = last.file.sourceText();
-    const next = astSkipTrivia(text, last.end, false, false);
-    return next < this.end && text.charCodeAt(next) === 44;
-  }
-}
-
-/** A declaration's modifiers, with the flags of all of them: tsc-ts's
- * ModifierList. */
-export class AstModifierList<T extends AstNode = AstNode> extends AstNodeList<T> {
-  get modifierFlags(): number {
-    let result = 0;
-    for (const modifier of this.nodes) result |= astModifierFlag(modifier.kind);
-    return result;
-  }
-}
-
 /** One immutable AST response owns one object per node and one array per
- * list.
- * Parent access is lazy, so resolving a checker handle near the bottom
+ * list. Parent access is lazy, so resolving a checker handle near the bottom
  * of a deep tree never recursively constructs its ancestors. */
-export interface AstFileOptions {
-  /** Answer the reference an assignment, a `++`/`--` update or a for-in/of
-   * head writes without the parentheses and non-null assertions around it.
-   * TypeScript accepts both around a target (`(x) = 1`, `a[i]! += 1`) and
-   * both are erased at run time. With this option the writer's `left`,
-   * `operand` or `initializer` is the reference itself and the reference's
-   * `parent` is the writer, so every reader of a write target sees one
-   * shape. Positions stay the source's: the reference keeps its own span.
-   * Files read for other purposes keep TypeScript's exact tree. */
-  writeTargets?: boolean;
-}
-
-const NO_CHILD_INDICES = new Uint32Array(0);
-const NO_CHILD_NODES: AstNode[] = [];
-
 export class AstFile {
   readonly wire: AstWireFile;
   readonly root: AstNode;
-  // Wire ids are bounded dense indices. Holes mark unresolved slots; present
-  // entries hold concrete nodes/lists without an optional payload wrapper.
-  private readonly nodes: AstNode[];
-  private readonly lists: AstNode[][];
+  // Wire ids are bounded dense indices. Direct slots preserve lazy object
+  // creation and avoid hashing and temporary optional boxes on every read.
+  private readonly nodes: (AstNode | undefined)[];
+  private readonly lists: (AstNode[] | undefined)[];
   private readonly references = new Map<number, AstFileReference[]>();
   private readonly structuredNodes = new Map<number, AstNode[]>();
   private readonly strings = new Map<number, string[]>();
   private lines: number[] | undefined;
-  /** Resolved named children, eight slots per node; empty until the first
-   * named child is read. */
-  private childIndices: Uint32Array = NO_CHILD_INDICES;
-  /** The root source file's name (AstNode.fileName). */
-  private rootFileName: string | undefined;
-
-  /** Whether nodes answer write targets without their wrappers (see
-   * AstFileOptions.writeTargets). */
-  readonly writeTargets: boolean;
+  private childIndices: Uint32Array | undefined;
 
   constructor(
     bytes: Uint8Array,
+    private readonly listMetadata?: (nodes: AstNode[], pos: number, end: number) => void,
     private readonly materialized?: () => void,
-    options: AstFileOptions = {},
   ) {
-    this.writeTargets = options.writeTargets === true;
     this.wire = new AstWireFile(bytes);
-    this.nodes = new Array<AstNode>(this.wire.nodeCount);
-    this.lists = new Array<AstNode[]>(this.wire.nodeCount);
+    this.nodes = new Array<AstNode | undefined>(this.wire.nodeCount);
+    this.lists = new Array<AstNode[] | undefined>(this.wire.nodeCount);
     this.root = new AstNode(this, 1);
     this.nodes[1] = this.root;
   }
@@ -390,36 +38,28 @@ export class AstFile {
    * consumers require this kind check; a type or signature root is valid
    * for typeToTypeNode/signatureToSignatureDeclaration. */
   get sourceFile(): SourceFile {
-    if (this.root.kind !== SyntaxKind.SourceFile)
-      throw new AstDecodeError("expected a source file root");
+    if (this.root.kind !== SyntaxKind.SourceFile) throw new AstDecodeError("expected a source file root");
     return this.root as SourceFile;
   }
 
   node(index: number): AstNode {
-    const existing: AstNode | undefined = this.nodes[index];
+    const existing = this.nodes[index];
     if (existing !== undefined) return existing;
-    if (index === 0 || this.wire.kind(index) === KIND_NODE_LIST)
-      throw new AstDecodeError("expected a node index");
+    if (index === 0 || this.wire.kind(index) === KIND_NODE_LIST) throw new AstDecodeError("expected a node index");
     const node = new AstNode(this, index);
     this.nodes[index] = node;
     this.materialized?.();
     return node;
   }
 
-  list(index: number): AstNodeList {
-    return new AstNodeList(this.wire, index, this.listNodes(index));
-  }
-  modifierList(index: number): AstModifierList {
-    return new AstModifierList(this.wire, index, this.listNodes(index));
-  }
-  private listNodes(index: number): AstNode[] {
-    let nodes = this.lists[index];
-    if (nodes === undefined) {
-      nodes = [];
-      for (const child of this.wire.list(index)) nodes.push(this.node(child));
-      this.lists[index] = nodes;
-      this.materialized?.();
-    }
+  list(index: number): AstNode[] {
+    const existing = this.lists[index];
+    if (existing !== undefined) return existing;
+    const nodes: AstNode[] = [];
+    for (const child of this.wire.list(index)) nodes.push(this.node(child));
+    this.listMetadata?.(nodes, this.wire.pos(index) >>> 0, this.wire.end(index) >>> 0);
+    this.lists[index] = nodes;
+    this.materialized?.();
     return nodes;
   }
 
@@ -427,16 +67,15 @@ export class AstFile {
     return this.namedChildAt(node, astChildOrder(node.kind, name));
   }
 
-  /** The child in wire slot `order` (astChildOrder), or 0 when the slot is
-   * negative or empty. */
+  /** The child in wire slot `order` (astChildOrder), or 0 when the slot is negative or empty. */
   namedChildAt(node: AstNode, order: number): number {
     if (node.file !== this) throw new AstDecodeError("named child belongs to another source file");
     if (order < 0) return 0;
-    const mask = node.data >>> 30 === 0 ? node.data & 0xff : 0xff;
+    const mask = (node.data >>> 30) === 0 ? node.data & 0xff : 0xff;
     if ((mask & (1 << order)) === 0) return 0;
     const slot = node.index * 8 + order;
-    let indices = this.childIndices;
-    if (indices.length !== 0) {
+    const indices = this.childIndices;
+    if (indices !== undefined) {
       const cached = indices[slot]!;
       if (cached !== 0) return cached;
     }
@@ -444,24 +83,16 @@ export class AstFile {
     // The pinned wire has at most eight named children per node. One packed
     // table avoids per-node arrays; allocate it only after successful access
     // so malformed siblings still fail lazily in the checked wire decoder.
-    if (indices.length === 0) {
-      indices = new Uint32Array(this.wire.nodeCount * 8);
-      this.childIndices = indices;
-    }
-    indices[slot] = index;
+    if (this.childIndices === undefined) this.childIndices = new Uint32Array(this.wire.nodeCount * 8);
+    this.childIndices[slot] = index;
     return index;
   }
 
   resolve(handle: string): AstNode {
-    return this.resolveHandle(parseAstNodeHandle(handle));
-  }
-
-  resolveHandle(parsed: AstNodeHandle): AstNode {
-    if (parsed.path !== this.root.path)
-      throw new AstDecodeError("node handle belongs to another source file");
+    const parsed = parseAstNodeHandle(handle);
+    if (parsed.path !== this.root.path) throw new AstDecodeError("node handle belongs to another source file");
     const node = this.node(parsed.index);
-    if (node.kind !== this.wire.kindFromWire(parsed.kind))
-      throw new AstDecodeError("node handle kind does not match the response");
+    if (node.kind !== parsed.kind) throw new AstDecodeError("node handle kind does not match the response");
     return node;
   }
 
@@ -493,49 +124,8 @@ export class AstFile {
     return result;
   }
 
-  /** Whether the root is a source file (not a checker-made fragment). */
-  isSourceFile(): boolean {
-    return this.root.kind === SyntaxKind.SourceFile;
-  }
-
-  /** The root's text, without reporting a read: for this layer's own
-   * token arithmetic (a token's start, a trailing comma), whose answers
-   * are the same in every token-equivalent version. */
-  sourceText(): string {
-    return this.root.unobservedText() ?? "";
-  }
-
-  /** Reports a read of this file's whole raw text. */
-  noteSourceText(): void {
-    if (sourceTextObserver !== undefined && this.root.kind === SyntaxKind.SourceFile)
-      sourceTextObserver.whole(this.root.fileName);
-  }
-
-  /** Reports a read of the text from `start` to `end`. */
-  noteTextRange(start: number, end: number, span: SourceTextSpan): void {
-    if (sourceTextObserver !== undefined && this.root.kind === SyntaxKind.SourceFile)
-      sourceTextObserver.range(this.root.fileName, this.sourceText(), start, end, span);
-  }
-
-  /** Reports a read of the line and character of `position`. */
-  noteTextPosition(position: number): void {
-    if (sourceTextObserver !== undefined && this.root.kind === SyntaxKind.SourceFile)
-      sourceTextObserver.position(this.root.fileName, this.sourceText(), position);
-  }
-
-  /** The file name of the source file node at `index`; the root's is
-   * read once. */
-  sourceFileName(index: number): string {
-    if (index === 1 && this.rootFileName !== undefined) return this.rootFileName;
-    const name = this.wire.string(this.wire.extendedWord(index, 4));
-    if (index === 1) this.rootFileName = name;
-    return name;
-  }
-
-  /** The offsets at which lines start. Not reported: the caller reports
-   * what it takes from them (one position's line, or all of them). */
   lineStarts(): number[] {
-    if (this.lines === undefined) this.lines = astLineStarts(this.sourceText());
+    if (this.lines === undefined) this.lines = astLineStarts(this.root.text ?? "");
     return this.lines;
   }
 }
@@ -543,73 +133,6 @@ export class AstFile {
 /** Concrete native layout shared by every syntax kind. Kind-specific
  * properties are views over the wire; they never copy identity-bearing
  * nodes into structural records. */
-/* Write targets without their wrappers (AstFileOptions.writeTargets). */
-
-function isTargetWrapper(node: AstNode): boolean {
-  return node.kind === AstKind.ParenthesizedExpression || node.kind === AstKind.NonNullExpression;
-}
-
-function unwrapTarget(node: AstNode): AstNode {
-  let target = node;
-  while (isTargetWrapper(target)) {
-    const inner = target.childNode("expression");
-    if (inner === undefined) break;
-    target = inner;
-  }
-  return target;
-}
-
-/** Whether `field` of `node` is a write target: an assignment's left side,
- * a `++`/`--` operand, or a for-in/of head that declares nothing. */
-function writesTarget(node: AstNode, field: "left" | "operand" | "initializer"): boolean {
-  switch (node.kind) {
-    case AstKind.BinaryExpression: {
-      if (field !== "left") return false;
-      const operator = node.childNode("operatorToken")?.kind;
-      return (
-        operator !== undefined &&
-        operator >= AstKind.FirstAssignment &&
-        operator <= AstKind.LastAssignment
-      );
-    }
-    case AstKind.PrefixUnaryExpression:
-    case AstKind.PostfixUnaryExpression:
-      return (
-        field === "operand" &&
-        (node.operator === AstKind.PlusPlusToken || node.operator === AstKind.MinusMinusToken)
-      );
-    case AstKind.ForInStatement:
-    case AstKind.ForOfStatement:
-      return (
-        field === "initializer" &&
-        node.childNode("initializer")?.kind !== AstKind.VariableDeclarationList
-      );
-    default:
-      return false;
-  }
-}
-
-/** The parent of `node`, whose syntactic parent `wrapper` is a parenthesis
- * or a non-null assertion: the writer when the wrappers around `node` are
- * the whole target of an assignment, update or for-in/of head, and
- * `wrapper` otherwise. */
-function writerOf(node: AstNode, wrapper: AstNode): AstNode {
-  let outer = wrapper;
-  for (;;) {
-    const up = outer.parent;
-    if (up === undefined) return wrapper;
-    if (isTargetWrapper(up)) {
-      outer = up;
-      continue;
-    }
-    for (const field of ["left", "operand", "initializer"] as const) {
-      if (writesTarget(up, field) && up.childNode(field) === outer && unwrapTarget(outer) === node)
-        return up;
-    }
-    return wrapper;
-  }
-}
-
 export class AstNode {
   readonly kind: SyntaxKind;
   readonly pos: number;
@@ -618,18 +141,8 @@ export class AstNode {
   readonly data: number;
   private parentResolved = false;
   private parentCache: AstNode | undefined;
-  /** The node's text, read once: the frontend asks the same identifiers
-   * for their text many times. */
-  private textResolved = false;
-  private textCache: string | undefined;
-  /** Named child nodes by wire slot, filled as they are read; empty until
-   * the first one is. Slots the child mask leaves empty are never stored. */
-  private childNodes: AstNode[] = NO_CHILD_NODES;
 
-  constructor(
-    readonly file: AstFile,
-    readonly index: number,
-  ) {
+  constructor(readonly file: AstFile, readonly index: number) {
     // Materialize immutable scalar metadata once. Lowering repeatedly reads
     // it while refining the same node, without needing another wire decode.
     const wire = file.wire;
@@ -640,38 +153,17 @@ export class AstNode {
     this.data = wire.data(index);
   }
 
-  get id(): string {
-    return `${this.index}.${this.file.wire.kindOnWire(this.kind)}.${this.file.root.path}`;
-  }
+  get id(): string { return `${this.index}.${this.kind}.${this.file.root.path}`; }
   get parent(): AstNode | undefined {
     if (!this.parentResolved) {
       const index = this.file.wire.semanticParent(this.index);
-      const parent = index === 0 || index === this.index ? undefined : this.file.node(index);
-      this.parentCache =
-        parent !== undefined && this.file.writeTargets && isTargetWrapper(parent)
-          ? writerOf(this, parent)
-          : parent;
+      this.parentCache = index === 0 || index === this.index ? undefined : this.file.node(index);
       this.parentResolved = true;
     }
     return this.parentCache;
   }
-  get text(): string | undefined {
-    // A source file's text read as a string: the reader may depend on any
-    // of it (see SourceTextObserver).
-    if (this.index === 1) this.file.noteSourceText();
-    return this.unobservedText();
-  }
-  /** `text` without reporting a read of a source file's text. */
-  unobservedText(): string | undefined {
-    if (!this.textResolved) {
-      this.textCache = this.file.wire.text(this.index);
-      this.textResolved = true;
-    }
-    return this.textCache;
-  }
-  get rawText(): string | undefined {
-    return this.file.wire.rawText(this.index);
-  }
+  get text(): string | undefined { return this.file.wire.text(this.index); }
+  get rawText(): string | undefined { return this.file.wire.rawText(this.index); }
 
   childNode(name: string): AstNode | undefined {
     const index = this.file.namedChild(this, name);
@@ -679,72 +171,33 @@ export class AstNode {
   }
   /** childNode by wire slot, as the generated getters select it. */
   childNodeAt(order: number): AstNode | undefined {
-    let nodes = this.childNodes;
-    if (order >= 0 && order < nodes.length) {
-      const cached = nodes[order];
-      if (cached !== undefined) return cached;
-    }
     const index = this.file.namedChildAt(this, order);
-    if (index === 0) return undefined;
-    const child = this.file.node(index);
-    if (nodes.length === 0) {
-      const mask = this.data >>> 30 === 0 ? this.data & 0xff : 0xff;
-      nodes = new Array<AstNode>(32 - Math.clz32(mask));
-      this.childNodes = nodes;
-    }
-    nodes[order] = child;
-    return child;
+    return index === 0 ? undefined : this.file.node(index);
   }
-  childListAt(order: number): AstNodeList | undefined {
+  childListAt(order: number): AstNode[] | undefined {
     const index = this.file.namedChildAt(this, order);
     return index === 0 ? undefined : this.file.list(index);
   }
-  childAt(order: number): AstNode | AstNodeList | undefined {
+  childAt(order: number): AstNode | AstNode[] | undefined {
     const index = this.file.namedChildAt(this, order);
     if (index === 0) return undefined;
-    return this.file.wire.kind(index) === KIND_NODE_LIST
-      ? this.file.list(index)
-      : this.file.node(index);
+    return this.file.wire.kind(index) === KIND_NODE_LIST ? this.file.list(index) : this.file.node(index);
   }
-  childList(name: string): AstNodeList | undefined {
+  childList(name: string): AstNode[] | undefined {
     const index = this.file.namedChild(this, name);
     return index === 0 ? undefined : this.file.list(index);
   }
-  child(name: string): AstNode | AstNodeList | undefined {
+  child(name: string): AstNode | AstNode[] | undefined {
     const index = this.file.namedChild(this, name);
     if (index === 0) return undefined;
-    return this.file.wire.kind(index) === KIND_NODE_LIST
-      ? this.file.list(index)
-      : this.file.node(index);
+    return this.file.wire.kind(index) === KIND_NODE_LIST ? this.file.list(index) : this.file.node(index);
   }
 
-  /** Append semantic child handles without giving a traversal worklist an
-   * owning reference to every pending node. Lists still pass through the
-   * checked, identity-preserving cache used by forEachChild. */
-  appendChildIndices(indices: number[]): void {
-    const file = this.file;
-    const wire = file.wire;
-    for (let index = wire.firstChild(this.index); index !== 0; index = wire.next(index)) {
-      if (wire.parent(index) !== this.index)
-        throw new AstDecodeError("sibling belongs to another parent");
-      const kind = wire.kind(index);
-      if (kind === KIND_NODE_LIST) {
-        for (const node of file.list(index).nodes) indices.push(node.index);
-      } else if (kind !== AstKind.JSDoc) {
-        indices.push(index);
-      }
-    }
-  }
-
-  forEachChild<T>(
-    visitNode: (node: AstNode) => T,
-    visitList?: (nodes: AstNodeList) => T,
-  ): T | undefined {
+  forEachChild<T>(visitNode: (node: AstNode) => T, visitList?: (nodes: readonly AstNode[]) => T): T | undefined {
     const wire = this.file.wire;
     const tree = wire.preorder();
     if (tree === null) return this.forEachLinkedChild(visitNode, visitList);
-    // In the checked preorder tree, the first child follows its parent and
-    // each later child starts where the previous child's subtree ends.
+    // In the checked preorder tree, the first child follows its parent and each later child starts where the previous child's subtree ends.
     const kinds = tree.kinds;
     const ends = tree.ends;
     const stop = ends[this.index]!;
@@ -762,16 +215,12 @@ export class AstNode {
   }
 
   /** forEachChild through the sibling and parent links. */
-  private forEachLinkedChild<T>(
-    visitNode: (node: AstNode) => T,
-    visitList?: (nodes: AstNodeList) => T,
-  ): T | undefined {
+  private forEachLinkedChild<T>(visitNode: (node: AstNode) => T, visitList?: (nodes: readonly AstNode[]) => T): T | undefined {
     const wire = this.file.wire;
     // Walk the immutable sibling links directly. Repeated semantic scans
     // should not allocate and free a temporary child-index array per node.
     for (let index = wire.firstChild(this.index); index !== 0; index = wire.next(index)) {
-      if (wire.parent(index) !== this.index)
-        throw new AstDecodeError("sibling belongs to another parent");
+      if (wire.parent(index) !== this.index) throw new AstDecodeError("sibling belongs to another parent");
       const kind = wire.kind(index);
       if (kind === KIND_NODE_LIST) {
         const result = this.visitChildList(index, visitNode, visitList);
@@ -784,14 +233,10 @@ export class AstNode {
     return undefined;
   }
 
-  private visitChildList<T>(
-    index: number,
-    visitNode: (node: AstNode) => T,
-    visitList?: (nodes: AstNodeList) => T,
-  ): T | undefined {
+  private visitChildList<T>(index: number, visitNode: (node: AstNode) => T, visitList?: (nodes: readonly AstNode[]) => T): T | undefined {
     const list = this.file.list(index);
     if (visitList !== undefined) return visitList(list);
-    for (const node of list.nodes) {
+    for (const node of list) {
       const result = visitNode(node);
       if (result) return result;
     }
@@ -806,17 +251,12 @@ export class AstNode {
     return docs.length === 0 ? undefined : docs;
   }
 
-  getSourceFile(): SourceFile {
-    return this.file.sourceFile;
-  }
+  getSourceFile(): SourceFile { return this.file.sourceFile; }
   getStart(sourceFile?: AstNode, includeJsDocComment?: boolean): number {
     if (this.pos === this.end && this.pos >= 0 && this.kind !== AstKind.EndOfFile) return this.pos;
     const source = sourceFile ?? this.file.root;
-    const text = source.file.sourceText();
-    if (
-      (this.kind >= AstKind.FirstJSDocNode && this.kind <= AstKind.LastJSDocNode) ||
-      this.kind === AstKind.JsxText
-    ) {
+    const text = source.text ?? "";
+    if ((this.kind >= AstKind.FirstJSDocNode && this.kind <= AstKind.LastJSDocNode) || this.kind === AstKind.JsxText) {
       return astSkipTrivia(text, this.pos, true, false);
     }
     if (includeJsDocComment) {
@@ -825,138 +265,69 @@ export class AstNode {
     }
     return astSkipTrivia(text, this.pos, false, (this.flags & AstNodeFlags.JSDoc) !== 0);
   }
-  getFullStart(): number {
-    return this.pos;
-  }
-  getEnd(): number {
-    return this.end;
-  }
-  getWidth(sourceFile?: AstNode): number {
-    return this.end - this.getStart(sourceFile);
-  }
-  getFullWidth(): number {
-    return this.end - this.pos;
-  }
-  getLeadingTriviaWidth(sourceFile?: AstNode): number {
-    return this.getStart(sourceFile) - this.pos;
-  }
-  getFullText(sourceFile?: AstNode): string {
-    const source = sourceFile ?? this.file.root;
-    source.file.noteTextRange(this.pos, this.end, FULL_SPAN);
-    return source.file.sourceText().substring(this.pos, this.end);
-  }
+  getFullStart(): number { return this.pos; }
+  getEnd(): number { return this.end; }
+  getWidth(sourceFile?: AstNode): number { return this.end - this.getStart(sourceFile); }
+  getFullWidth(): number { return this.end - this.pos; }
+  getLeadingTriviaWidth(sourceFile?: AstNode): number { return this.getStart(sourceFile) - this.pos; }
+  getFullText(sourceFile?: AstNode): string { return ((sourceFile ?? this.file.root).text ?? "").substring(this.pos, this.end); }
   getText(sourceFile?: AstNode): string {
     const source = sourceFile ?? this.file.root;
-    const start = this.getStart(source);
-    // A token's text is the same in every token-equivalent version.
-    if (this.kind > SyntaxKind.LastToken) source.file.noteTextRange(start, this.end, TOKEN_SPAN);
-    return source.file.sourceText().substring(start, this.end);
+    return (source.text ?? "").substring(this.getStart(source), this.end);
   }
 
-  get containsOnlyTriviaWhiteSpaces(): boolean {
-    return (this.data & (1 << 24)) !== 0;
-  }
-  get isArrayType(): boolean {
-    return (this.data & (1 << 24)) !== 0;
-  }
-  get isBracketed(): boolean {
-    return (this.data & (1 << 24)) !== 0;
-  }
-  get isExportEquals(): boolean {
-    return (this.data & (1 << 24)) !== 0;
-  }
-  get isNameFirst(): boolean {
-    return (this.data & (1 << 25)) !== 0;
-  }
-  get isTypeOf(): boolean {
-    return (this.data & (1 << 24)) !== 0;
-  }
-  get isTypeOnly(): boolean {
-    return (this.data & (1 << 24)) !== 0;
-  }
-  get multiLine(): boolean {
-    return (this.data & (1 << 24)) !== 0;
-  }
+  get containsOnlyTriviaWhiteSpaces(): boolean { return (this.data & (1 << 24)) !== 0; }
+  get isArrayType(): boolean { return (this.data & (1 << 24)) !== 0; }
+  get isBracketed(): boolean { return (this.data & (1 << 24)) !== 0; }
+  get isExportEquals(): boolean { return (this.data & (1 << 24)) !== 0; }
+  get isNameFirst(): boolean { return (this.data & (1 << 25)) !== 0; }
+  get isTypeOf(): boolean { return (this.data & (1 << 24)) !== 0; }
+  get isTypeOnly(): boolean { return (this.data & (1 << 24)) !== 0; }
+  get multiLine(): boolean { return (this.data & (1 << 24)) !== 0; }
   get keyword(): number | undefined {
-    return this.kind === AstKind.ModuleDeclaration
-      ? (this.data >>> 24) & 1
-        ? AstKind.NamespaceKeyword
-        : AstKind.ModuleKeyword
-      : undefined;
+    return this.kind === AstKind.ModuleDeclaration ? ((this.data >>> 24) & 1 ? AstKind.NamespaceKeyword : AstKind.ModuleKeyword) : undefined;
   }
   get keywordToken(): number | undefined {
-    return this.kind === AstKind.MetaProperty
-      ? (this.data >>> 24) & 1
-        ? AstKind.NewKeyword
-        : AstKind.ImportKeyword
-      : undefined;
+    return this.kind === AstKind.MetaProperty ? ((this.data >>> 24) & 1 ? AstKind.NewKeyword : AstKind.ImportKeyword) : undefined;
   }
   get operator(): number | undefined {
     const value = (this.data >>> 24) & 7;
     if (this.kind === AstKind.PrefixUnaryExpression) {
       switch (value) {
-        case 1:
-          return AstKind.MinusToken;
-        case 2:
-          return AstKind.TildeToken;
-        case 3:
-          return AstKind.ExclamationToken;
-        case 4:
-          return AstKind.PlusPlusToken;
-        case 5:
-          return AstKind.MinusMinusToken;
-        default:
-          return AstKind.PlusToken;
+        case 1: return AstKind.MinusToken;
+        case 2: return AstKind.TildeToken;
+        case 3: return AstKind.ExclamationToken;
+        case 4: return AstKind.PlusPlusToken;
+        case 5: return AstKind.MinusMinusToken;
+        default: return AstKind.PlusToken;
       }
     }
-    if (this.kind === AstKind.PostfixUnaryExpression)
-      return value & 1 ? AstKind.MinusMinusToken : AstKind.PlusPlusToken;
-    if (this.kind === AstKind.TypeOperator)
-      return (value & 3) === 1
-        ? AstKind.ReadonlyKeyword
-        : (value & 3) === 2
-          ? AstKind.UniqueKeyword
-          : AstKind.KeyOfKeyword;
+    if (this.kind === AstKind.PostfixUnaryExpression) return value & 1 ? AstKind.MinusMinusToken : AstKind.PlusPlusToken;
+    if (this.kind === AstKind.TypeOperator) return (value & 3) === 1 ? AstKind.ReadonlyKeyword : (value & 3) === 2 ? AstKind.UniqueKeyword : AstKind.KeyOfKeyword;
     return undefined;
   }
   get phaseModifier(): number | undefined {
     if (this.kind !== AstKind.ImportClause) return undefined;
     const value = (this.data >>> 24) & 3;
-    if (value === 3) return SOURCE_PHASE_MODIFIER;
     return value === 1 ? AstKind.TypeKeyword : value === 2 ? AstKind.DeferKeyword : undefined;
   }
   get token(): number | undefined {
-    if (this.kind === AstKind.HeritageClause)
-      return (this.data >>> 24) & 1 ? AstKind.ImplementsKeyword : AstKind.ExtendsKeyword;
-    if (this.kind === AstKind.ImportAttributes)
-      return (this.data >>> 25) & 1 ? AstKind.AssertKeyword : AstKind.WithKeyword;
+    if (this.kind === AstKind.HeritageClause) return (this.data >>> 24) & 1 ? AstKind.ImplementsKeyword : AstKind.ExtendsKeyword;
+    if (this.kind === AstKind.ImportAttributes) return (this.data >>> 25) & 1 ? AstKind.AssertKeyword : AstKind.WithKeyword;
     return undefined;
   }
   get templateFlags(): number | undefined {
-    return this.kind === AstKind.TemplateHead ||
-      this.kind === AstKind.TemplateMiddle ||
-      this.kind === AstKind.TemplateTail
-      ? this.file.wire.extendedWord(this.index, 8)
-      : undefined;
+    return this.kind === AstKind.TemplateHead || this.kind === AstKind.TemplateMiddle || this.kind === AstKind.TemplateTail
+      ? this.file.wire.extendedWord(this.index, 8) : undefined;
   }
   get tokenFlags(): number {
-    return this.kind === AstKind.StringLiteral ||
-      this.kind === AstKind.NumericLiteral ||
-      this.kind === AstKind.BigIntLiteral ||
-      this.kind === AstKind.RegularExpressionLiteral
-      ? this.file.wire.extendedWord(this.index, 4)
-      : 0;
+    return this.kind === AstKind.StringLiteral || this.kind === AstKind.NumericLiteral || this.kind === AstKind.BigIntLiteral || this.kind === AstKind.RegularExpressionLiteral
+      ? this.file.wire.extendedWord(this.index, 4) : 0;
   }
   get modifierFlags(): number {
     let result = 0;
-    for (const modifier of this.childListAt(this.modifiersSlot())?.nodes ?? [])
-      result |= astModifierFlag(modifier.kind);
+    for (const modifier of this.childList("modifiers") ?? []) result |= astModifierFlag(modifier.kind);
     return result;
-  }
-
-  get modifiers(): AstModifierList | undefined {
-    const index = this.file.namedChildAt(this, this.modifiersSlot());
-    return index === 0 ? undefined : this.file.modifierList(index);
   }
 
   get body(): AstNode | undefined {
@@ -964,17 +335,9 @@ export class AstNode {
     // TS7 can serialize a reparsed @type callable before a method's
     // body without setting the type presence bit. The linked Block is
     // still the real body; keep the JSDoc node out of this view.
-    if (
-      body !== undefined &&
-      (body.flags & AstNodeFlags.JSDoc) !== 0 &&
-      (body.flags & AstNodeFlags.Reparsed) !== 0
-    ) {
+    if (body !== undefined && (body.flags & AstNodeFlags.JSDoc) !== 0 && (body.flags & AstNodeFlags.Reparsed) !== 0) {
       const next = this.file.wire.next(body.index);
-      if (
-        next !== 0 &&
-        this.file.wire.parent(next) === this.index &&
-        this.file.wire.kind(next) === AstKind.Block
-      ) {
+      if (next !== 0 && this.file.wire.parent(next) === this.index && this.file.wire.kind(next) === AstKind.Block) {
         return this.file.node(next);
       }
     }
@@ -990,35 +353,11 @@ export class AstNode {
     return token?.kind === SyntaxKind.QuestionToken ? token : undefined;
   }
 
-  // A write target keeps its parentheses and non-null assertions in the
-  // tree; with AstFileOptions.writeTargets these views return the target
-  // without them.
-  get initializer(): AstNode | undefined {
-    const initializer = this.childNodeAt(this.initializerSlot());
-    return initializer !== undefined && this.file.writeTargets && writesTarget(this, "initializer")
-      ? unwrapTarget(initializer)
-      : initializer;
-  }
-
-  get left(): AstNode | undefined {
-    const left = this.childNodeAt(this.leftSlot());
-    return left !== undefined && this.file.writeTargets && writesTarget(this, "left")
-      ? unwrapTarget(left)
-      : left;
-  }
-
-  get operand(): AstNode | undefined {
-    const operand = this.childNodeAt(this.operandSlot());
-    return operand !== undefined && this.file.writeTargets && writesTarget(this, "operand")
-      ? unwrapTarget(operand)
-      : operand;
-  }
-
   // BEGIN GENERATED CHILD GETTERS
-  // Generated from typescript@7.1.0-beta; run scripts/generate-ts7-ast-schema.mjs.
+  // Generated from typescript@7.0.2; run scripts/generate-ts7-ast-schema.mjs.
   get argument(): AstNode | undefined {
     switch (this.kind) {
-      case 207:
+      case 206:
         return this.childNodeAt(0);
       default:
         return undefined;
@@ -1026,17 +365,17 @@ export class AstNode {
   }
   get argumentExpression(): AstNode | undefined {
     switch (this.kind) {
-      case 214:
+      case 213:
         return this.childNodeAt(2);
       default:
         return undefined;
     }
   }
-  get arguments(): AstNodeList | undefined {
+  get arguments(): readonly AstNode[] | undefined {
     switch (this.kind) {
-      case 216:
-        return this.childListAt(2);
       case 215:
+        return this.childListAt(2);
+      case 214:
         return this.childListAt(3);
       default:
         return undefined;
@@ -1044,7 +383,7 @@ export class AstNode {
   }
   get assertsModifier(): AstNode | undefined {
     switch (this.kind) {
-      case 184:
+      case 183:
         return this.childNodeAt(0);
       default:
         return undefined;
@@ -1052,30 +391,29 @@ export class AstNode {
   }
   get asteriskToken(): AstNode | undefined {
     switch (this.kind) {
-      case 231:
+      case 230:
         return this.childNodeAt(0);
-      case 176:
-      case 220:
-      case 264:
+      case 175:
+      case 219:
+      case 263:
         return this.childNodeAt(1);
       default:
         return undefined;
     }
   }
-  get attributes(): AstNode | AstNodeList | undefined {
+  get attributes(): AstNode | readonly AstNode[] | undefined {
     switch (this.kind) {
-      case 302:
+      case 301:
         return this.childAt(0);
-      case 207:
+      case 206:
         return this.childAt(1);
-      case 269:
+      case 286:
       case 287:
-      case 288:
         return this.childAt(2);
-      case 274:
-      case 280:
-      case 344:
-      case 347:
+      case 273:
+      case 279:
+      case 343:
+      case 346:
         return this.childAt(3);
       default:
         return undefined;
@@ -1083,8 +421,8 @@ export class AstNode {
   }
   get awaitModifier(): AstNode | undefined {
     switch (this.kind) {
+      case 250:
       case 251:
-      case 252:
         return this.childNodeAt(0);
       default:
         return undefined;
@@ -1092,7 +430,7 @@ export class AstNode {
   }
   get block(): AstNode | undefined {
     switch (this.kind) {
-      case 301:
+      case 300:
         return this.childNodeAt(1);
       default:
         return undefined;
@@ -1100,7 +438,7 @@ export class AstNode {
   }
   get caseBlock(): AstNode | undefined {
     switch (this.kind) {
-      case 257:
+      case 256:
         return this.childNodeAt(1);
       default:
         return undefined;
@@ -1108,7 +446,7 @@ export class AstNode {
   }
   get catchClause(): AstNode | undefined {
     switch (this.kind) {
-      case 260:
+      case 259:
         return this.childNodeAt(1);
       default:
         return undefined;
@@ -1116,18 +454,18 @@ export class AstNode {
   }
   get checkType(): AstNode | undefined {
     switch (this.kind) {
-      case 196:
+      case 195:
         return this.childNodeAt(0);
       default:
         return undefined;
     }
   }
-  get children(): AstNode | AstNodeList | undefined {
+  get children(): AstNode | readonly AstNode[] | undefined {
     switch (this.kind) {
-      case 345:
+      case 344:
         return this.childAt(0);
-      case 286:
-      case 290:
+      case 285:
+      case 289:
         return this.childAt(1);
       default:
         return undefined;
@@ -1135,16 +473,16 @@ export class AstNode {
   }
   get className(): AstNode | undefined {
     switch (this.kind) {
+      case 323:
       case 324:
-      case 325:
         return this.childNodeAt(1);
       default:
         return undefined;
     }
   }
-  get clauses(): AstNodeList | undefined {
+  get clauses(): readonly AstNode[] | undefined {
     switch (this.kind) {
-      case 271:
+      case 270:
         return this.childListAt(0);
       default:
         return undefined;
@@ -1152,7 +490,7 @@ export class AstNode {
   }
   get closingElement(): AstNode | undefined {
     switch (this.kind) {
-      case 286:
+      case 285:
         return this.childNodeAt(2);
       default:
         return undefined;
@@ -1160,7 +498,7 @@ export class AstNode {
   }
   get closingFragment(): AstNode | undefined {
     switch (this.kind) {
-      case 290:
+      case 289:
         return this.childNodeAt(2);
       default:
         return undefined;
@@ -1168,41 +506,41 @@ export class AstNode {
   }
   get colonToken(): AstNode | undefined {
     switch (this.kind) {
-      case 229:
+      case 228:
         return this.childNodeAt(3);
       default:
         return undefined;
     }
   }
-  get comment(): AstNodeList | undefined {
+  get comment(): readonly AstNode[] | undefined {
     switch (this.kind) {
-      case 316:
+      case 315:
         return this.childListAt(0);
-      case 323:
+      case 322:
+      case 325:
       case 326:
       case 327:
       case 328:
       case 329:
       case 330:
-      case 331:
         return this.childListAt(1);
+      case 323:
       case 324:
-      case 325:
-      case 333:
-      case 335:
-      case 336:
-      case 337:
-      case 340:
-      case 342:
-      case 343:
-        return this.childListAt(2);
       case 332:
       case 334:
-      case 338:
+      case 335:
+      case 336:
       case 339:
       case 341:
+      case 342:
+        return this.childListAt(2);
+      case 331:
+      case 333:
+      case 337:
+      case 338:
+      case 340:
         return this.childListAt(3);
-      case 344:
+      case 343:
         return this.childListAt(4);
       default:
         return undefined;
@@ -1210,9 +548,9 @@ export class AstNode {
   }
   get condition(): AstNode | undefined {
     switch (this.kind) {
-      case 229:
+      case 228:
         return this.childNodeAt(0);
-      case 250:
+      case 249:
         return this.childNodeAt(1);
       default:
         return undefined;
@@ -1220,9 +558,9 @@ export class AstNode {
   }
   get constraint(): AstNode | undefined {
     switch (this.kind) {
-      case 338:
+      case 337:
         return this.childNodeAt(1);
-      case 170:
+      case 169:
         return this.childNodeAt(2);
       default:
         return undefined;
@@ -1230,15 +568,15 @@ export class AstNode {
   }
   get declarationList(): AstNode | undefined {
     switch (this.kind) {
-      case 245:
+      case 244:
         return this.childNodeAt(1);
       default:
         return undefined;
     }
   }
-  get declarations(): AstNodeList | undefined {
+  get declarations(): readonly AstNode[] | undefined {
     switch (this.kind) {
-      case 263:
+      case 262:
         return this.childListAt(0);
       default:
         return undefined;
@@ -1246,7 +584,7 @@ export class AstNode {
   }
   get defaultType(): AstNode | undefined {
     switch (this.kind) {
-      case 170:
+      case 169:
         return this.childNodeAt(4);
       default:
         return undefined;
@@ -1254,11 +592,11 @@ export class AstNode {
   }
   get dotDotDotToken(): AstNode | undefined {
     switch (this.kind) {
-      case 204:
-      case 210:
-      case 296:
+      case 203:
+      case 209:
+      case 295:
         return this.childNodeAt(0);
-      case 171:
+      case 170:
         return this.childNodeAt(1);
       default:
         return undefined;
@@ -1266,20 +604,20 @@ export class AstNode {
   }
   get elementType(): AstNode | undefined {
     switch (this.kind) {
-      case 190:
+      case 189:
         return this.childNodeAt(0);
       default:
         return undefined;
     }
   }
-  get elements(): AstNodeList | undefined {
+  get elements(): readonly AstNode[] | undefined {
     switch (this.kind) {
-      case 191:
+      case 190:
+      case 207:
       case 208:
-      case 209:
-      case 211:
-      case 277:
-      case 281:
+      case 210:
+      case 276:
+      case 280:
         return this.childListAt(0);
       default:
         return undefined;
@@ -1287,7 +625,7 @@ export class AstNode {
   }
   get elseStatement(): AstNode | undefined {
     switch (this.kind) {
-      case 247:
+      case 246:
         return this.childNodeAt(2);
       default:
         return undefined;
@@ -1295,7 +633,7 @@ export class AstNode {
   }
   get endOfFileToken(): AstNode | undefined {
     switch (this.kind) {
-      case 308:
+      case 307:
         return this.childNodeAt(1);
       default:
         return undefined;
@@ -1303,7 +641,7 @@ export class AstNode {
   }
   get equalsGreaterThanToken(): AstNode | undefined {
     switch (this.kind) {
-      case 221:
+      case 220:
         return this.childNodeAt(4);
       default:
         return undefined;
@@ -1311,7 +649,7 @@ export class AstNode {
   }
   get equalsToken(): AstNode | undefined {
     switch (this.kind) {
-      case 305:
+      case 304:
         return this.childNodeAt(4);
       default:
         return undefined;
@@ -1319,7 +657,7 @@ export class AstNode {
   }
   get exclamationToken(): AstNode | undefined {
     switch (this.kind) {
-      case 262:
+      case 261:
         return this.childNodeAt(1);
       default:
         return undefined;
@@ -1327,7 +665,7 @@ export class AstNode {
   }
   get exportClause(): AstNode | undefined {
     switch (this.kind) {
-      case 280:
+      case 279:
         return this.childNodeAt(1);
       default:
         return undefined;
@@ -1335,7 +673,7 @@ export class AstNode {
   }
   get exprName(): AstNode | undefined {
     switch (this.kind) {
-      case 188:
+      case 187:
         return this.childNodeAt(0);
       default:
         return undefined;
@@ -1343,48 +681,48 @@ export class AstNode {
   }
   get expression(): AstNode | undefined {
     switch (this.kind) {
-      case 169:
-      case 172:
+      case 168:
+      case 171:
+      case 212:
       case 213:
       case 214:
       case 215:
-      case 216:
-      case 219:
+      case 218:
+      case 221:
       case 222:
       case 223:
       case 224:
-      case 225:
-      case 232:
+      case 231:
+      case 234:
       case 235:
       case 236:
-      case 237:
+      case 239:
       case 240:
-      case 241:
+      case 245:
       case 246:
-      case 247:
-      case 249:
+      case 248:
+      case 254:
       case 255:
       case 256:
-      case 257:
-      case 259:
-      case 285:
-      case 295:
+      case 258:
+      case 284:
+      case 294:
+      case 297:
       case 298:
-      case 299:
-      case 306:
+      case 305:
+      case 348:
       case 349:
-      case 350:
         return this.childNodeAt(0);
-      case 218:
-      case 231:
-      case 248:
-      case 296:
+      case 217:
+      case 230:
+      case 247:
+      case 295:
         return this.childNodeAt(1);
+      case 250:
       case 251:
-      case 252:
-      case 279:
+      case 278:
         return this.childNodeAt(2);
-      case 170:
+      case 169:
         return this.childNodeAt(3);
       default:
         return undefined;
@@ -1392,7 +730,7 @@ export class AstNode {
   }
   get extendsType(): AstNode | undefined {
     switch (this.kind) {
-      case 196:
+      case 195:
         return this.childNodeAt(1);
       default:
         return undefined;
@@ -1400,7 +738,7 @@ export class AstNode {
   }
   get falseType(): AstNode | undefined {
     switch (this.kind) {
-      case 196:
+      case 195:
         return this.childNodeAt(3);
       default:
         return undefined;
@@ -1408,7 +746,7 @@ export class AstNode {
   }
   get finallyBlock(): AstNode | undefined {
     switch (this.kind) {
-      case 260:
+      case 259:
         return this.childNodeAt(2);
       default:
         return undefined;
@@ -1416,18 +754,18 @@ export class AstNode {
   }
   get head(): AstNode | undefined {
     switch (this.kind) {
-      case 205:
-      case 230:
+      case 204:
+      case 229:
         return this.childNodeAt(0);
       default:
         return undefined;
     }
   }
-  get heritageClauses(): AstNodeList | undefined {
+  get heritageClauses(): readonly AstNode[] | undefined {
     switch (this.kind) {
-      case 233:
+      case 232:
+      case 264:
       case 265:
-      case 266:
         return this.childListAt(3);
       default:
         return undefined;
@@ -1435,9 +773,9 @@ export class AstNode {
   }
   get importClause(): AstNode | undefined {
     switch (this.kind) {
-      case 274:
-      case 344:
-      case 347:
+      case 273:
+      case 343:
+      case 346:
         return this.childNodeAt(1);
       default:
         return undefined;
@@ -1445,7 +783,7 @@ export class AstNode {
   }
   get incrementor(): AstNode | undefined {
     switch (this.kind) {
-      case 250:
+      case 249:
         return this.childNodeAt(2);
       default:
         return undefined;
@@ -1453,15 +791,37 @@ export class AstNode {
   }
   get indexType(): AstNode | undefined {
     switch (this.kind) {
-      case 201:
+      case 200:
         return this.childNodeAt(1);
+      default:
+        return undefined;
+    }
+  }
+  get initializer(): AstNode | undefined {
+    switch (this.kind) {
+      case 249:
+        return this.childNodeAt(0);
+      case 250:
+      case 251:
+      case 292:
+      case 306:
+        return this.childNodeAt(1);
+      case 209:
+      case 261:
+        return this.childNodeAt(3);
+      case 172:
+      case 173:
+      case 303:
+        return this.childNodeAt(4);
+      case 170:
+        return this.childNodeAt(5);
       default:
         return undefined;
     }
   }
   get jsdocPropertyTags(): AstNode | undefined {
     switch (this.kind) {
-      case 318:
+      case 317:
         return this.childNodeAt(0);
       default:
         return undefined;
@@ -1469,44 +829,94 @@ export class AstNode {
   }
   get label(): AstNode | undefined {
     switch (this.kind) {
+      case 252:
       case 253:
-      case 254:
-      case 258:
+      case 257:
         return this.childNodeAt(0);
+      default:
+        return undefined;
+    }
+  }
+  get left(): AstNode | undefined {
+    switch (this.kind) {
+      case 167:
+        return this.childNodeAt(0);
+      case 227:
+        return this.childNodeAt(1);
       default:
         return undefined;
     }
   }
   get literal(): AstNode | undefined {
     switch (this.kind) {
-      case 203:
+      case 202:
         return this.childNodeAt(0);
-      case 206:
-      case 241:
+      case 205:
+      case 240:
         return this.childNodeAt(1);
       default:
         return undefined;
     }
   }
-  get members(): AstNodeList | undefined {
+  get members(): readonly AstNode[] | undefined {
     switch (this.kind) {
-      case 189:
+      case 188:
         return this.childListAt(0);
-      case 268:
+      case 267:
         return this.childListAt(2);
-      case 233:
+      case 232:
+      case 264:
+      case 265:
+        return this.childListAt(4);
+      case 201:
+        return this.childListAt(5);
+      default:
+        return undefined;
+    }
+  }
+  get modifiers(): readonly AstNode[] | undefined {
+    switch (this.kind) {
+      case 169:
+      case 170:
+      case 172:
+      case 173:
+      case 174:
+      case 175:
+      case 176:
+      case 177:
+      case 178:
+      case 179:
+      case 182:
+      case 186:
+      case 219:
+      case 220:
+      case 227:
+      case 232:
+      case 244:
+      case 263:
+      case 264:
       case 265:
       case 266:
-        return this.childListAt(4);
-      case 202:
-        return this.childListAt(5);
+      case 267:
+      case 268:
+      case 271:
+      case 272:
+      case 273:
+      case 278:
+      case 279:
+      case 283:
+      case 303:
+      case 304:
+      case 345:
+      case 346:
+        return this.childListAt(0);
       default:
         return undefined;
     }
   }
   get moduleReference(): AstNode | undefined {
     switch (this.kind) {
-      case 273:
+      case 272:
         return this.childNodeAt(2);
       default:
         return undefined;
@@ -1514,10 +924,10 @@ export class AstNode {
   }
   get moduleSpecifier(): AstNode | undefined {
     switch (this.kind) {
-      case 274:
-      case 280:
-      case 344:
-      case 347:
+      case 273:
+      case 279:
+      case 343:
+      case 346:
         return this.childNodeAt(2);
       default:
         return undefined;
@@ -1525,51 +935,51 @@ export class AstNode {
   }
   get name(): AstNode | undefined {
     switch (this.kind) {
-      case 238:
-      case 262:
+      case 237:
+      case 261:
+      case 274:
       case 275:
-      case 276:
-      case 282:
-      case 293:
-      case 303:
-      case 307:
-      case 310:
+      case 281:
+      case 292:
+      case 302:
+      case 306:
+      case 309:
+      case 319:
       case 320:
       case 321:
-      case 322:
         return this.childNodeAt(0);
-      case 170:
+      case 169:
+      case 172:
       case 173:
       case 174:
-      case 175:
+      case 178:
       case 179:
-      case 180:
-      case 204:
-      case 233:
+      case 203:
+      case 232:
+      case 264:
       case 265:
       case 266:
       case 267:
       case 268:
-      case 269:
+      case 271:
       case 272:
-      case 273:
-      case 278:
-      case 283:
-      case 297:
+      case 277:
+      case 282:
+      case 296:
+      case 303:
       case 304:
-      case 305:
-      case 334:
-      case 341:
-      case 346:
+      case 333:
+      case 340:
+      case 345:
         return this.childNodeAt(1);
-      case 171:
-      case 176:
-      case 210:
-      case 213:
-      case 220:
-      case 264:
-      case 332:
-      case 339:
+      case 170:
+      case 175:
+      case 209:
+      case 212:
+      case 219:
+      case 263:
+      case 331:
+      case 338:
         return this.childNodeAt(2);
       default:
         return undefined;
@@ -1577,7 +987,7 @@ export class AstNode {
   }
   get nameExpression(): AstNode | undefined {
     switch (this.kind) {
-      case 340:
+      case 339:
         return this.childNodeAt(1);
       default:
         return undefined;
@@ -1585,7 +995,7 @@ export class AstNode {
   }
   get nameType(): AstNode | undefined {
     switch (this.kind) {
-      case 202:
+      case 201:
         return this.childNodeAt(2);
       default:
         return undefined;
@@ -1593,7 +1003,7 @@ export class AstNode {
   }
   get namedBindings(): AstNode | undefined {
     switch (this.kind) {
-      case 275:
+      case 274:
         return this.childNodeAt(1);
       default:
         return undefined;
@@ -1601,7 +1011,7 @@ export class AstNode {
   }
   get namespace(): AstNode | undefined {
     switch (this.kind) {
-      case 297:
+      case 296:
         return this.childNodeAt(0);
       default:
         return undefined;
@@ -1609,7 +1019,7 @@ export class AstNode {
   }
   get objectAssignmentInitializer(): AstNode | undefined {
     switch (this.kind) {
-      case 305:
+      case 304:
         return this.childNodeAt(5);
       default:
         return undefined;
@@ -1617,7 +1027,7 @@ export class AstNode {
   }
   get objectType(): AstNode | undefined {
     switch (this.kind) {
-      case 201:
+      case 200:
         return this.childNodeAt(0);
       default:
         return undefined;
@@ -1625,7 +1035,7 @@ export class AstNode {
   }
   get openingElement(): AstNode | undefined {
     switch (this.kind) {
-      case 286:
+      case 285:
         return this.childNodeAt(0);
       default:
         return undefined;
@@ -1633,7 +1043,16 @@ export class AstNode {
   }
   get openingFragment(): AstNode | undefined {
     switch (this.kind) {
-      case 290:
+      case 289:
+        return this.childNodeAt(0);
+      default:
+        return undefined;
+    }
+  }
+  get operand(): AstNode | undefined {
+    switch (this.kind) {
+      case 225:
+      case 226:
         return this.childNodeAt(0);
       default:
         return undefined;
@@ -1641,7 +1060,7 @@ export class AstNode {
   }
   get operatorToken(): AstNode | undefined {
     switch (this.kind) {
-      case 228:
+      case 227:
         return this.childNodeAt(3);
       default:
         return undefined;
@@ -1649,32 +1068,32 @@ export class AstNode {
   }
   get parameterName(): AstNode | undefined {
     switch (this.kind) {
-      case 184:
+      case 183:
         return this.childNodeAt(1);
       default:
         return undefined;
     }
   }
-  get parameters(): AstNodeList | undefined {
+  get parameters(): readonly AstNode[] | undefined {
     switch (this.kind) {
+      case 180:
       case 181:
       case 182:
-      case 183:
-      case 186:
-      case 319:
+      case 185:
+      case 318:
         return this.childListAt(1);
-      case 178:
-      case 187:
-      case 221:
-        return this.childListAt(2);
-      case 179:
-      case 180:
-        return this.childListAt(3);
-      case 175:
+      case 177:
+      case 186:
       case 220:
-      case 264:
+        return this.childListAt(2);
+      case 178:
+      case 179:
+        return this.childListAt(3);
+      case 174:
+      case 219:
+      case 263:
         return this.childListAt(4);
-      case 176:
+      case 175:
         return this.childListAt(5);
       default:
         return undefined;
@@ -1682,22 +1101,22 @@ export class AstNode {
   }
   get postfixToken(): AstNode | undefined {
     switch (this.kind) {
+      case 172:
       case 173:
       case 174:
-      case 175:
+      case 303:
       case 304:
-      case 305:
         return this.childNodeAt(2);
-      case 176:
+      case 175:
         return this.childNodeAt(3);
       default:
         return undefined;
     }
   }
-  get properties(): AstNodeList | undefined {
+  get properties(): readonly AstNode[] | undefined {
     switch (this.kind) {
-      case 212:
-      case 294:
+      case 211:
+      case 293:
         return this.childListAt(0);
       default:
         return undefined;
@@ -1705,10 +1124,10 @@ export class AstNode {
   }
   get propertyName(): AstNode | undefined {
     switch (this.kind) {
-      case 278:
-      case 283:
+      case 277:
+      case 282:
         return this.childNodeAt(0);
-      case 210:
+      case 209:
         return this.childNodeAt(1);
       default:
         return undefined;
@@ -1716,7 +1135,7 @@ export class AstNode {
   }
   get qualifier(): AstNode | undefined {
     switch (this.kind) {
-      case 207:
+      case 206:
         return this.childNodeAt(2);
       default:
         return undefined;
@@ -1724,10 +1143,10 @@ export class AstNode {
   }
   get questionDotToken(): AstNode | undefined {
     switch (this.kind) {
+      case 212:
       case 213:
       case 214:
-      case 215:
-      case 217:
+      case 216:
         return this.childNodeAt(1);
       default:
         return undefined;
@@ -1735,7 +1154,7 @@ export class AstNode {
   }
   get readonlyToken(): AstNode | undefined {
     switch (this.kind) {
-      case 202:
+      case 201:
         return this.childNodeAt(0);
       default:
         return undefined;
@@ -1743,9 +1162,9 @@ export class AstNode {
   }
   get right(): AstNode | undefined {
     switch (this.kind) {
-      case 168:
+      case 167:
         return this.childNodeAt(1);
-      case 228:
+      case 227:
         return this.childNodeAt(4);
       default:
         return undefined;
@@ -1753,28 +1172,28 @@ export class AstNode {
   }
   get statement(): AstNode | undefined {
     switch (this.kind) {
-      case 248:
+      case 247:
         return this.childNodeAt(0);
-      case 249:
-      case 256:
-      case 258:
+      case 248:
+      case 255:
+      case 257:
         return this.childNodeAt(1);
+      case 249:
       case 250:
       case 251:
-      case 252:
         return this.childNodeAt(3);
       default:
         return undefined;
     }
   }
-  get statements(): AstNodeList | undefined {
+  get statements(): readonly AstNode[] | undefined {
     switch (this.kind) {
-      case 243:
-      case 270:
-      case 308:
+      case 242:
+      case 269:
+      case 307:
         return this.childListAt(0);
+      case 297:
       case 298:
-      case 299:
         return this.childListAt(1);
       default:
         return undefined;
@@ -1782,7 +1201,7 @@ export class AstNode {
   }
   get tag(): AstNode | undefined {
     switch (this.kind) {
-      case 217:
+      case 216:
         return this.childNodeAt(0);
       default:
         return undefined;
@@ -1790,9 +1209,10 @@ export class AstNode {
   }
   get tagName(): AstNode | undefined {
     switch (this.kind) {
+      case 286:
       case 287:
       case 288:
-      case 289:
+      case 322:
       case 323:
       case 324:
       case 325:
@@ -1814,15 +1234,14 @@ export class AstNode {
       case 341:
       case 342:
       case 343:
-      case 344:
         return this.childNodeAt(0);
       default:
         return undefined;
     }
   }
-  get tags(): AstNodeList | undefined {
+  get tags(): readonly AstNode[] | undefined {
     switch (this.kind) {
-      case 316:
+      case 315:
         return this.childListAt(1);
       default:
         return undefined;
@@ -1830,16 +1249,16 @@ export class AstNode {
   }
   get template(): AstNode | undefined {
     switch (this.kind) {
-      case 217:
+      case 216:
         return this.childNodeAt(3);
       default:
         return undefined;
     }
   }
-  get templateSpans(): AstNodeList | undefined {
+  get templateSpans(): readonly AstNode[] | undefined {
     switch (this.kind) {
-      case 205:
-      case 230:
+      case 204:
+      case 229:
         return this.childListAt(1);
       default:
         return undefined;
@@ -1847,7 +1266,7 @@ export class AstNode {
   }
   get thenStatement(): AstNode | undefined {
     switch (this.kind) {
-      case 247:
+      case 246:
         return this.childNodeAt(1);
       default:
         return undefined;
@@ -1855,7 +1274,7 @@ export class AstNode {
   }
   get thisArg(): AstNode | undefined {
     switch (this.kind) {
-      case 350:
+      case 349:
         return this.childNodeAt(1);
       default:
         return undefined;
@@ -1863,7 +1282,7 @@ export class AstNode {
   }
   get trueType(): AstNode | undefined {
     switch (this.kind) {
-      case 196:
+      case 195:
         return this.childNodeAt(2);
       default:
         return undefined;
@@ -1871,7 +1290,7 @@ export class AstNode {
   }
   get tryBlock(): AstNode | undefined {
     switch (this.kind) {
-      case 260:
+      case 259:
         return this.childNodeAt(0);
       default:
         return undefined;
@@ -1879,7 +1298,7 @@ export class AstNode {
   }
   get tupleNameSource(): AstNode | undefined {
     switch (this.kind) {
-      case 239:
+      case 238:
         return this.childNodeAt(0);
       default:
         return undefined;
@@ -1887,70 +1306,70 @@ export class AstNode {
   }
   get type(): AstNode | undefined {
     switch (this.kind) {
+      case 191:
       case 192:
-      case 193:
-      case 198:
-      case 200:
-      case 206:
-      case 218:
-      case 309:
+      case 197:
+      case 199:
+      case 205:
+      case 217:
+      case 308:
+      case 311:
       case 312:
       case 313:
       case 314:
-      case 315:
         return this.childNodeAt(0);
-      case 236:
-      case 240:
-      case 279:
+      case 235:
+      case 239:
+      case 278:
         return this.childNodeAt(1);
+      case 180:
       case 181:
       case 182:
       case 183:
-      case 184:
-      case 186:
-      case 228:
-      case 262:
-      case 319:
+      case 185:
+      case 227:
+      case 261:
+      case 318:
         return this.childNodeAt(2);
+      case 172:
       case 173:
-      case 174:
-      case 178:
-      case 187:
-      case 204:
-      case 221:
-      case 267:
-      case 304:
-      case 305:
-      case 346:
-        return this.childNodeAt(3);
-      case 171:
-      case 179:
-      case 180:
-      case 202:
-        return this.childNodeAt(4);
-      case 175:
+      case 177:
+      case 186:
+      case 203:
       case 220:
-      case 264:
+      case 266:
+      case 303:
+      case 304:
+      case 345:
+        return this.childNodeAt(3);
+      case 170:
+      case 178:
+      case 179:
+      case 201:
+        return this.childNodeAt(4);
+      case 174:
+      case 219:
+      case 263:
         return this.childNodeAt(5);
-      case 176:
+      case 175:
         return this.childNodeAt(6);
       default:
         return undefined;
     }
   }
-  get typeArguments(): AstNodeList | undefined {
+  get typeArguments(): readonly AstNode[] | undefined {
     switch (this.kind) {
-      case 185:
-      case 188:
-      case 216:
-      case 235:
-      case 287:
-      case 288:
-        return this.childListAt(1);
+      case 184:
+      case 187:
       case 215:
-      case 217:
+      case 234:
+      case 286:
+      case 287:
+        return this.childListAt(1);
+      case 214:
+      case 216:
         return this.childListAt(2);
-      case 207:
+      case 206:
         return this.childListAt(3);
       default:
         return undefined;
@@ -1958,17 +1377,17 @@ export class AstNode {
   }
   get typeExpression(): AstNode | undefined {
     switch (this.kind) {
+      case 331:
       case 332:
-      case 333:
+      case 334:
       case 335:
       case 336:
-      case 337:
-      case 339:
-      case 342:
-      case 343:
-        return this.childNodeAt(1);
-      case 334:
+      case 338:
       case 341:
+      case 342:
+        return this.childNodeAt(1);
+      case 333:
+      case 340:
         return this.childNodeAt(2);
       default:
         return undefined;
@@ -1976,7 +1395,7 @@ export class AstNode {
   }
   get typeName(): AstNode | undefined {
     switch (this.kind) {
-      case 185:
+      case 184:
         return this.childNodeAt(0);
       default:
         return undefined;
@@ -1984,49 +1403,49 @@ export class AstNode {
   }
   get typeParameter(): AstNode | undefined {
     switch (this.kind) {
-      case 197:
+      case 196:
         return this.childNodeAt(0);
-      case 202:
+      case 201:
         return this.childNodeAt(1);
       default:
         return undefined;
     }
   }
-  get typeParameters(): AstNodeList | undefined {
+  get typeParameters(): readonly AstNode[] | undefined {
     switch (this.kind) {
-      case 181:
-      case 182:
-      case 186:
-      case 319:
-        return this.childListAt(0);
-      case 178:
-      case 187:
-      case 221:
-        return this.childListAt(1);
-      case 179:
       case 180:
-      case 233:
+      case 181:
+      case 185:
+      case 318:
+        return this.childListAt(0);
+      case 177:
+      case 186:
+      case 220:
+        return this.childListAt(1);
+      case 178:
+      case 179:
+      case 232:
+      case 264:
       case 265:
       case 266:
-      case 267:
-      case 338:
-      case 346:
+      case 337:
+      case 345:
         return this.childListAt(2);
-      case 175:
-      case 220:
-      case 264:
+      case 174:
+      case 219:
+      case 263:
         return this.childListAt(3);
-      case 176:
+      case 175:
         return this.childListAt(4);
       default:
         return undefined;
     }
   }
-  get types(): AstNodeList | undefined {
+  get types(): readonly AstNode[] | undefined {
     switch (this.kind) {
+      case 193:
       case 194:
-      case 195:
-      case 300:
+      case 299:
         return this.childListAt(0);
       default:
         return undefined;
@@ -2034,7 +1453,7 @@ export class AstNode {
   }
   get value(): AstNode | undefined {
     switch (this.kind) {
-      case 303:
+      case 302:
         return this.childNodeAt(1);
       default:
         return undefined;
@@ -2042,7 +1461,7 @@ export class AstNode {
   }
   get variableDeclaration(): AstNode | undefined {
     switch (this.kind) {
-      case 301:
+      case 300:
         return this.childNodeAt(0);
       default:
         return undefined;
@@ -2050,7 +1469,7 @@ export class AstNode {
   }
   get whenFalse(): AstNode | undefined {
     switch (this.kind) {
-      case 229:
+      case 228:
         return this.childNodeAt(4);
       default:
         return undefined;
@@ -2058,7 +1477,7 @@ export class AstNode {
   }
   get whenTrue(): AstNode | undefined {
     switch (this.kind) {
-      case 229:
+      case 228:
         return this.childNodeAt(2);
       default:
         return undefined;
@@ -2066,114 +1485,33 @@ export class AstNode {
   }
   private bodySlot(): number {
     switch (this.kind) {
-      case 177:
-        return 1;
-      case 269:
-        return 3;
-      case 178:
-        return 4;
-      case 179:
-      case 180:
-      case 221:
-        return 5;
-      case 220:
-      case 264:
-        return 6;
       case 176:
-        return 7;
-      default:
-        return -1;
-    }
-  }
-  private initializerSlot(): number {
-    switch (this.kind) {
-      case 250:
-        return 0;
-      case 251:
-      case 252:
-      case 293:
-      case 307:
         return 1;
-      case 210:
-      case 262:
-        return 3;
-      case 173:
-      case 174:
-      case 304:
-        return 4;
-      case 171:
-        return 5;
-      default:
-        return -1;
-    }
-  }
-  private leftSlot(): number {
-    switch (this.kind) {
-      case 168:
-        return 0;
-      case 228:
-        return 1;
-      default:
-        return -1;
-    }
-  }
-  private modifiersSlot(): number {
-    switch (this.kind) {
-      case 170:
-      case 171:
-      case 173:
-      case 174:
-      case 175:
-      case 176:
-      case 177:
-      case 178:
-      case 179:
-      case 180:
-      case 183:
-      case 187:
-      case 220:
-      case 221:
-      case 228:
-      case 233:
-      case 245:
-      case 264:
-      case 265:
-      case 266:
-      case 267:
       case 268:
-      case 269:
-      case 272:
-      case 273:
-      case 274:
-      case 279:
-      case 280:
-      case 284:
-      case 304:
-      case 305:
-      case 346:
-      case 347:
-        return 0;
-      default:
-        return -1;
-    }
-  }
-  private operandSlot(): number {
-    switch (this.kind) {
-      case 226:
-      case 227:
-        return 0;
+        return 2;
+      case 177:
+        return 4;
+      case 178:
+      case 179:
+      case 220:
+        return 5;
+      case 219:
+      case 263:
+        return 6;
+      case 175:
+        return 7;
       default:
         return -1;
     }
   }
   private questionTokenSlot(): number {
     switch (this.kind) {
-      case 229:
+      case 228:
         return 1;
-      case 204:
+      case 203:
         return 2;
-      case 171:
-      case 202:
+      case 170:
+      case 201:
         return 3;
       default:
         return -1;
@@ -2183,100 +1521,53 @@ export class AstNode {
 
   // Source-file fields stay on the same nominal class, matching the wire's
   // single node representation. Their extended-data accesses are checked.
-  get fileName(): string {
-    return this.file.sourceFileName(this.index);
-  }
-  get path(): string {
-    return this.file.wire.string(this.file.wire.extendedWord(this.index, 8));
-  }
-  get languageVariant(): number {
-    return this.file.wire.extendedWord(this.index, 12);
-  }
-  get scriptKind(): number {
-    return this.file.wire.extendedWord(this.index, 16);
-  }
-  get isDeclarationFile(): boolean {
-    return (this.flags & AstNodeFlags.Ambient) !== 0;
-  }
-  get referencedFiles(): AstFileReference[] {
-    return this.file.fileReferences(this.file.wire.extendedWord(this.index, 20));
-  }
-  get typeReferenceDirectives(): AstFileReference[] {
-    return this.file.fileReferences(this.file.wire.extendedWord(this.index, 24));
-  }
-  get libReferenceDirectives(): AstFileReference[] {
-    return this.file.fileReferences(this.file.wire.extendedWord(this.index, 28));
-  }
-  get imports(): AstNode[] {
-    return this.file.nodeReferences(this.file.wire.extendedWord(this.index, 32));
-  }
-  get moduleAugmentations(): AstNode[] {
-    return this.file.nodeReferences(this.file.wire.extendedWord(this.index, 36));
-  }
-  get ambientModuleNames(): string[] {
-    return this.file.stringReferences(this.file.wire.extendedWord(this.index, 40));
-  }
+  get fileName(): string { return this.file.wire.string(this.file.wire.extendedWord(this.index, 4)); }
+  get path(): string { return this.file.wire.string(this.file.wire.extendedWord(this.index, 8)); }
+  get languageVariant(): number { return this.file.wire.extendedWord(this.index, 12); }
+  get scriptKind(): number { return this.file.wire.extendedWord(this.index, 16); }
+  get isDeclarationFile(): boolean { return (this.flags & AstNodeFlags.Ambient) !== 0; }
+  get referencedFiles(): AstFileReference[] { return this.file.fileReferences(this.file.wire.extendedWord(this.index, 20)); }
+  get typeReferenceDirectives(): AstFileReference[] { return this.file.fileReferences(this.file.wire.extendedWord(this.index, 24)); }
+  get libReferenceDirectives(): AstFileReference[] { return this.file.fileReferences(this.file.wire.extendedWord(this.index, 28)); }
+  get imports(): AstNode[] { return this.file.nodeReferences(this.file.wire.extendedWord(this.index, 32)); }
+  get moduleAugmentations(): AstNode[] { return this.file.nodeReferences(this.file.wire.extendedWord(this.index, 36)); }
+  get ambientModuleNames(): string[] { return this.file.stringReferences(this.file.wire.extendedWord(this.index, 40)); }
   get externalModuleIndicator(): AstNode | true | undefined {
     const index = this.file.wire.extendedWord(this.index, 44);
     return index === 0 ? undefined : index === this.index ? true : this.file.node(index);
   }
-  getLineStarts(): number[] {
-    // Every line's start: a read of the whole text.
-    this.file.noteSourceText();
-    return this.file.lineStarts();
-  }
+  getLineStarts(): number[] { return this.file.lineStarts(); }
   getLineAndCharacterOfPosition(position: number): { line: number; character: number } {
-    this.file.noteTextPosition(position);
-    const starts = this.file.lineStarts();
+    const starts = this.getLineStarts();
     const line = astLineOfPosition(starts, position);
     return { line, character: position - starts[line]! };
   }
   getPositionOfLineAndCharacter(line: number, character: number): number {
     const starts = this.getLineStarts();
-    if (line < 0 || line >= starts.length)
-      throw new Error(`Bad line number. Line: ${line}, lineStarts.length: ${starts.length}`);
+    if (line < 0 || line >= starts.length) throw new Error(`Bad line number. Line: ${line}, lineStarts.length: ${starts.length}`);
     return starts[line]! + character;
   }
-  getOrCreateNodeAtIndex(index: number): AstNode {
-    return this.file.node(index);
-  }
+  getOrCreateNodeAtIndex(index: number): AstNode { return this.file.node(index); }
 }
 
 function astModifierFlag(kind: number): number {
   switch (kind) {
-    case AstKind.StaticKeyword:
-      return AstModifierFlags.Static;
-    case AstKind.PublicKeyword:
-      return AstModifierFlags.Public;
-    case AstKind.ProtectedKeyword:
-      return AstModifierFlags.Protected;
-    case AstKind.PrivateKeyword:
-      return AstModifierFlags.Private;
-    case AstKind.AbstractKeyword:
-      return AstModifierFlags.Abstract;
-    case AstKind.AccessorKeyword:
-      return AstModifierFlags.Accessor;
-    case AstKind.ExportKeyword:
-      return AstModifierFlags.Export;
-    case AstKind.DeclareKeyword:
-      return AstModifierFlags.Ambient;
-    case AstKind.ConstKeyword:
-      return AstModifierFlags.Const;
-    case AstKind.DefaultKeyword:
-      return AstModifierFlags.Default;
-    case AstKind.AsyncKeyword:
-      return AstModifierFlags.Async;
-    case AstKind.ReadonlyKeyword:
-      return AstModifierFlags.Readonly;
-    case AstKind.OverrideKeyword:
-      return AstModifierFlags.Override;
-    case AstKind.InKeyword:
-      return AstModifierFlags.In;
-    case AstKind.OutKeyword:
-      return AstModifierFlags.Out;
-    case AstKind.Decorator:
-      return AstModifierFlags.Decorator;
-    default:
-      return AstModifierFlags.None;
+    case AstKind.StaticKeyword: return AstModifierFlags.Static;
+    case AstKind.PublicKeyword: return AstModifierFlags.Public;
+    case AstKind.ProtectedKeyword: return AstModifierFlags.Protected;
+    case AstKind.PrivateKeyword: return AstModifierFlags.Private;
+    case AstKind.AbstractKeyword: return AstModifierFlags.Abstract;
+    case AstKind.AccessorKeyword: return AstModifierFlags.Accessor;
+    case AstKind.ExportKeyword: return AstModifierFlags.Export;
+    case AstKind.DeclareKeyword: return AstModifierFlags.Ambient;
+    case AstKind.ConstKeyword: return AstModifierFlags.Const;
+    case AstKind.DefaultKeyword: return AstModifierFlags.Default;
+    case AstKind.AsyncKeyword: return AstModifierFlags.Async;
+    case AstKind.ReadonlyKeyword: return AstModifierFlags.Readonly;
+    case AstKind.OverrideKeyword: return AstModifierFlags.Override;
+    case AstKind.InKeyword: return AstModifierFlags.In;
+    case AstKind.OutKeyword: return AstModifierFlags.Out;
+    case AstKind.Decorator: return AstModifierFlags.Decorator;
+    default: return AstModifierFlags.None;
   }
 }

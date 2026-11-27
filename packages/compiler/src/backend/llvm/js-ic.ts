@@ -1,3 +1,4 @@
+// This file was modified from scriptc (Apache-2.0); see MODIFICATIONS.md.
 /* Inline-cache lowering of the dynamic tier (two-tier design stage S4;
  * runtime scr_js_object.c, sites ir/js-ic.ts).
  *
@@ -46,9 +47,9 @@ import { DYN_INDEX_SET } from "./common.js";
 import { DYN_KIND } from "./dyn.js";
 import { dispatchesCall } from "./integer-clones.js";
 import type { ExprOf, LlValue, LlvmEmitterContext } from "./expr-context.js";
-import { JS_BITS } from "./jsval-encoding.js";
+import { JS_BITS } from "./jsword-encoding.js";
 import { emitGroupedGet, emitGroupedSet } from "./js-groups.js";
-import { jsImmediates } from "./jsval.js";
+import { jsImmediates } from "./jsword.js";
 
 type Host = LlvmEmitterContext;
 
@@ -264,7 +265,7 @@ function inlineReplace(
 }
 
 /** A property value (a dyn cell, `owned` or borrowed from its entry) as
- * the site's result type, owned. A jsval result reads a number cell as an
+ * the site's result type, owned. A jsword result reads a number cell as an
  * immediate, so arithmetic on it takes no reference and a later store can
  * update an unshared number cell in place; any other cell is carried under
  * the cell tag. */
@@ -287,7 +288,7 @@ export function asResult(host: Host, cell: string, e: IrExpr, owned: boolean | s
     B.line(`${held} = phi ptr [ ${cell}, %${from} ], [ ${retained}, %${retainedEnd} ]`);
     return held;
   };
-  if (e.type.kind !== "jsval") return hold();
+  if (e.type.kind !== "jsword") return hold();
   const number = B.newLabel("icr.num");
   const other = B.newLabel("icr.cell");
   const join = B.newLabel("icr.j");
@@ -654,7 +655,7 @@ export function capsuleCallSite(
 ): CapsuleCallSite | null {
   if (!jsIcMethods(host) || !helper.name.startsWith("%dyn.class.call.")) return null;
   if (helper.async !== undefined || helper.generator !== undefined) return null;
-  if (e.type.kind !== "jsval" && e.type.kind !== "dyn") return null;
+  if (e.type.kind !== "jsword" && e.type.kind !== "dyn") return null;
   const { params } = helper;
   const arity = params.length - 3;
   if (
@@ -787,7 +788,7 @@ function capsuleCall(
 }
 
 /** A method the site can call with the ordinary or borrowed ABI and a
- * dyn, jsval or void result. */
+ * dyn, jsword or void result. */
 function plainMethod(host: Host, name: string, returnsReceiver: boolean): boolean {
   const fn = host.fnByName.get(name);
   if (fn === undefined || fn.async !== undefined || fn.generator !== undefined) return false;
@@ -795,7 +796,7 @@ function plainMethod(host: Host, name: string, returnsReceiver: boolean): boolea
   if (host.int32Abis.has(name)) return false;
   if (dispatchesCall(host.integerClones, host.currentFunctionName, name)) return false;
   const result = fn.returnType.kind;
-  return returnsReceiver ? result === "void" : result === "dyn" || result === "jsval";
+  return returnsReceiver ? result === "void" : result === "dyn" || result === "jsword";
 }
 
 /** A call of a method dispatch helper from dynamic-tier code whose class
@@ -841,9 +842,9 @@ export function emitCapsuleCall(
   const branches = matched.map((label, i) => `[ ${i}, %${label} ]`);
   B.line(`${branch} = phi i32 ${[...branches, `[ -1, %${resolveEnd} ]`].join(", ")}`);
   // The callback's result for an inline capsule is never read: undefined
-  // for a jsval result, null for a dyn one.
+  // for a jsword result, null for a dyn one.
   const unread =
-    site.callback.returnType.kind === "jsval"
+    site.callback.returnType.kind === "jsword"
       ? `inttoptr (i64 ${JS_BITS.undefined} to ptr)`
       : "null";
   const cb = B.tmp();
@@ -865,7 +866,7 @@ export function emitCapsuleCall(
     let out: string;
     if (call.returnsReceiver) {
       const held = host.retainFrame(receiver.name, DYN);
-      out = e.type.kind === "jsval" ? cellWord(host, held) : held;
+      out = e.type.kind === "jsword" ? cellWord(host, held) : held;
     } else {
       const returned = host.fnByName.get(call.method)!.returnType;
       out = returned.kind === e.type.kind ? result : asResult(host, result, e, true);
@@ -887,7 +888,7 @@ export function emitCapsuleCall(
   return host.own({ name: out, type: e.type });
 }
 
-/** A held cell as a jsval word. */
+/** A held cell as a jsword word. */
 function cellWord(host: Host, cell: string): string {
   const B = host.B;
   const bits = B.tmp();
@@ -1034,11 +1035,11 @@ function emitGet(host: Host, e: ExprOf<"call">, callee: IrFunction, key: string)
   return host.own({ name: out, type: e.type });
 }
 
-/** A number as the site's result type: an immediate for a jsval result,
+/** A number as the site's result type: an immediate for a jsword result,
  * a fresh cell (as the generic read makes) for a dyn one. */
 function numberResult(host: Host, d: string, e: IrExpr): string {
   const B = host.B;
-  if (e.type.kind === "jsval") {
+  if (e.type.kind === "jsword") {
     // Counts are never NaN: the bits are the word.
     const bits = B.tmp();
     const word = B.tmp();
@@ -1052,7 +1053,7 @@ function numberResult(host: Host, d: string, e: IrExpr): string {
   return cell;
 }
 
-/** The jsval word of a store's value when the jsval pass left one: the
+/** The jsword word of a store's value when the jsword pass left one: the
  * operand of `js.toDyn`. The word of a double is its bits with NaN
  * canonicalized, the same word the pass carries for it. */
 function storeWord(host: Host, value: IrExpr): string | null {
@@ -1064,7 +1065,7 @@ function storeWord(host: Host, value: IrExpr): string | null {
 function emitSet(host: Host, e: ExprOf<"call">, callee: IrFunction, key: string): LlValue {
   const B = host.B;
   const receiver = emitBorrowedInput(host, e.args[0]!);
-  // A value the jsval pass left as `js.toDyn(x)` is stored from the jsval
+  // A value the jsword pass left as `js.toDyn(x)` is stored from the jsword
   // itself: a number replaces the value of an unshared number cell in place
   // instead of boxing a new one, and the generic path boxes it only where it
   // must store a cell.
@@ -1083,7 +1084,7 @@ function emitSet(host: Host, e: ExprOf<"call">, callee: IrFunction, key: string)
   const probe = B.newLabel("ics.probe");
   const slow = B.newLabel("ics.slow");
   const join = B.newLabel("ics.j");
-  // The cell the probe and the helper store when the value is a jsval;
+  // The cell the probe and the helper store when the value is a jsword;
   // the statement's frame releases it.
   let boxedSlot: string | null = null;
   if (word !== null) {
@@ -1331,7 +1332,7 @@ function emitNativeNumberElement(
   B.line(`${slot} = getelementptr inbounds double, ptr ${data}, i64 ${i}`);
   B.line(`${value} = load double, ptr ${slot}`);
   let out: string;
-  if (e.type.kind === "jsval") {
+  if (e.type.kind === "jsword") {
     const raw = B.tmp();
     const nan = B.tmp();
     const bits = B.tmp();

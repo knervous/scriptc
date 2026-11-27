@@ -1,7 +1,0 @@
-{
- "order": [
-  "<repo>/tests/corpus/http-write-information-typed-headers/headers.ts",
-  "<repo>/tests/corpus/http-write-information-typed-headers/main.mjs"
- ],
- "diags": []
-}

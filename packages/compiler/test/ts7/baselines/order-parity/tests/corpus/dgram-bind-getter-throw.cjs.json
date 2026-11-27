@@ -1,6 +1,0 @@
-{
- "order": [
-  "<repo>/tests/corpus/dgram-bind-getter-throw.cjs"
- ],
- "diags": []
-}

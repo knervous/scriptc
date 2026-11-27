@@ -1,6 +1,0 @@
-{
- "order": [
-  "<repo>/tests/corpus/numeric-call-specialization.ts"
- ],
- "diags": []
-}

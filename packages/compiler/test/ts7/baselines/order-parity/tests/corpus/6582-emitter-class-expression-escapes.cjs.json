@@ -1,6 +1,0 @@
-{
- "order": [
-  "<repo>/tests/corpus/6582-emitter-class-expression-escapes.cjs"
- ],
- "diags": []
-}

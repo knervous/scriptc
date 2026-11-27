@@ -1,3 +1,4 @@
+// @dynamic
 // The routed CALL and METHOD-DISPATCH arms over island values held in
 // 'unknown' (lane dyn-routing-ops): a dyn callee holding an engine
 // function routes through scr_jsval_call; method dispatch on a wrapped

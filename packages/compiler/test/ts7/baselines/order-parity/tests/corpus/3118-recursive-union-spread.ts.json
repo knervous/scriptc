@@ -1,6 +1,0 @@
-{
- "order": [
-  "<repo>/tests/corpus/3118-recursive-union-spread.ts"
- ],
- "diags": []
-}

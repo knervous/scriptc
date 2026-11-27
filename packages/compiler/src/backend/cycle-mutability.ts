@@ -1,7 +1,8 @@
+// This file was modified from scriptc (Apache-2.0); see MODIFICATIONS.md.
 import type { IrExpr, IrFunction, IrModule, IrStmt, IrType } from "../ir/ir.js";
 import { RUNTIME_EMITTER_CLASS, RUNTIME_STREAM_CLASSES, typeKey } from "../ir/ir.js";
 import { dynamicFieldStores, type DynamicFieldStores } from "../ir/int32-slots.js";
-import { everyExprChild, everyStmtChild, everyTypeChild } from "../ir/traverse.js";
+import { everyExprChild, everyModuleNode, everyStmtChild, everyTypeChild } from "../ir/traverse.js";
 import { resultSlotStore } from "./result-slots.js";
 
 /** Which shape fields can be written after their object escapes.
@@ -45,7 +46,7 @@ import { resultSlotStore } from "./result-slots.js";
  *   holds no object twice (convertsTree) builds each record while only its
  *   parent refers to it, as a literal does, and marks nothing;
  * - runtime-rooted hierarchies (errors, emitters, streams) are mutable;
- * - library builds disable the refinement.
+ * - library builds and dynamic-island programs disable the refinement.
  *
  * Keys: `object:<hierarchy root>` / `record:<id>` units, fields as
  * `<unit>\0<field>`. */
@@ -61,6 +62,14 @@ export interface CycleMutability {
   /** Individually mutable fields. */
   fields: Set<string>;
 }
+
+const DYNAMIC_ISLAND_EXPRS = new Set<string>([
+  "jsMarshal",
+  "jsOp",
+  "jsExit",
+  "jsBridgePromise",
+  "dynFromJsval",
+]);
 
 /** Expressions whose operands may be converted to checked-dynamic values
  * (typed-ref capsules) by the backend or runtime. */
@@ -123,6 +132,16 @@ export function computeCycleMutability(
   const ctorOf = new Map<string, (typeof classes)[number]>(
     classes.map((c) => [`%${c.name}.constructor`, c]),
   );
+
+  // The dynamic island stores engine values in native slots and can reach
+  // any object through them: no refinement.
+  let island = false;
+  everyModuleNode(mod, {
+    expr: (e) => !(island = island || DYNAMIC_ISLAND_EXPRS.has(e.kind)),
+    stmt: () => true,
+    type: (t) => !(island = island || t.kind === "jsval"),
+  });
+  if (island) return { ...result, all: true };
 
   for (const c of classes) {
     if (c.runtime || c.name === RUNTIME_EMITTER_CLASS || RUNTIME_STREAM_CLASSES.has(c.name))

@@ -1,3 +1,5 @@
+// This file was modified from scriptc (Apache-2.0); see MODIFICATIONS.md.
+import { browserTarget, nativeDyn, runtimeModuleId } from "../frontend/browser-target.js";
 import { InternalCompilerError } from "../errors.js";
 import type { IrLibFn } from "./builtin-signatures.js";
 export type { IrLibFn } from "./builtin-signatures.js";
@@ -76,6 +78,35 @@ export const BYTES_ELEMENT_NAME: Record<IrBytesElem, string> = {
   f32: "Float32Array",
   f64: "Float64Array",
 };
+
+/** The element kinds this fork's frontend and WasmGC backend know, in their
+ * order: upstream's tables above add Float16Array ("f16") before Float32Array,
+ * which would shift every kind index the WasmGC backend emits and teach the
+ * frontend a typed array neither lowers. Same entries otherwise (typed over
+ * every kind; neither side ever holds "f16"). */
+export const FORK_BYTES_ELEMENT_SIZE = {
+  u8: 1,
+  u8c: 1,
+  i8: 1,
+  u16: 2,
+  i16: 2,
+  u32: 4,
+  i32: 4,
+  f32: 4,
+  f64: 8,
+} as Record<IrBytesElem, number>;
+
+export const FORK_BYTES_ELEMENT_NAME = {
+  u8: "Uint8Array",
+  u8c: "Uint8ClampedArray",
+  i8: "Int8Array",
+  u16: "Uint16Array",
+  i16: "Int16Array",
+  u32: "Uint32Array",
+  i32: "Int32Array",
+  f32: "Float32Array",
+  f64: "Float64Array",
+} as Record<IrBytesElem, string>;
 
 export type IrType =
   | { kind: "f64" }
@@ -311,7 +342,8 @@ export type IrType =
   /** Heap, refcounted closure. `rest` marks a variadic function value.
    * `restAbi: "typed"` spells one trailing typed array in `params`; static
    * call sites pack their surplus arguments into it before `callValue`.
-   * An absent `restAbi` is the checked-dynamic
+   * `restAbi: "jsval"` similarly spells one trailing engine array for an
+   * island host callback. An absent `restAbi` is the legacy checked-dynamic
    * JS form: `params` stays the declared non-rest list and the lifted
    * function has one hidden trailing ScrDyn array filled by its boxed call
    * thunk. `argumentsAll` keeps that hidden ABI but fills it with every
@@ -332,7 +364,7 @@ export type IrType =
       params: IrType[];
       ret: IrType;
       rest?: true;
-      restAbi?: "typed";
+      restAbi?: "jsval" | "typed";
       argumentsAll?: true;
       argumentsPresence?: true;
     }
@@ -349,7 +381,7 @@ export type IrType =
    * completion against C's one signature sound. Allowed in locals,
    * globals, params, returns, class/record fields, capture boxes, array
    * elements, Map VALUES, and union arms; fenced out of Map keys, Set
-   * elements, JSON, and ToString. Unknown slots retain
+   * elements, JSON, jsval conversion, and ToString. Unknown slots retain
    * class identity and allow an exact typed constructor round trip. */
   | { kind: "classval"; className: string }
   /** An ECMAScript module namespace object for one statically-known module.
@@ -383,17 +415,25 @@ export type IrType =
    * <type>' first" hint — or, in JavaScript sources, met with per-site
    * checked lowerings (SEMANTICS.md 115-117). */
   | { kind: "dyn" }
+  /** An island value handle — the type of `any` under --dynamic. Runtime
+   * representation is a refcounted cell (ScrJsval) owning one embedded-
+   * engine value. It can live in locals, globals, parameters, returns,
+   * arrays, class fields, and ambient AbortSignal/AbortController record
+   * fields. Operations on jsval compile to engine calls (jsOp) with
+   * JS-exact semantics; exits back to static types are validated (jsExit).
+   * This kind exists only with the dynamic option. */
+  | { kind: "jsval" }
   /** A dynamic-tier value (two-tier design §5.1, stage S3): one 64-bit
    * NaN-boxed word. Numbers, booleans, undefined and null are immediates
    * (no allocation); strings and BigInts are the static tier's own objects
    * under a pointer tag; every other value is a `dyn` cell under the cell
    * tag. Only dynamic-tier functions operate on it (ir/tiers.ts, I1), and
-   * only through the `js.*` builtins, locals and moves: the jsval pass
-   * (ir/jsval.ts) introduces it after lowering, never the frontend. Static
+   * only through the `js.*` builtins, locals and moves: the jsword pass
+   * (ir/jsword.ts) introduces it after lowering, never the frontend. Static
    * functions see it only as the operand or result of a boundary
    * conversion. Refcounted: retain/release skip immediates. 32-bit targets
    * represent it as a boxed `dyn` cell. */
-  | { kind: "jsval" }
+  | { kind: "jsword" }
   /** A catch binding or its closure capture (never parameters, returns,
    * fields, arms or elements). The one global form is a module's recorded
    * evaluation error, written only from that module's catch binding and
@@ -501,6 +541,7 @@ const POINTER_KIND_LIST = [
   "union",
   "dyn",
   "jsval",
+  "jsword",
   "caught",
   "promise",
   "generator",
@@ -558,7 +599,8 @@ export const RUNTIME_RC_STEMS: Record<IrType["kind"], string> = {
   record: "",
   union: "scr_union",
   dyn: "scr_dyn",
-  jsval: "scr_js",
+  jsval: "scr_jsval",
+  jsword: "scr_js",
   caught: "scr_caught",
   promise: "scr_promise",
   generator: "scr_gen",
@@ -672,6 +714,7 @@ export const CHILDWRITER_T: IrType = { kind: "childWriter" };
 export const PROCSTREAM_T: IrType = { kind: "procStream" };
 export const VOID: IrType = { kind: "void" };
 export const DYN: IrType = { kind: "dyn" };
+export const JSVAL: IrType = { kind: "jsval" };
 /** The `foreign` type (scope-B NI-4): a value owned by a Node island,
  * typed by the island package's declarations. Objects stay in V8 and cross
  * as handles (identity is the V8 object's); member operations compile from
@@ -680,7 +723,7 @@ export const DYN: IrType = { kind: "dyn" };
  * dyn values), so foreign -> any is the identity and the generic dyn paths
  * (equality, inspection, any slots) apply unchanged. */
 export const FOREIGN: IrType = DYN;
-export const JSVAL: IrType = { kind: "jsval" };
+export const JSWORD: IrType = { kind: "jsword" };
 export const CAUGHT: IrType = { kind: "caught" };
 export const UNDEFINED_T: IrType = { kind: "undefinedT" };
 export const NULL_T: IrType = { kind: "nullT" };
@@ -716,6 +759,7 @@ export function isSupportedArrayElem(t: IrType): boolean {
     case "union":
     case "func":
     case "promise":
+    case "jsval":
     case "regex":
     case "date":
     case "child":
@@ -728,6 +772,9 @@ export function isSupportedArrayElem(t: IrType): boolean {
     case "classval":
     case "moduleNs":
       return true;
+    // Browser target: a Date is an externref page value, stored like a jsval.
+    case "date":
+      return browserTarget();
     default:
       return false;
   }
@@ -753,32 +800,27 @@ export function setOf(elem: IrType): IrType {
  * classes and arrays can point back at their collection, so constructors
  * must carry key tracing as well as retain/release adapters. */
 export function isIdentityCollectionKey(t: IrType): boolean {
-  return (
-    t.kind === "record" ||
-    t.kind === "object" ||
-    t.kind === "array" ||
-    t.kind === "netServer" ||
-    t.kind === "symbol" ||
+  return t.kind === "record" || t.kind === "object" || t.kind === "array" ||
+    t.kind === "netServer" || t.kind === "symbol" ||
     // A function value is one closure for its whole life (top-level
     // functions intern one immortal closure, inner closures allocate once
     // per evaluation), so pointer identity is JS function identity.
-    // Closures are cycle-headered and traced like records.
+    // Closures are cycle-headered and traced like records. (Browser target:
+    // closures are GC references with identity: listener sets.)
     t.kind === "func" ||
     // A promise is one object for its whole life, so pointer identity is
     // JS promise identity; the runtime's scr_promise_{retain,release,trace}_v
-    // adapters already serve Map values and boxed captures.
+    // adapters already serve Map values and boxed captures. (Browser target:
+    // one $Promise GC object, keyed by identity: in-flight sets.)
     t.kind === "promise" ||
-    t.kind === "date" ||
-    // A Map, a Set and a typed array are one object each for their whole
-    // life, so pointer identity is JS identity here too (JavaScript compares
-    // every object key by identity). Their runtime families already carry
-    // the ref-slot adapters this table needs: scr_map_retain/release/trace_v
-    // serve Maps and Sets, and a typed array is a leaf
-    // (scr_bytes_retain/release_v, no trace).
-    t.kind === "map" ||
-    t.kind === "set" ||
-    t.kind === "bytes"
-  );
+    // Dates key by identity off the browser target (upstream); the browser
+    // target keeps the fork's rule. So do Maps, Sets and typed arrays: one
+    // object each for their whole life, so pointer identity is JS identity
+    // (their runtime families already carry the ref-slot adapters this table
+    // needs: scr_map_retain/release/trace_v serve Maps and Sets, and a typed
+    // array is a leaf, scr_bytes_retain/release_v, no trace).
+    (!browserTarget() &&
+      (t.kind === "date" || t.kind === "map" || t.kind === "set" || t.kind === "bytes"));
 }
 
 /** Primitive keys compare by value and reference keys by identity. Union
@@ -850,11 +892,19 @@ export function isSupportedSetElem(t: IrType, unionArms?: IrType[]): boolean {
 }
 
 /** The Map VALUE fence: scalars, supported native references, closures
- * and checked values.
+ * and checked values. jsval has no native slot.
  * Record/object/union values can point back at the map holding them, which
  * is exactly why ref-valued maps are cycle-capable (see the backend's
  * cycle analysis and docs/memory.md). Shared frontend/validator. */
 export function isSupportedMapValue(t: IrType): boolean {
+  // Browser target (WasmGC): an island value is an externref, storable anywhere.
+  if ((t.kind === "jsval" || t.kind === "date") && browserTarget()) return true;
+  // Browser target: a typed array is a GC reference like an array, so a Map
+  // or index-signature slot holds it as is (Map<string, Float32Array>).
+  if (t.kind === "bytes" && browserTarget()) return true;
+  // Browser target: a closure is a GC reference too (Map<string, () => Counts> — a reader/handler registry, the Map
+  // form of the index-signature command registry).
+  if (t.kind === "func" && browserTarget()) return true;
   switch (t.kind) {
     case "bytes":
     case "dyn":
@@ -961,13 +1011,18 @@ export function primitiveConstructorType(ret: IrType): IrType & { kind: "func" }
   };
 }
 
-/** Maps and sets use tagged union storage and retain their native identity.
- * Joined unions (inferred joins of member reads and array elements) keep
- * promises nullable-only; declared maybe-promise unions are admitted by
- * maybePromiseUnionArmsOk. */
+/** Maps, sets and promises may share a union with null/undefined only.
+ * Unit tag tests can narrow nullable containers without losing identity;
+ * arbitrary data siblings require a separate runtime narrowing operation.
+ * Share this rule across checker mapping, synthesized unions and validation.
+ * (Upstream's LLVM lane gives maps and sets tagged union storage and admits
+ * them beside data arms; this fork's frontend and WasmGC backend keep the
+ * nullable-only rule, so the shared predicate stays the fork's.) */
 export function unionContainerArmsOk(arms: IrType[]): boolean {
   return arms.every(
-    (a, i) => a.kind !== "promise" || arms.every((b, j) => j === i || isUnitType(b)),
+    (a, i) =>
+      (a.kind !== "map" && a.kind !== "set" && a.kind !== "promise") ||
+      arms.every((b, j) => j === i || isUnitType(b)),
   );
 }
 
@@ -1001,6 +1056,7 @@ export function typeKey(t: IrType): string {
     case "symbol":
     case "dyn":
     case "jsval":
+    case "jsword":
     case "caught":
     case "void":
       return t.kind;
@@ -1020,7 +1076,9 @@ export function typeKey(t: IrType): string {
       const slots = t.params.map(typeKey);
       if (t.rest === true) {
         slots.push(
-          t.restAbi === "typed"
+          t.restAbi === "jsval"
+            ? "...jsval[]"
+            : t.restAbi === "typed"
             ? "...typed[]"
             : t.argumentsPresence
               ? "presence[]"
@@ -1040,7 +1098,7 @@ export function typeKey(t: IrType): string {
     case "classval":
       return `classval:${t.className}`;
     case "moduleNs":
-      return `moduleNs:${t.moduleId}`;
+      return `moduleNs:${runtimeModuleId(t.moduleId)}`;
     case "record":
       return `record:${t.shapeId}`;
     case "union":
@@ -1057,25 +1115,23 @@ export function typeKey(t: IrType): string {
   }
 }
 
-/** Sorts arms into `typeKey` order, building each key once.
+/** Sorts arms into `typeKey` order, building each key once (ported from upstream scriptc 32b851332f).
  *
- * The inline form this replaces, `arms.sort((a, b) => (typeKey(a) <
- * typeKey(b) ? -1 : 1))`, builds two keys for every comparison — 2·n·log n
- * key strings per sort, and a key walks its whole type. This form builds n
- * keys and compares them from a map. The comparator answers the same way for
- * every pair (a pure function of the two arms), so the sort visits the same
- * comparisons and leaves the arms in the same order; a sort compacts the
- * array in place, and so does this. */
-export function sortArms(arms: IrType[]): IrType[] {
+ * The inline form this replaces, `arms.sort((a, b) => (typeKey(a) < typeKey(b) ? -1 : 1))`, builds two keys for
+ * every comparison: 2·n·log n key strings per sort, and a key walks its whole type. This form builds n keys and
+ * compares them from a map. The comparator answers the same way for every pair (a pure function of the two arms),
+ * so the sort visits the same comparisons and leaves the arms in the same order; a sort compacts the array in
+ * place, and so does this. */
+export function sortArms<T extends IrType>(arms: T[]): T[] {
   if (arms.length < 2) return arms;
   const keys = new Map<IrType, string>();
   for (const arm of arms) if (!keys.has(arm)) keys.set(arm, typeKey(arm));
   return arms.sort((a, b) => (keys.get(a)! < keys.get(b)! ? -1 : 1));
 }
 
-/** `sortArms` for the total-order form `< -1 : > 1 : 0`, which leaves arms
- * with equal keys in their input order instead of reversing them. */
-export function sortArmsTotal(arms: IrType[]): IrType[] {
+/** `sortArms` for the total-order form `< -1 : > 1 : 0`, which leaves arms with equal keys in their input order
+ * instead of reversing them. */
+export function sortArmsTotal<T extends IrType>(arms: T[]): T[] {
   if (arms.length < 2) return arms;
   const keys = new Map<IrType, string>();
   for (const arm of arms) if (!keys.has(arm)) keys.set(arm, typeKey(arm));
@@ -1193,6 +1249,11 @@ export interface IrModule {
   /** Bumped on any breaking IR change; serialize.ts refuses mismatches. */
   irVersion: 17;
   sourceFile: string;
+  /** Browser target: dyn and island values are the page engine's values, so
+   * every type crosses the island/dyn boundary (wasmgc engine dyn). */
+  browser?: true;
+  /** Sloppy-mode JavaScript sources (no "use strict", not an ES module): a write to a frozen record is ignored there, a TypeError elsewhere. */
+  sloppyFiles?: string[];
   functions: IrFunction[];
   /** Class shapes. Constructors and methods are ordinary module functions
    * named `%Class.constructor` / `%Class.method` whose first param is
@@ -1207,12 +1268,40 @@ export interface IrModule {
    * per-file `%init.<i>` functions; ids live in a distinct "%g." namespace so
    * they can never collide with function-local ids. */
   globals?: IrGlobal[];
+  /** The embedded npm runtime graph (--dynamic builds with npm imports):
+   * every reached module's SOURCE, keyed by resolved path, plus the
+   * (importer, specifier) → target edges the island's module loader and
+   * require shim resolve against. Emitted as static strings — binaries
+   * never read node_modules at runtime. Edge targets are module keys or
+   * "node:*" builtins (island-shimmed). */
+  embedded?: {
+    /** `esm` (CommonJS modules only) is the synthesized ESM facade the
+     * island loader evaluates when an ES module imports the CJS file:
+     * default plus the named exports LEXED from the source at build time
+     * (cjs-lexer.ts — the compiler's port of Node's vendored CJS lexer). */
+    modules: {
+      key: string;
+      source: string;
+      format: "esm" | "cjs" | "json";
+      esm?: string;
+      /** Parsed/bound embedded source reaches the engine's global fetch. */
+      usesFetch?: true;
+    }[];
+    /** `kind` picks Node's "exports" condition set per CALL FORM: one
+     * (from, specifier) can name a dual package's ESM entry behind an
+     * "import" edge AND its CJS entry behind a "require" edge; "any"
+     * serves both lookups (relative files, builtins). */
+    edges: { from: string; specifier: string; to: string; kind: "any" | "import" | "require" }[];
+  };
   /** Record shapes, in first-seen (`r0`, `r1`, ...) order. Fields are in
    * CANONICAL order (sorted by name) — the shape's identity; a `recordLit`'s
    * fields stay in source order (evaluation order) independently. The
    * frontend guarantees structural dedup: no two entries share a canonical
    * field list. Backends emit one struct per shape, exactly like classes. */
   records?: IrRecordShape[];
+  /** "<shapeId>.<field>" for record string fields every TypeScript type behind the shape declared as a union of string
+   * literals (a closed set of values): the WasmGC backend may hold them as atoms even when untyped code fills them. */
+  closedStringFields?: string[];
   /** Tagged unions, in first-seen (`u0`, `u1`, ...) order. `arms` are in
    * CANONICAL order (sorted by typeKey) — the union's identity; the arm's
    * INDEX in this list is its runtime tag. The frontend guarantees
@@ -1326,6 +1415,28 @@ export interface IrModule {
    * emissions stay conformance-identical by construction. Absent on every
    * executable build (the backends emit main() exactly as always). */
   lib?: IrLibSection;
+  /** Object mode (link/object.ts) only: the class hierarchy the lowering decided dispatch against (direct calls where
+   * no override exists below a class, exact receivers, leaf classes). A linked world must agree. */
+  objectHierarchy?: IrObjectClassView[];
+  /** Object mode only: sha256 of the module's text as the lowering read it, and of the whole program's (every source
+   * file's path and text, in path order): the revision the object was lowered from. */
+  objectSource?: string;
+  objectProgram?: string;
+  /** Object mode only: each module file's sha256 (by absolute path), for every module the program tags. */
+  objectFiles?: Record<string, string>;
+  /** Object mode only: what the lowering's program-dependent dispatchers enumerate (dispatchStateNames). */
+  objectDispatch?: Record<string, string[]>;
+  /** Object mode only: deferred module initializers no lowered code read (`%g.<binding>`, `class:<name>`,
+   * `prototype:<name>`), and other modules' ones this lowering's code read (header mode). */
+  objectDeferred?: string[];
+  objectDemands?: string[];
+  /** Object mode only: every program file's sha256; each owned module's read closure (files, link/build.ts reuse);
+   * the interface-arms digest (Lowerer.objectArmsDigest). */
+  objectSources?: Record<string, string>;
+  objectReads?: Record<string, string[]>;
+  objectArms?: string;
+  /** Object mode only: every module unit the lowering knew, declared or not reached (a recompile tells new units by it). */
+  objectUnits?: string[];
   /** Contract types (@scriptc/types) the frontend verified against every
    * write in the program (ir/contract-check.ts). Backends may rely on them
    * unconditionally. Absent when the program writes no contract. */
@@ -1418,22 +1529,16 @@ export interface IrContracts {
   singleOwner?: string[];
 }
 
-export type IrFfiValueParamClass =
-  | "f64"
-  | "f32"
-  | "bool"
-  | "u8"
-  | "i8"
-  | "u16"
-  | "i16"
-  | "u32"
-  | "i32"
-  | "i64"
-  | "u64"
-  | "pointer"
-  | "string"
-  | "bytes"
-  | "mutable-bytes";
+/** One class as an object's lowering saw it: its base and its members (methods and accessors by name, `<name> abstract`
+ * for abstract ones, `<name> generic` for generic methods). `instance` marks a generic class instance. */
+export interface IrObjectClassView {
+  name: string;
+  base?: string;
+  members: string[];
+  instance?: true;
+}
+
+export type IrFfiValueParamClass = "f64" | "f32" | "bool" | "u8" | "i8" | "u16" | "i16" | "u32" | "i32" | "i64" | "u64" | "pointer" | "string" | "bytes" | "mutable-bytes" | "retained-bytes" | "dyn";
 export type IrFfiCallbackParamClass =
   | "f64"
   | "f32"
@@ -1450,20 +1555,7 @@ export type IrFfiCallbackParamClass =
   | "cstring"
   | "string"
   | "bytes";
-export type IrFfiReturnClass =
-  | "f64"
-  | "f32"
-  | "bool"
-  | "u8"
-  | "i8"
-  | "u16"
-  | "i16"
-  | "u32"
-  | "i32"
-  | "i64"
-  | "u64"
-  | "pointer"
-  | "void";
+export type IrFfiReturnClass = "f64" | "f32" | "bool" | "u8" | "i8" | "u16" | "i16" | "u32" | "i32" | "i64" | "u64" | "pointer" | "void" | "dyn" | "shared-bytes";
 
 export interface IrFfiContextParam {
   /** Manifest-local id of the callback whose ScrClosure* occupies this ABI slot. */
@@ -1528,9 +1620,15 @@ export function ffiClassType(
       return STRING;
     case "bytes":
     case "mutable-bytes":
+    case "retained-bytes":
+    // A record the linked module keeps in the shared memory, read in place (wasm link only).
+    case "shared-bytes":
       return BYTES_U8;
     case "void":
       return VOID;
+    // A dyn value crossing between compiled wasm modules (WasmGcLink.sharedRuntime).
+    case "dyn":
+      return DYN;
     default:
       return F64;
   }
@@ -1578,6 +1676,9 @@ export interface IrFfiImport {
   callbackTarget?: string;
   params: IrFfiParam[];
   returns: IrFfiReturnClass;
+  /** Wasm link only: a JSPI suspending import from module "jspi" (the host
+   * returns a Promise; the wasm stack suspends until it settles). */
+  suspending?: true;
 }
 
 /** One export-map entry, resolved: the external ccc symbol, the IR
@@ -1811,6 +1912,14 @@ export interface IrClassDef {
    * `get:<prop>` / `set:<prop>` entries — names no user identifier can
    * spell — and behave as ordinary methods here. */
   methods?: string[];
+  /** Every method/accessor name DECLARED on this class, before reachability
+   * pruning (`methods` keeps only those with emitted functions). Reflection
+   * only — `"name" in instance` from untyped code — never implies a function. */
+  declaredMethods?: string[];
+  /** Instances can reach page JavaScript (the class bridge: a page facade
+   * whose prototype chain calls the class's methods and accessors), so every
+   * method in `methods` is a root of the module, called or not. */
+  pageVisible?: true;
   /** String names of the methods and accessors this class declares on its
    * prototype (not inherited), independent of method reachability. A
    * reflective `in` over an instance seen as `unknown` answers them. */
@@ -1860,19 +1969,11 @@ export const RUNTIME_ERROR_CLASSES: ReadonlyMap<
   ["%ReferenceError", { lib: "ReferenceError", kind: 5, base: "%Error" }],
   ["%EvalError", { lib: "EvalError", kind: 6, base: "%Error" }],
   ["%URIError", { lib: "URIError", kind: 7, base: "%Error" }],
-  // AggregateError — Promise.any's rejection and its own constructor. Its
-  // `errors` list lives in a runtime-side slot beyond the ScrError prefix
-  // (the DOMException arrangement), read through error.aggregateErrors, so
-  // user `extends AggregateError` is fenced too.
-  ["%AggregateError", { lib: "AggregateError", kind: 8, base: "%Error" }],
-  // node:assert's AssertionError — every assertion failure and its own
-  // constructor. The Error layout; actual, expected, operator,
-  // generatedMessage and diff are properties of the error's dyn view.
-  ["%AssertionError", { lib: "AssertionError", kind: 9, base: "%Error" }],
-  // SuppressedError — the error a `using` disposal raises over a pending
-  // error, and its own constructor. The Error layout; error and suppressed
-  // are non-enumerable properties of the error's dyn view.
-  ["%SuppressedError", { lib: "SuppressedError", kind: 10, base: "%Error" }],
+  // Upstream registers AggregateError (kind 8), AssertionError (kind 9) and
+  // SuppressedError (kind 10) here. This fork's frontend registers a class
+  // for every entry in every module, which changes WasmGC output, and it
+  // lowers no construction of those three, so the fork keeps the table
+  // without them.
 ]);
 
 /** The runtime-provided node:events EventEmitter class (ScrEmitter /
@@ -2305,6 +2406,10 @@ export interface IrFunction {
   /** Original TS name (mangling is a backend concern). Lifted lambdas get
    * synthetic '%'-prefixed names ('%' can't appear in a TS identifier). */
   name: string;
+  /** Class instance methods: how each parameter after `this` takes the
+   * JavaScript arguments (the frontend's ParamMode), for a caller that has
+   * only an arguments list (a page facade calling the method). */
+  paramModes?: ("required" | "omittable" | "rest" | "dynRest" | "islandRest" | "arguments")[];
   /** Source function name for native error stack frames. */
   sourceName?: string;
   /** The function's JavaScript `name` when it differs from sourceName: an
@@ -2334,9 +2439,9 @@ export interface IrFunction {
   classCaptures?: (IrParam & { slot: number })[];
   body: IrStmt[];
   loc: SrcLoc;
-  /** A closure body's jsval entry (ir/jsval.ts): a function with the same
-   * captures that takes jsval parameters. The backend gives each function
-   * value boxed from this closure a jsval call entry into it. */
+  /** A closure body's jsword entry (ir/jsword.ts): a function with the same
+   * captures that takes jsword parameters. The backend gives each function
+   * value boxed from this closure a jsword call entry into it. */
   jsEntry?: string;
   /** A view's body (frontend/lowering/function-views.ts): a closure over it
    * stands, at this function's signature, for the function value in its
@@ -2406,6 +2511,11 @@ export interface IrFunction {
      * only), in which case nothing runs before the first resume. */
     bindAtCall?: true;
   };
+  /** JS `Function.prototype.name` when it differs from sourceName (object
+   * literal methods and accessors: "m", "get x"). */
+  jsName?: string;
+  /** JS `length`: the authored parameters before the first default or rest. */
+  jsLength?: number;
   /** Async module initializers only: a module-global Promise<T> slot where
    * the spawn wrapper caches its first evaluation promise. Every later
    * static/dynamic import receives that same promise, including while the
@@ -2443,6 +2553,9 @@ export interface IrGlobal {
   /** Lexical record/function/checked-value bindings use their initially-null
    * pointer as a TDZ sentinel. Reads and later writes throw until initializing assign. */
   tdz?: true;
+  /** A lexical binding some code can read before its declaration ran (WasmGC): an initialization flag, set by the declaring store, guards
+   * every read and write; the access before it throws the ReferenceError. Any type. */
+  tdzFlag?: true;
   /** An import-cycle binding whose initialization state lives in this BOOL
    * global instead: the declaration's store is the `assign` marked
    * `initializes`, followed by the flag's set; accesses that can run
@@ -2502,7 +2615,11 @@ export type IrStmt =
    * initialize an empty box. Ordinary assignments must check it first. */
   | { kind: "assign"; localId: string; value: IrExpr; initializes?: true; loc: SrcLoc }
   | { kind: "exprStmt"; expr: IrExpr; loc: SrcLoc }
-  | { kind: "if"; cond: IrExpr; then: IrStmt[]; else_: IrStmt[] | null; loc: SrcLoc }
+  /** `classArm`: this `if` is one class's arm of a class dispatcher (its `then` calls that class's helper with the dispatcher's
+   * own arguments). It holds when `value` (a dyn local) is an instance of `className`; a run of consecutive arms is equivalent
+   * to calling the arm of the first one the value's class satisfies, which a backend may do through a table indexed by the
+   * class's type index (docs-draft/DESCRIPTOR_DISPATCH.md). Backends that ignore it run the chain as written. */
+  | { kind: "if"; cond: IrExpr; then: IrStmt[]; else_: IrStmt[] | null; loc: SrcLoc; classArm?: { className: string; value: string } }
   /** `labels` (here and on doWhile/for/forOf/switch/block): the JS label
    * names of the enclosing `lbl:` statements, outermost first — the targets
    * a labeled `break lbl`/`continue lbl` names. A statement without labels
@@ -2828,11 +2945,11 @@ export const MAY_THROW_ARR_METHODS: ReadonlySet<IrArrIntrinsicMethod> = new Set(
 /** Element types whose comparator sort can run in the runtime over raw
  * slots: numbers, and reference-counted values passed to the comparator by
  * pointer. Unions with an undefined arm order undefined last without a
- * comparator call, and checked values have their own ABI; those
+ * comparator call, and checked or island values have their own ABI; those
  * keep the IR sort helper. */
 export function isSortValuesElement(elem: IrType, unionArms?: readonly IrType[]): boolean {
   if (elem.kind === "f64") return true;
-  if (elem.kind === "dyn" || elem.kind === "caught") return false;
+  if (elem.kind === "dyn" || elem.kind === "jsval" || elem.kind === "caught") return false;
   if (elem.kind === "union" && (!unionArms || unionArms.some((arm) => arm.kind === "undefinedT")))
     return false;
   return isRefCounted(elem);
@@ -2933,7 +3050,11 @@ export type IrStrIntrinsicMethod =
   // string walk a byte cursor with them, advancing by the character's
   // byte count; the cursor is always a character start below the count.
   | "byteLength"
-  | "cpAtByte";
+  | "cpAtByte"
+  // This fork's frontend still desugars string for-of onto the code-POINT
+  // character at a UTF-16 index, advancing by its length (upstream's
+  // byte-cursor walk replaced it there).
+  | "cpAt";
 
 /** The typed-array/Buffer method surface (bytesIntrinsic). Receiver/arg
  * conventions (validated): `length`/`byteLength` are property reads → f64;
@@ -3196,6 +3317,11 @@ export type IrRegexIntrinsicMethod =
    * start index — the row's `.index`, always present (every drained row
    * matched). Same result and throw contract as matchAll. */
   | "matchAllInto"
+  /** `s.replace(re, fn)` / `s.replaceAll(re, fn)` with a function replacement (native dyn): args[1] is the callback
+   * as a callable dyn value, called in the module with (match, ...captures, offset, string, [groups]); its result is
+   * ToString'd. replaceAllFn without /g throws Node's TypeError, and the callback may throw. */
+  | "replaceFn"
+  | "replaceAllFn"
   /** matchAllInto whose rows are read only through their elements and the
    * companion index: the rows carry no index, input or groups properties. */
   | "matchAllCapturesInto"
@@ -3209,7 +3335,16 @@ export type IrRegexIntrinsicMethod =
   | "toString"
   | "replace"
   | "replaceAll"
-  | "split";
+  | "split"
+  /** Reads of a typed exec/match result (receiver: the string[] itself; browser target only).
+   * matchHasIndex: the result carries own index/input (false for a global String.match list);
+   * matchIndex / matchInput are then its index and input; matchHasGroups: groups is an object
+   * (the pattern has named groups); matchGroups is that object (a dyn value; undefined when absent). */
+  | "matchHasIndex"
+  | "matchIndex"
+  | "matchInput"
+  | "matchHasGroups"
+  | "matchGroups";
 
 /** Numeric binary ops. The bitwise six (`&`/`|`/`^`/`<<`/`>>`/`>>>`) have
  * JS ToInt32/ToUint32 semantics — operands convert (NaN/±Infinity → 0,
@@ -3308,7 +3443,8 @@ export type IrExpr =
    * dyn asks its runtime kind. The other operand form is a UNION — the ARM
    * value's ToBoolean via a per-union interned helper (unit arms false;
    * f64/string/bool arms per-value; ref arms — arrays, records, objects,
-   * functions, maps, sets, promises, ... — always true). Result is bool. */
+   * functions, maps, sets, promises, ... — always true; jsval arms ask the
+   * engine). Result is bool. */
   | { kind: "toBool"; operand: IrExpr; type: IrType; loc: SrcLoc }
   /** Distinct from `bin`: short-circuits, and has JS value semantics — the
    * result is the deciding operand itself (`a && b` ≡ `toBool(a) ? b : a`),
@@ -3319,8 +3455,11 @@ export type IrExpr =
   | { kind: "logical"; op: "&&" | "||"; left: IrExpr; right: IrExpr; type: IrType; loc: SrcLoc }
   | { kind: "strConcat"; left: IrExpr; right: IrExpr; type: IrType; loc: SrcLoc }
   | { kind: "strEq"; negated: boolean; left: IrExpr; right: IrExpr; type: IrType; loc: SrcLoc }
-  /** String ordering in ECMAScript's UTF-16 code-unit order. */
-  | { kind: "strCmp"; op: IrStrCmpOp; left: IrExpr; right: IrExpr; type: IrType; loc: SrcLoc }
+  /** String ordering in ECMAScript's UTF-16 code-unit order. `utf16` is this
+   * fork's frontend marker for the default Array sort comparator (its WasmGC
+   * backend keeps code-point order for ordinary comparisons); the LLVM
+   * backend compares in UTF-16 order either way. */
+  | { kind: "strCmp"; op: IrStrCmpOp; left: IrExpr; right: IrExpr; utf16?: boolean; type: IrType; loc: SrcLoc }
   /** f64|bool → string, JS-exact (Number::toString / "true"/"false").
    * Union operands dispatch through the per-union ToString helper (arms
    * fenced to unit/string/f64/bool by the frontend); a CAUGHT operand is
@@ -3747,11 +3886,13 @@ export type IrExpr =
    * IteratorResult record, or BOOL `done` for a record-free drive (then
    * `value` reads a yielded value or the completion; an empty completion
    * on a valued return channel throws an SC1071 fence error). */
+  /** `prime`: the delegation loop of `yield*` starting its delegate - the first next()'s argument is never observed, so a typed next channel takes none (this fork's frontend). */
   | {
       kind: "genResume";
       mode: "next" | "return" | "throw" | "step" | "value" | "close" | "delegate";
       gen: IrExpr;
       arg: IrExpr | null;
+      prime?: true;
       type: IrType;
       loc: SrcLoc;
     }
@@ -3897,7 +4038,7 @@ export type IrExpr =
    * prototype, as Object.groupBy's result has (recordNullProto reads it). */
   | {
       kind: "recordLit";
-      fields: { name: string; value: IrExpr; overflow?: true }[];
+      fields: { name: string; value: IrExpr; overflow?: true; drop?: true }[];
       nullProto?: true;
       type: IrType;
       loc: SrcLoc;
@@ -3987,7 +4128,21 @@ export type IrExpr =
       /** A boxed function's `length` when it differs from its parameter
        * count (builtin function values). */
       fnLength?: number;
+      /** The undefined a setter-only accessor read answers (JS), deliberately not narrowed at the read. */
+      setterOnlyRead?: true;
     }
+  /** Island value → dyn conversion (`type` is always dyn; the operand
+   * is always jsval): the jsval→dyn crossing — an 'any'-typed engine
+   * value flowing into an 'unknown'/'object'/JS-residue slot wraps BY
+   * REFERENCE as the checked-dynamic tree's SCR_DYN_JSVAL kind (scr_dyn_from_jsval).
+   * Engine scalars (number/string/boolean/null/undefined) normalize to
+   * the native dyn kinds at wrap time, so wrapped nodes only ever hold
+   * engine objects/arrays/functions; typeof/truthiness/String()/=== on
+   * the wrapped node route to the engine, un-armed dyn walks fence
+   * loudly, and scr_jsval_from_dyn unwraps the SAME engine value back
+   * (identity round trip). The operand is borrowed; the result is owned
+   * (+1). Never throws. */
+  | { kind: "dynFromJsval"; value: IrExpr; type: IrType; loc: SrcLoc }
   /** CALLING a dyn value — `fn(a, b)` where fn is checked-dynamic (an
    * implicit-any JS binding, a dyn record member, a dynKeyGet result).
    * Arguments are ALREADY dyn-typed (typed values box through dynFrom at
@@ -4001,8 +4156,8 @@ export type IrExpr =
    * per-arg validation against the boxed signature (mismatches throw the
    * path-annotated TypeError), result converted back to dyn. Callee and
    * args are borrowed; the result is owned (+1). MAY THROW. In a
-   * dynamic-tier function the jsval pass may make an argument of the
-   * fixed-arity form a jsval (ir/jsval.ts): a callee with a jsval entry
+   * dynamic-tier function the jsword pass may make an argument of the
+   * fixed-arity form a jsword (ir/jsword.ts): a callee with a jsword entry
    * takes it as is, any other callee gets it boxed.
    *
    * `spreads` (the runtime-arity form — `f(...args)`, the rest-forwarding
@@ -4035,20 +4190,11 @@ export type IrExpr =
    * the kind's prototype lacks throws Node's catchable "<calleeName> is
    * not a function"; OBJ receivers call the own member (own properties
    * shadow prototypes in JS too); undefined/null receivers throw Node's
-   * "Cannot read properties of ...". Arguments are already dyn, or jsvals
+   * "Cannot read properties of ...". Arguments are already dyn, or jswords
    * as for dynCall.
    * `calleeName` is the source spelling for the error texts. Receiver and
    * args are borrowed; the result is owned (+1). MAY THROW. */
-  | {
-      kind: "dynInvoke";
-      recv: IrExpr;
-      method: string;
-      calleeName: string;
-      calleeNameValue?: IrExpr;
-      args: IrExpr[];
-      type: IrType;
-      loc: SrcLoc;
-    }
+  | { kind: "dynInvoke"; recv: IrExpr; method: string; calleeName: string; calleeNameValue?: IrExpr; domInterface?: string; args: IrExpr[]; type: IrType; loc: SrcLoc }
   /** A dyn ARRAY built element-by-element (JS mixed-element literals —
    * `['pwd', []]` — and evolving `[]` declarations): each element is
    * already a dyn value; the result owns them. Never throws. */
@@ -4111,6 +4257,7 @@ export type IrExpr =
         | "array"
         | "truthy"
         | "error"
+        | "errorInstance"
         | "function"
         /** The value is a capsule of a compiled class instance. */
         | "classCapsule"
@@ -4158,7 +4305,11 @@ export type IrExpr =
    * value, units by kind, reference kinds by node identity — JS-exact
    * within the checked-dynamic tree's aliasing story). Both operands are borrowed,
    * nothing allocates, never throws. Result is bool. */
-  | { kind: "dynScalarEq"; left: IrExpr; right: IrExpr; negated?: true; type: IrType; loc: SrcLoc }
+  | { kind: "dynScalarEq"; left: IrExpr; right: IrExpr; negated?: true;
+    /** Reference identity, not `===`: compiler-generated "did this return
+     * the same value" tests, where NaN === NaN being false is irrelevant
+     * and a native lowering can use ref.eq. Backends may treat it as ===. */
+    identity?: true; type: IrType; loc: SrcLoc }
   /** Statements inside an expression: `stmts` run in order, then `result`
    * is the expression's value — the lift behind assignment-as-expression
    * forms whose statement lowering needs temps and writes (destructuring
@@ -4188,7 +4339,8 @@ export type IrExpr =
    * 'FIRSTPROP' of 'SPELLING' …" when `firstProp` is set (V8 names the
    * pattern's first property) — and yields the value unchanged otherwise.
    * `spelling` is the RHS's compile-time source spelling. Value and type
-   * are dyn; the helper throws a catchable error. */
+   * are dyn (the dyn helper) or jsval (the island's prelude guard —
+   * engine-thrown, catchable like every boundary throw). */
   | {
       kind: "dynDestrCheck";
       value: IrExpr;
@@ -4201,7 +4353,10 @@ export type IrExpr =
    * it. Over a dyn value: arrays step by index, strings by code point,
    * Buffers by byte; everything else throws V8's exact "<desc> is not
    * iterable (cannot read property Symbol(Symbol.iterator))" TypeError.
-   * The result is a fresh dyn array of exactly `count` elements
+   * Over an island (jsval) value the engine runs the REAL iterator
+   * protocol (user iterables included, IteratorClose per spec) behind the
+   * same V8 message for non-iterables. The result is a FRESH array (dyn
+   * or engine, matching the operand) of exactly `count` elements
    * (undefined-padded past the end) — the empty pattern passes count 0
    * and uses only the validation. Value is borrowed; the result is owned
    * (+1). */
@@ -4284,16 +4439,7 @@ export type IrExpr =
    * function value with a potentially different static signature. This is
    * non-coercing: closures share one pointer representation, but the value
    * never enters the union or becomes callable through its arm type. */
-  | {
-      kind: "unionFuncEq";
-      unionId: string;
-      tag: number;
-      union: IrExpr;
-      func: IrExpr;
-      negated: boolean;
-      type: IrType;
-      loc: SrcLoc;
-    }
+  | { kind: "unionFuncEq"; unionId: string; tag: number; union: IrExpr; func: IrExpr; funcFirst?: true; negated: boolean; type: IrType; loc: SrcLoc }
   /** Runtime test on a catch binding (`value` is a caught-typed varRef,
    * borrowed). The primitive tests ("string"/"number"/"boolean") compare
    * the snapshot's kind tag. "object" also checks reference payloads,
@@ -4617,7 +4763,8 @@ export type IrExpr =
    * The dyn operand is borrowed; the result is owned (+1). This is
    * scriptc-specific behavior — JS `as` never checks (SEMANTICS.md
    * documents it as the headline divergence: a lying cast throws instead of
-   * corrupting memory). `preserveRefs` refuses structural copies of native
+   * corrupting memory). `refOnly` (WasmGC native model): the value must BE the typed value (it entered dyn by reference): a container
+   * (array, record, tuple, Map, Set) is cast by type test, never rebuilt from data; anything else is the catchable TypeError. `preserveRefs` refuses structural copies of native
    * references, including references nested in newly materialized arrays or
    * tuples; collection seeds use it to preserve key identity. */
   /** `exact`: the value is known to be a capsule this program boxed from
@@ -4656,6 +4803,7 @@ export type IrExpr =
       kind: "dynCheck";
       value: IrExpr;
       preserveRefs?: true;
+      refOnly?: true;
       adopt?: true;
       shared?: true;
       exact?: true;
@@ -4672,7 +4820,202 @@ export type IrExpr =
       pathIndex?: number;
       type: IrType;
       loc: SrcLoc;
-    };
+    }
+  /** Static → island marshal (--dynamic builds only). `value`'s type is
+   * f64/string/bool (marshaled by value) or a JSON-safe composite
+   * (record/array/union — marshaled as a DEEP COPY through the emitted
+   * type-directed JSON serializer and the engine's JSON parser; the
+   * aliasing divergence is documented in SEMANTICS.md). Result is an
+   * owned (+1) jsval; the operand is borrowed. Never throws. */
+  /** `opaque` (browser target only): a compiled reference crossing as an opaque
+   * JS object -- identity preserved, no copy; its jsExit twin tests the type. */
+  | { kind: "jsMarshal"; value: IrExpr; type: IrType; opaque?: true; /** A dyn value stored into a page-typed `any` slot (plain native lane): a compiled ArrayBuffer there is a loud TypeError, not a byte view. */ bufferStore?: true; /** A compiled typed array at a page position whose declared type admits only ArrayBuffer-backed views (WebIDL BufferSource without [AllowShared]): the page receives a copy when the module memory is shared. */ unshared?: true; loc: SrcLoc }
+  /** An operation on island values (--dynamic builds only), executed by
+   * the embedded engine with JS-exact semantics (coercions come from
+   * pinned prelude closures, not C reimplementations). `args` are
+   * jsval-typed and borrowed. Result `type` per op: arithmetic
+   * (add/sub/mul/div/mod/pow), unary neg/plus, getProp/getIdx,
+   * callMethod/callFn/callFnThis/globalGet → jsval (+1); comparisons
+   * (lt/le/gt/ge/eq/neq), truthy, not → bool; typeof, toStr → string (+1);
+   * setProp/setIdx → void. `name` carries the property/method identifier
+   * for getProp/setProp/callMethod/globalGet, absent otherwise. MAY THROW
+   * (engine
+   * exceptions bridge into the exception cell, catchably) — backends'
+   * may-throw analyses must seed on every jsOp like a `throw`. */
+  /** `calleeName` (callMethod): the call's source text (`n.push`), for V8's "<callee> is not a function". */
+  /** domReceiver: the receiver (args[0]) is statically a lib.dom interface, so on a
+   * native host (hostHandles) it is always a page value. domInterface: that interface's name. */
+  | { kind: "jsOp"; op: IrJsOp; name?: string; calleeName?: string; domReceiver?: true; domInterface?: string; args: IrExpr[]; type: IrType; loc: SrcLoc }
+  /** Island → static validated exit (--dynamic builds only): `value` is
+   * jsval-typed, `type` is the static target. STRICT for primitives (a
+   * non-number refuses to exit as number — no coercion); composite
+   * targets round-trip through the engine's JSON.stringify and the
+   * existing dynCheck walker for the target (width-tolerant records,
+   * path-annotated failures — identical semantics to `dyn as T`). MAY
+   * THROW a catchable TypeError-shaped string. The operand is borrowed;
+   * the result is owned (+1) for refcounted targets. */
+  /** `checkedArray` (browser target): an explicit `x as T[]` cast — the page
+   * value must pass Array.isArray before the copying element-wise exit. */
+  | { kind: "jsExit"; value: IrExpr; type: IrType; opaque?: true; checkedArray?: true; loc: SrcLoc }
+  /** Island → static PROMISE bridge (--dynamic builds only): `value` is a
+   * jsval whose declared type is Promise<T> (a package call's promise —
+   * it lives in the engine); the result is a fresh pending static promise
+   * the engine promise settles. `type` is promise-of-jsval (the settled
+   * engine value crosses as a retained handle; typed uses exit like any
+   * jsval) or promise-of-void (T mapped to void — nothing to carry).
+   * Fulfillment wakes parked awaiters through the ready queue; rejection
+   * crosses like a bridged exception (engine Errors become real static
+   * Errors) and re-throws at the await or enters the unhandled ledger.
+   * Bridging one engine promise twice makes two independent static
+   * observers of the same settlement — semantically equivalent, slightly
+   * redundant (SEMANTICS.md). Operand borrowed; result +1. MAY THROW
+   * only on an engine-level surprise minting the subscription — backends
+   * seed may-throw and emit the pending check like other island ops. */
+  | { kind: "jsBridgePromise"; value: IrExpr; type: IrType; loc: SrcLoc };
+
+/** The island operation set. Grouped by result type — see the jsOp node
+ * doc. A closed union: every member has a lowering rule in the frontend,
+ * a validation rule, and a scr_jsval_* implementation in scr_island.c. */
+export type IrJsOp =
+  | "add"
+  | "sub"
+  | "mul"
+  | "div"
+  | "mod"
+  | "pow"
+  | "neg"
+  | "plus"
+  | "lt"
+  | "le"
+  | "gt"
+  | "ge"
+  | "eq"
+  | "neq"
+  /** `v instanceof C` where BOTH sides are island values (a package-
+   * exported class as the RHS): the spec's InstanceofOperator in the
+   * engine, Symbol.hasInstance included; a non-object RHS throws the
+   * engine's own TypeError, bridged catchably. */
+  | "instanceOf"
+  | "truthy"
+  | "not"
+  | "typeof"
+  | "toStr"
+  | "getProp"
+  | "setProp"
+  | "getIdx"
+  | "setIdx"
+  | "callMethod"
+  | "callFn"
+  /** Calls an already-resolved island function with an explicit receiver.
+   * Args are (callee, receiver, ...arguments); this preserves computed
+   * method evaluation order without reading a getter twice. */
+  | "callFnThis"
+  /** Spread application on an island callee — `f(...pre, ...s)`, the
+   * rest-forwarding idiom (`(...args) => g(...args)` under --dynamic).
+   * Args are exactly (callee, pre, spread): `pre` is the engine array of
+   * leading fixed arguments (jsOp arrLit), `spread` the spread source;
+   * `name` carries the spread expression's source spelling (V8's nullish
+   * spread-call TypeError spells it). The prelude helper uses REAL spread
+   * syntax, so iterator protocols are the engine's own, with guards
+   * front-running V8's exact spread-call TypeError texts. May throw. */
+  | "callSpread"
+  /** Spread application of an island METHOD — `recv.name(...pre, ...s)`, the
+   * receiver kept as `this` (`layouts.push(...more)` on a page array). Args
+   * are (receiver, pre, spread), `name` the method; the host uses real
+   * spread syntax. May throw. */
+  | "callMethodSpread"
+  /** `new X(...)` where X is jsval-typed (package-declared classes):
+   * JS_CallConstructor — args are the callee then the constructor
+   * arguments, mirroring callFn. */
+  | "construct"
+  /** A member of the engine's global object by name (Math, parseFloat, ...)
+   * — the receiver/callee for the island-backed ambient surface. Zero args;
+   * `name` carries the global's identifier. May-throw for uniformity with
+   * the other engine entries (the emitter's pending check runs after it). */
+  | "globalGet"
+  /** Island-native literals: an object literal / array literal whose
+   * contextual type is `any` builds directly in the engine — objLit args
+   * are alternating key/value jsvals (keys are marshaled strings), arrLit
+   * args are the elements. Never throw. */
+  | "objLit"
+  | "arrLit"
+  /** The engine-native TemplateStringsArray for an ISLAND TAG call: args
+   * are 2n marshaled strings — n cooked then n raw — building a fresh
+   * engine array whose `.raw` carries the raw spellings (tags dispatch on
+   * it). Never throws. */
+  | "tplStrings"
+  /** Spread completion for an island-native object literal: copies
+   * args[1]'s own enumerable properties onto args[0] (the spec's
+   * CopyDataProperties — the engine's own Object.assign; null/undefined
+   * sources spread nothing) and answers args[0] for chaining. May throw
+   * (getters run). */
+  | "objSpread"
+  /** Accessor completion for an island-native object literal: defines a
+   * GETTER property on args[0] (the object) — args are (obj, key string
+   * marshal, getter function handle) — and answers the same object (the
+   * chainable spelling: `defineGetter(objLit(...), k, f)`). The
+   * self-referential doc-printer root-indent shape. Never throws. */
+  | "defineGetter"
+  /** The engine's own undefined / null as island values (zero args, never
+   * throw): the unit arms of a union marshaling IN (`string | undefined`
+   * into an 'any' slot — the undefined arm IS the engine undefined), and
+   * conceptually the unit path of `x?.y` on 'any' (the emitter inlines
+   * that one). */
+  | "undefLit"
+  | "nullLit"
+  /** GetIterator over an island value — the for-of head over 'any' (the
+   * engine's own protocol lookup; V8's not-iterable TypeError on refusal).
+   * The loop drives next() through callMethod and reads value/done with
+   * getProp/truthy. */
+  | "iterNew"
+  /** `o.name?.(...)` — the optional METHOD call on an island receiver: a
+   * nullish member answers the engine's undefined, anything else calls
+   * with `this = o` (JS-exact; non-callables throw in the engine). */
+  | "optCallMethod";
+
+/** Result-type rule for each island op (the validator enforces it; the
+ * frontend constructs nodes with exactly these). */
+export function jsOpResultKind(op: IrJsOp): "jsval" | "bool" | "string" | "void" {
+  switch (op) {
+    case "add": case "sub": case "mul": case "div": case "mod": case "pow":
+    case "neg": case "plus":
+    case "getProp": case "getIdx": case "callMethod": case "callFn": case "callFnThis":
+    case "callSpread": case "callMethodSpread":
+    case "construct":
+    case "globalGet":
+    case "objLit":
+    case "arrLit":
+    case "defineGetter":
+    case "tplStrings":
+    case "objSpread":
+    case "undefLit":
+    case "nullLit":
+    case "iterNew":
+    case "optCallMethod":
+      return "jsval";
+    case "lt":
+    case "le":
+    case "gt":
+    case "ge":
+    case "eq":
+    case "neq":
+    case "instanceOf":
+    case "truthy":
+    case "not":
+      return "bool";
+    case "typeof":
+    case "toStr":
+      return "string";
+    case "setProp":
+    case "setIdx":
+      return "void";
+    default: {
+      const _exhaustive: never = op;
+      void _exhaustive;
+      throw new InternalCompilerError("unreachable");
+    }
+  }
+}
 
 /** True when a type is a union with an undefined arm — the optional-flavored
  * slot marker shared by the frontend (record literals may omit such fields)
@@ -4726,7 +5069,7 @@ export function isJsonStringifySafeType(
  * any position, needs the runtime JSON traversal. Its declared structure can
  * be boxed, but payloads may carry omitted values, toJSON methods, added
  * properties, or cycles. This predicate does not widen
- * the type-directed serializer, checked-value boundary, or root-undefined
+ * the type-directed serializer, checked-island boundary, or root-undefined
  * contract; callers must select the checked runtime traversal explicitly. */
 export function isJsonStringifyDynamicType(
   t: IrType,
@@ -4734,7 +5077,7 @@ export function isJsonStringifyDynamicType(
   getUnion: (unionId: string) => IrUnionDef | undefined,
 ): boolean {
   return (
-    (t.kind === "record" || t.kind === "array" || t.kind === "union" || isDynTypedRefType(t)) &&
+    (t.kind === "record" || t.kind === "array" || t.kind === "union" || (isDynTypedRefType(t) && !browserTarget())) &&
     isJsonSafeAt(t, getRecord, getUnion, true, false, new Set(), true) &&
     !isJsonStringifySafeType(t, getRecord, getUnion)
   );
@@ -4784,9 +5127,10 @@ function isJsonSafeAt(
     case "string":
     case "bool":
       return true;
-    // JSON.stringify writes a Date's toJSON(); JSON text never parses to one.
+    // JSON.stringify writes a Date's toJSON(); JSON text never parses to one. (Native targets: the WasmGC lowering
+    // keeps the fork's rejection.)
     case "date":
-      return stringify;
+      return stringify && !browserTarget();
     case "array":
       return isJsonSafeAt(
         t.elem,
@@ -4897,7 +5241,8 @@ function isJsonSafeAt(
     // Class instances stringify through the runtime JSON traversal, which
     // reads their own enumerable properties and calls toJSON.
     case "object":
-      if (nativeFields && stringify && isDynTypedRefType(t)) return true;
+      // Native targets: the runtime traversal (WasmGC keeps the fork's type-directed forms).
+      if (nativeFields && stringify && isDynTypedRefType(t) && !browserTarget()) return true;
       return false;
     case "func":
     // Class values stringify as "{}" husks in Node (own enumerable statics
@@ -4910,9 +5255,13 @@ function isJsonSafeAt(
     // omitted as object values) — rejected instead of diverging without a
     // diagnostic.
     case "symbol":
-      return runtimeScalars;
-    case "caught":
+      // Upstream's runtime traversal drops symbols as Node does (native targets); browser targets keep the fork's
+      // rejection.
+      if (!browserTarget()) return runtimeScalars;
+      return false;
     case "jsval":
+    case "caught":
+    case "jsword":
     case "promise":
     case "generator":
     case "moduleNs":
@@ -4934,8 +5283,151 @@ function isJsonSafeAt(
   }
 }
 
+/** THE island boundary predicate: true when a static type can cross into
+ * the island (jsMarshal — primitives by value, composites as deep JSON
+ * copies) and back out (jsExit — strict primitive extraction, composites
+ * through the dynCheck walker). Primitives are JSON-safe, so the rule
+ * coincides with isJsonSafeType; it has its own name because the boundary
+ * is its own concept — the frontend's implicit coercions, the explicit-cast
+ * lowering, and the validator's jsMarshal/jsExit rules all ask this ONE
+ * question, and the boundary rejection messages describe exactly this set. */
+export function canCrossIslandBoundary(
+  t: IrType,
+  getRecord: (shapeId: string) => IrRecordShape | undefined,
+  getUnion: (unionId: string) => IrUnionDef | undefined,
+): boolean {
+  // Browser target: a Date is the page's own Date (an opaque page value), so it crosses by reference.
+  if (t.kind === "date" && browserTarget()) return true;
+  return isJsonSafeType(t, getRecord, getUnion);
+}
+
+/** True for a closure type that can cross INTO the island as a host
+ * function: every parameter jsval (the engine's arguments pass through as
+ * handles — no per-type extraction exists inside a host call) and the
+ * result jsval, void, or a primitive (which marshals back by value —
+ * `(x) => x * 2` on an 'any' x infers a number return). Contextual typing
+ * produces exactly this shape for callbacks passed to package APIs
+ * (`.action((a, b) => ...)` against `(...args: any[]) => void`). Arity is
+ * capped by the runtime's host-call argument buffer (scr_island.c). */
+export const MAX_ISLAND_CALLBACK_ARITY = 16;
+export function canMarshalFuncIntoIsland(t: IrType): boolean {
+  return (
+    t.kind === "func" &&
+    t.rest !== true &&
+    t.params.length <= MAX_ISLAND_CALLBACK_ARITY &&
+    t.params.every((p) => p.kind === "jsval") &&
+    (t.ret.kind === "jsval" ||
+      t.ret.kind === "void" ||
+      t.ret.kind === "f64" ||
+      t.ret.kind === "bool" ||
+      t.ret.kind === "string")
+  );
+}
+
+/** Parameter types a TYPED closure may declare when it crosses INTO the
+ * island as a host function: jsval params take the engine argument as a
+ * handle (the all-'any' shape above); dyn params normalize scalars or retain
+ * engine objects by reference. Every other admitted type converts
+ * AT CALL TIME through the validated-exit machinery — strict primitives,
+ * JSON round-trip composites (the dynCheck walker: width-tolerant records,
+ * path-annotated failures). On top of the jsExit set, a bare `T | undefined`
+ * union is admitted here — an absent or undefined engine argument takes the
+ * undefined arm, exactly the missing-optional-field rule (and exactly the
+ * commander case: `.action((text: string | undefined, opts) => ...)` sees
+ * undefined when the command argument is omitted). */
+export function isIslandCallbackParamType(
+  t: IrType,
+  getRecord: (shapeId: string) => IrRecordShape | undefined,
+  getUnion: (unionId: string) => IrUnionDef | undefined,
+): boolean {
+  if (t.kind === "jsval" || t.kind === "dyn") return true;
+  if (isJsonSafeType(t, getRecord, getUnion)) return true;
+  if (t.kind === "union") {
+    // A bare undefined-armed union: every non-undefined arm must be
+    // JSON-safe (arms never nest unions, so plain isJsonSafeType applies).
+    const def = getUnion(t.unionId);
+    return (
+      !!def &&
+      def.arms.every((a) => a.kind === "undefinedT" || isJsonSafeType(a, getRecord, getUnion))
+    );
+  }
+  return false;
+}
+
+/** Classify a typed island callback's RETURN for adapter synthesis: sync
+ * kinds marshal back by value ('void'|'jsval'|'f64'|'bool'|'string' — the
+ * canMarshalFuncIntoIsland set), 'json' marshals a JSON-safe composite
+ * through the type-directed serializer + engine parse (the jsMarshal
+ * composite path — commander's option-argument collectors return arrays
+ * this way), and a Promise of the by-value kinds wraps as an engine
+ * promise settled when the scriptc promise settles (async callbacks —
+ * the `.action(async ...)` case). Null for anything else (Promise of
+ * composites: still fenced). */
+export function islandCallbackRet(
+  t: IrType,
+  getRecord: (shapeId: string) => IrRecordShape | undefined,
+  getUnion: (unionId: string) => IrUnionDef | undefined,
+): { async: boolean; tag: "void" | "jsval" | "f64" | "bool" | "string" | "json" | "dyn" } | null {
+  const tagOf = (r: IrType) =>
+    r.kind === "void" ||
+    r.kind === "jsval" ||
+    r.kind === "f64" ||
+    r.kind === "bool" ||
+    r.kind === "string"
+      ? r.kind
+      : null;
+  if (t.kind === "promise") {
+    const tag = tagOf(t.inner);
+    return tag ? { async: true, tag } : null;
+  }
+  const tag = tagOf(t);
+  if (tag) return { async: false, tag };
+  // A CHECKED-DYNAMIC result (a JS getter/callback whose inferred return
+  // degraded — the doc-printer root-indent getter): the dyn value deep-
+  // copies into the engine on return, exactly the jsMarshal dyn rule
+  // (data kinds only; boxed functions/handles throw the catchable
+  // TypeError). Sync only — no engine-promise tag exists for dyn values.
+  if (t.kind === "dyn") return { async: false, tag: "dyn" };
+  return isJsonSafeType(t, getRecord, getUnion) ? { async: false, tag: "json" } : null;
+}
+
+/** The TYPED extension of canMarshalFuncIntoIsland (a strict superset):
+ * closures whose params are per-argument-convertible at call time
+ * (isIslandCallbackParamType) and whose return classifies
+ * (islandCallbackRet). Same arity cap — the runtime's host-call argument
+ * buffer. Statically typed closure parameters stay fenced; unknown values
+ * enter as checked-dynamic values and are validated at each typed use. */
+export function canMarshalTypedFuncIntoIsland(
+  t: IrType,
+  getRecord: (shapeId: string) => IrRecordShape | undefined,
+  getUnion: (unionId: string) => IrUnionDef | undefined,
+): boolean {
+  if (t.kind !== "func") return false;
+  // The ISLAND-REST form (`async (...args) =>` in JS under --dynamic —
+  // the withPlugins wrapper): the trailing ABI param is the ENGINE array
+  // of the call's surplus arguments; leading params convert per argument
+  // like any typed callback. Plain rest signatures (dynRest, typed
+  // rests) stay out — no completed-ABI spelling exists for them here.
+  if (t.rest === true) {
+    return (
+      t.restAbi === "jsval" &&
+      t.params.length >= 1 &&
+      t.params.length <= MAX_ISLAND_CALLBACK_ARITY &&
+      t.params[t.params.length - 1]!.kind === "jsval" &&
+      t.params.slice(0, -1).every((p) => isIslandCallbackParamType(p, getRecord, getUnion)) &&
+      islandCallbackRet(t.ret, getRecord, getUnion) !== null
+    );
+  }
+  return (
+    t.params.length <= MAX_ISLAND_CALLBACK_ARITY &&
+    t.params.every((p) => isIslandCallbackParamType(p, getRecord, getUnion)) &&
+    islandCallbackRet(t.ret, getRecord, getUnion) !== null
+  );
+}
+
 /* ── the checked-dynamic FUNCTION boundary ──────────────────────────────
- * Closures cross the checked-value boundary as a
+ * The STATIC twin of the island's typed-function marshaling
+ * (canMarshalTypedFuncIntoIsland): closures cross the dyn boundary as a
  * callable dyn kind carrying the closure + a compiled per-signature call
  * thunk. Two directions, two predicates, mutually recursive with the
  * conversion domains. A function type can sit in a record field or a union
@@ -5141,6 +5633,8 @@ export function canConvertToDyn(
   if (t.kind === "object" && RUNTIME_ERROR_CLASSES.has(t.className)) return true;
   if (isDynTypedRefType(t)) return true;
   if (t.kind === "generator") return true;
+  // Browser target: a Date is the host's own Date, an opaque page value that crosses by reference.
+  if (t.kind === "date" && browserTarget()) return true;
   if (t.kind === "classval") return true;
   if (t.kind === "func") return canBoxFuncIntoDyn(t, getRecord, getUnion, visiting);
   if (DYN_HANDLE_KINDS.has(t.kind)) return true;
@@ -5163,9 +5657,10 @@ export function canConvertToDyn(
     // A function arm can return this union again (a step that answers the
     // next step). The back-edge answers coinductively, as in the composite
     // walk: the arms decide.
-    const key = `converting:${t.unionId}`;
-    if (visiting.has(key)) return true;
-    visiting.add(key);
+    // Browser targets keep the fork's walk, which marks no union.
+    const key = browserTarget() ? null : `converting:${t.unionId}`;
+    if (key !== null && visiting.has(key)) return true;
+    if (key !== null) visiting.add(key);
     // JSON-safe arms box as before; BOXABLE FUNCTION and PROMISE arms join them (the
     // invalid-input probes iterate `[1, null, () => {}, true]` — the
     // union's func arm crosses through the checked-dynamic function
@@ -5185,10 +5680,44 @@ export function canConvertToDyn(
         (a.kind === "func" && canBoxFuncIntoDyn(a, getRecord, getUnion, visiting)) ||
         (a.kind === "promise" && canConvertToDyn(a, getRecord, getUnion, visiting)),
     );
-    visiting.delete(key);
+    if (key !== null) visiting.delete(key);
     return result;
   }
   return false;
+}
+
+/** Kinds the native object model holds in a dyn slot as themselves (the emitter's toDynValue keeps each by reference). */
+const NATIVE_HOLD_KINDS: ReadonlySet<string> = new Set([
+  "f64", "bool", "string", "array", "bytes", "record", "map", "set", "dyn", "caught", "object", "generator", "classval",
+  "symbol", "bigint", "jsval", "regex", "date", "promise", "undefinedT", "nullT",
+]);
+
+/** Whether a value of type `t` can ENTER a dyn slot. Elsewhere that is canConvertToDyn (the JSON-safe/walker domain); under the
+ * native object model (nativeDyn) every non-void typed value enters by reference, whatever its members (records with methods,
+ * arrays of class instances, collections, page values, promises, unions of those). Decisions about copying a value as data
+ * (JSON.stringify, structuredClone, island marshalling) keep canConvertToDyn / their own predicates. */
+export function dynHoldable(
+  t: IrType,
+  getRecord: (shapeId: string) => IrRecordShape | undefined,
+  getUnion: (unionId: string) => IrUnionDef | undefined,
+  visiting: Set<string> = new Set(),
+): boolean {
+  if (canConvertToDyn(t, getRecord, getUnion, visiting)) return true;
+  if (!nativeDyn()) return false;
+  // A function holds by reference only when untyped code can call it: its parameters must have a by-reference check (canBoxFuncIntoDyn).
+  if (t.kind === "func") return canBoxFuncIntoDyn(t, getRecord, getUnion, visiting);
+  if (t.kind === "union") {
+    const def = getUnion(t.unionId);
+    return !!def && def.arms.every((a) => a.kind === "union" || a.kind === "func" ? dynHoldable(a, getRecord, getUnion, visiting) : NATIVE_HOLD_KINDS.has(a.kind));
+  }
+  return NATIVE_HOLD_KINDS.has(t.kind);
+}
+
+const REF_PARAM_KINDS: ReadonlySet<string> = new Set(["array", "record", "map", "set", "object", "generator", "classval", "f64", "bool", "string", "bytes", "bigint", "symbol", "date", "undefinedT", "nullT"]);
+/** Native model: a parameter the dyn invoker checks by type test (the kinds its by-reference checker covers; a module namespace never). */
+function refCheckableParam(p: IrType, getUnion: (unionId: string) => IrUnionDef | undefined): boolean {
+  if (p.kind === "union") return !!getUnion(p.unionId)?.arms.every((a) => a.kind !== "union" && REF_PARAM_KINDS.has(a.kind));
+  return REF_PARAM_KINDS.has(p.kind);
 }
 
 /** The composite extension of the dynFrom domain: JSON-safe scalars plus
@@ -5242,7 +5771,9 @@ function canBoxDynCompositeAt(
       // records, arrays and unions exactly like a bare promise: promise<dyn>
       // carries its ScrPromise, a void payload is absent, and any other inner
       // converts through the adapter promise toDynHelper emits
-      // (scr_dyn_new_promise_adapting).
+      // (scr_dyn_new_promise_adapting). Native targets: the WasmGC lowering
+      // keeps the fork's answer.
+      if (browserTarget()) return DYN_HANDLE_KINDS.has(t.kind);
       return (
         t.inner.kind === "dyn" ||
         t.inner.kind === "void" ||
@@ -5330,9 +5861,16 @@ export function canDynCheckTo(
 /** The in-progress key of a checked composite. Marking it for the duration of
  * the frame answers a recursion back-edge coinductively. It is not the
  * `checked:` success memo: a failed branch elsewhere clears every memo, and
- * a frame that lost its mark that way would be entered again without end. */
+ * a frame that lost its mark that way would be entered again without end.
+ * Browser targets keep the fork's inductive answer: their key is the type's
+ * own, which a back-edge refuses (checkedBackEdge). */
 function checkedVisitKey(t: IrType): string {
-  return `checking:${typeKey(t)}`;
+  return browserTarget() ? typeKey(t) : `checking:${typeKey(t)}`;
+}
+
+/** A recursion back-edge's answer (see checkedVisitKey). */
+function checkedBackEdge(): boolean {
+  return !browserTarget();
 }
 
 /** Reuse completed subgraphs within one conversion query. A failed branch
@@ -5353,7 +5891,9 @@ function canDynCheckToAt(
 ): boolean {
   if (t.kind === "procStream") return true;
   // Unknown fields keep an owned dyn subtree; checking the surrounding
-  // record/array still validates its layout. Backends retain dyn fields and fill missing
+  // record/array still validates its layout. This is broader than the
+  // stringify/island JSON domain, which cannot assume opaque slots are
+  // serializable. Backends already retain dyn fields and fill missing
   // unknown record fields with the undefined value.
   if (isJsonSafeAt(t, getRecord, getUnion, false, false, new Set(), true)) return true;
   if (t.kind === "bigint" || t.kind === "symbol" || t.kind === "date" || t.kind === "searchParams")
@@ -5363,12 +5903,9 @@ function canDynCheckToAt(
   if (t.kind === "bytes") return true;
   if (t.kind === "classval") return true;
   if (t.kind === "generator") return true;
-  if (t.kind === "promise")
-    return (
-      t.inner.kind === "dyn" ||
-      t.inner.kind === "void" ||
-      canDynCheckToAt(t.inner, getRecord, getUnion, visiting)
-    );
+  // Browser target: a page value slot (an element, a React node, a DOM event) takes any value as it is.
+  if (t.kind === "jsval" && browserTarget()) return true;
+  if (t.kind === "promise") return t.inner.kind === "dyn" || t.inner.kind === "void" || canDynCheckToAt(t.inner, getRecord, getUnion, visiting);
   if (t.kind === "object" && t.className === "%Error") return true;
   // Native class capsules already support checked extraction at ordinary
   // boundaries. Callable adapters use the same identity/brand check.
@@ -5376,7 +5913,7 @@ function canDynCheckToAt(
   if (t.kind === "array") {
     if (t.elem.kind === "procStream") return false;
     const key = checkedVisitKey(t);
-    if (visiting.has(key)) return true;
+    if (visiting.has(key)) return checkedBackEdge();
     visiting.add(key);
     const result = canDynCheckTo(t.elem, getRecord, getUnion, visiting);
     visiting.delete(key);
@@ -5392,7 +5929,7 @@ function canDynCheckToAt(
     // whose methods take the same options — and refusing the back-edge
     // would fence types whose every leaf is checkable.
     const key = checkedVisitKey(t);
-    if (visiting.has(key)) return true;
+    if (visiting.has(key)) return checkedBackEdge();
     const shape = getRecord(t.shapeId);
     if (!shape || shapeHasAccessorSlots(shape)) return false;
     visiting.add(key);
@@ -5408,10 +5945,11 @@ function canDynCheckToAt(
     const def = getUnion(t.unionId);
     if (!def) return false;
     // A function arm can return this union again; the back-edge answers
-    // coinductively, like a recursive record.
-    const key = checkedVisitKey(t);
-    if (visiting.has(key)) return true;
-    visiting.add(key);
+    // coinductively, like a recursive record. Browser targets keep the fork's
+    // walk, which marks no union.
+    const key = browserTarget() ? null : checkedVisitKey(t);
+    if (key !== null && visiting.has(key)) return true;
+    if (key !== null) visiting.add(key);
     // Optional native callbacks and handles retain the same checked
     // conversion as their bare value. The union matcher selects the arm
     // before its adapter/extractor runs.
@@ -5419,7 +5957,7 @@ function canDynCheckToAt(
       (a) =>
         isUnitType(a) || (a.kind !== "union" && canDynCheckTo(a, getRecord, getUnion, visiting)),
     );
-    visiting.delete(key);
+    if (key !== null) visiting.delete(key);
     return result;
   }
   return false;
@@ -5445,20 +5983,41 @@ export function canBoxFuncIntoDyn(
   getUnion: (unionId: string) => IrUnionDef | undefined,
   visiting: Set<string> = new Set(),
 ): boolean {
+  // Recursive function types: coinductive, as in canAdaptDynFuncTo.
+  if (t.kind !== "func") return false;
+  const key = `boxfn:${typeKey(t)}`;
+  if (visiting.has(key)) return true;
+  visiting.add(key);
+  const result = canBoxFuncIntoDynAt(t, getRecord, getUnion, visiting);
+  visiting.delete(key);
+  return result;
+}
+
+function canBoxFuncIntoDynAt(
+  t: IrType,
+  getRecord: (shapeId: string) => IrRecordShape | undefined,
+  getUnion: (unionId: string) => IrUnionDef | undefined,
+  visiting: Set<string>,
+): boolean {
   return (
     t.kind === "func" &&
     // Typed rest occupies the final native array parameter; its thunk
     // checks a fresh array containing all remaining call arguments.
-
+    // Island rest keeps its separate engine host-callback adapter.
     (t.rest !== true ||
       t.restAbi === undefined ||
       (t.restAbi === "typed" && t.params.at(-1)?.kind === "array")) &&
-    // The thunk checks each argument against the declared native type.
-    t.params.every((p) => p.kind === "dyn" || canDynCheckTo(p, getRecord, getUnion, visiting)) &&
-    // The result must be representable as a checked native value.
-    (t.ret.kind === "void" ||
-      t.ret.kind === "dyn" ||
-      canConvertToDyn(t.ret, getRecord, getUnion, visiting))
+    // A jsval (island) param converts through scr_jsval_from_dyn in the
+    // thunk (wrapped cells unwrap by reference, dyn data deep-copies) —
+    // the checker-'any' callback params of the routed-dispatch lane
+    // (`bag.list.map((x) => ...)` with x typed any).
+    t.params.every((p) => p.kind === "dyn" || p.kind === "jsval" || canDynCheckTo(p, getRecord, getUnion, visiting) ||
+      // Native object model: a parameter the invoker cannot rebuild from data takes the value only when it IS that typed value.
+      (nativeDyn() && refCheckableParam(p, getUnion))) &&
+    // A jsval return converts through the by-reference wrap
+    // (dynFromJsval — the thunk's result conversion), so engine-returning
+    // callbacks box too: the routed-dispatch lane's flatMap shape.
+    (t.ret.kind === "void" || t.ret.kind === "dyn" || t.ret.kind === "jsval" || dynHoldable(t.ret, getRecord, getUnion, visiting))
   );
 }
 
@@ -5472,17 +6031,117 @@ export function canAdaptDynFuncTo(
   getUnion: (unionId: string) => IrUnionDef | undefined,
   visiting: Set<string> = new Set(),
 ): boolean {
+  // A recursive function type (`type Callback = (didTimeout: boolean) => Callback | null`) reaches itself through its
+  // own params or result: answered coinductively, it adapts when the rest of its graph does.
+  if (t.kind !== "func") return false;
+  const key = `adapt:${typeKey(t)}`;
+  if (visiting.has(key)) return true;
+  visiting.add(key);
+  const result = canAdaptDynFuncToAt(t, getRecord, getUnion, visiting);
+  visiting.delete(key);
+  return result;
+}
+
+function canAdaptDynFuncToAt(
+  t: IrType,
+  getRecord: (shapeId: string) => IrRecordShape | undefined,
+  getUnion: (unionId: string) => IrUnionDef | undefined,
+  visiting: Set<string>,
+): boolean {
   return (
     t.kind === "func" &&
     // Checked rest and arguments packs retain all actual arguments; typed
     // rest is one trailing native array in `params`, which the adapter
-    // spreads into the dyn call's argument vector element by element.
+    // spreads into the dyn call's argument vector element by element (native
+    // targets; browser targets keep the fork's rule). Island rest ABIs still
+    // require their own conversion plan.
     (t.rest !== true ||
       t.restAbi === undefined ||
-      (t.restAbi === "typed" && t.params.at(-1)?.kind === "array")) &&
-    t.params.every((p) => p.kind === "dyn" || canConvertToDyn(p, getRecord, getUnion, visiting)) &&
-    (t.ret.kind === "void" ||
-      t.ret.kind === "dyn" ||
-      canDynCheckTo(t.ret, getRecord, getUnion, visiting))
+      (!browserTarget() && t.restAbi === "typed" && t.params.at(-1)?.kind === "array")) &&
+    // (Browser target: a page value parameter, an event or an element, enters dyn as itself.)
+    t.params.every((p) => p.kind === "dyn" || (p.kind === "jsval" && browserTarget()) || dynHoldable(p, getRecord, getUnion, visiting)) &&
+    // Native object model: a result that cannot be rebuilt from data is accepted when it IS the typed value (checked by type test).
+    (t.ret.kind === "void" || t.ret.kind === "dyn" || canDynCheckTo(t.ret, getRecord, getUnion, visiting) ||
+      (nativeDyn() && refCheckableParam(t.ret, getUnion)))
   );
+}
+
+/** The MARSHAL-direction boundary (jsMarshal): everything that can cross
+ * out and back (canCrossIslandBoundary) plus qualifying closures — those
+ * enter as host functions but never EXIT (jsExit keeps the narrower
+ * predicate). */
+export function canMarshalIntoIsland(
+  t: IrType,
+  getRecord: (shapeId: string) => IrRecordShape | undefined,
+  getUnion: (unionId: string) => IrUnionDef | undefined,
+): boolean {
+  return isJsonSafeType(t, getRecord, getUnion) || canMarshalFuncIntoIsland(t);
+}
+
+/** The EXIT-direction boundary (jsExit): everything round-trippable
+ * (canCrossIslandBoundary) plus BARE undefined/null-armed unions whose
+ * data arms are all JSON-safe — the engine's undefined takes the
+ * undefined arm before the JSON detour (JSON cannot spell undefined, and
+ * bare undefined-armed unions are JSON-unsafe for exactly that reason),
+ * null and data ride the round trip into the union's dynCheck. The
+ * package-API shape `result.headers` : `Record<string, string> |
+ * undefined` is the motivating case. */
+/** The static-promise→engine bridge's payload domain: the fulfillment
+ * types a scriptc promise may deliver INTO the island as a real engine
+ * thenable (scr_jsval_from_promise — the async-callback return bridge,
+ * reused by promise VALUES crossing at jsvalIn edges and the island
+ * Promise.all arm). Null = outside the domain (the boundary fence). */
+export function islandPromisePayloadTag(
+  inner: IrType,
+): "void" | "f64" | "bool" | "string" | "jsval" | "jsvalArr" | null {
+  switch (inner.kind) {
+    case "void":
+      return "void";
+    case "f64":
+      return "f64";
+    case "bool":
+      return "bool";
+    case "string":
+      return "string";
+    case "jsval":
+      return "jsval";
+    case "array":
+      return inner.elem.kind === "jsval" ? "jsvalArr" : null;
+    default:
+      return null;
+  }
+}
+
+export function canExitIslandToType(
+  t: IrType,
+  getRecord: (shapeId: string) => IrRecordShape | undefined,
+  getUnion: (unionId: string) => IrUnionDef | undefined,
+): boolean {
+  if (canCrossIslandBoundary(t, getRecord, getUnion)) return true;
+  // Uint8Array exits with a validated kind check + copy (engine Buffers
+  // pass — they ARE Uint8Arrays); other element widths stay out.
+  if (t.kind === "bytes" && t.elem === "u8") return true;
+  // `any[]`-declared slots (the jsval-element-array spelling): the engine
+  // array exits Array.isArray-gated, elements BY REFERENCE (identity
+  // crosses; the withPlugins `loadPlugins(plugins)` boundary).
+  if (t.kind === "array" && t.elem.kind === "jsval") return true;
+  if (t.kind === "union") {
+    const def = getUnion(t.unionId);
+    if (!def || !def.arms.some((a) => a.kind === "undefinedT")) return false;
+    if (def.arms.every((a) => isUnitType(a) || isJsonSafeType(a, getRecord, getUnion))) return true;
+    // `any[] | undefined` (the defaulted-parameter spelling): exactly one
+    // jsval-element-array data arm beside units — the engine's undefined
+    // takes the undefined arm, everything else the array exit.
+    const dataArms = def.arms.filter((a) => !isUnitType(a));
+    return (
+      dataArms.length === 1 && dataArms[0]!.kind === "array" && dataArms[0]!.elem.kind === "jsval"
+    );
+  }
+  return false;
+}
+
+/** Browser target: compiled reference kinds that cross into JavaScript as
+ * opaque references (identity kept) when they have no data marshal. */
+export function isOpaqueCrossingType(t: IrType): boolean {
+  return t.kind === "object" || t.kind === "record" || t.kind === "array" || t.kind === "map" || t.kind === "set" || t.kind === "promise";
 }

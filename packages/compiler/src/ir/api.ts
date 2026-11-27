@@ -1,3 +1,4 @@
+// This file was modified from scriptc (Apache-2.0); see MODIFICATIONS.md.
 /* Public IR facade. Compiler passes import their implementation owner directly. */
 export * from "./ir.js";
 export { MAY_THROW_LIB_FNS } from "./builtin-effects.js";
@@ -12,7 +13,9 @@ export {
   moduleUsesProcessEvents,
   moduleUsesEmitter,
   moduleUsesStream,
+  moduleEmbedsBuiltin,
   NPM_COMPRESS_MIN,
+  moduleEmbedsCompressedNpm,
   moduleUsesZlib,
   moduleUsesDc,
   moduleUsesAssert,

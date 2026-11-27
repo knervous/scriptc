@@ -1,6 +1,0 @@
-{
- "order": [
-  "<repo>/tests/corpus/js-checked-global-read-above-declaration.js"
- ],
- "diags": []
-}

@@ -1,6 +1,0 @@
-{
- "order": [
-  "<repo>/tests/corpus/5085-promise-allsettled-turns.ts"
- ],
- "diags": []
-}

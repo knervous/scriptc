@@ -1,6 +1,0 @@
-{
- "order": [
-  "<repo>/tests/corpus/var-definite-assignment-exempt-reads.ts"
- ],
- "diags": []
-}

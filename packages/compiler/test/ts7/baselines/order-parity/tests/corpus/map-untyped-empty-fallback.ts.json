@@ -1,6 +1,0 @@
-{
- "order": [
-  "<repo>/tests/corpus/map-untyped-empty-fallback.ts"
- ],
- "diags": []
-}

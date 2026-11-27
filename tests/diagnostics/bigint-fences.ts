@@ -9,9 +9,6 @@ console.log(JSON.stringify(1n));
 
 import { statSync } from "node:fs";
 const stats = statSync(".", { bigint: true });
-// A BigIntStats member is a call, not a value: reading one as a value still
-// has no lowering.
-const read = stats.isFile;
 console.log(stats.size);
 
 void typed;

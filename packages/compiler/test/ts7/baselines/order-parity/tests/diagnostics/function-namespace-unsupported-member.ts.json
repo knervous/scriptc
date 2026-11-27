@@ -1,6 +1,0 @@
-{
- "order": [
-  "<repo>/tests/diagnostics/function-namespace-unsupported-member.ts"
- ],
- "diags": []
-}

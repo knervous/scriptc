@@ -1,3 +1,4 @@
+// This file was modified from scriptc (Apache-2.0); see MODIFICATIONS.md.
 const IMAGE_MANIFEST_MEDIA_TYPES = new Set([
   "application/vnd.oci.image.manifest.v1+json",
   "application/vnd.docker.distribution.manifest.v2+json",
@@ -15,11 +16,15 @@ export function linuxAmd64ManifestDigest(inspection) {
   const manifest = inspection?.manifest;
   const platformManifest = manifest?.manifests?.find(
     (candidate) =>
-      candidate.platform?.os === "linux" && candidate.platform?.architecture === "amd64",
+      candidate.platform?.os === "linux" &&
+      candidate.platform?.architecture === "amd64",
   );
   if (typeof platformManifest?.digest === "string") return platformManifest.digest;
 
-  if (IMAGE_MANIFEST_MEDIA_TYPES.has(manifest?.mediaType) && typeof manifest?.digest === "string") {
+  if (
+    IMAGE_MANIFEST_MEDIA_TYPES.has(manifest?.mediaType) &&
+    typeof manifest?.digest === "string"
+  ) {
     return manifest.digest;
   }
 

@@ -1,6 +1,0 @@
-{
- "order": [
-  "<repo>/tests/corpus/overload-subclass-return-from-base-implementation.ts"
- ],
- "diags": []
-}

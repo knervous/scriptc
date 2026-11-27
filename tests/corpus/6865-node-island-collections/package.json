@@ -1,1 +1,0 @@
-{ "name": "island-collections", "private": true, "type": "module", "scriptc": { "packages": { "coll-pkg": "node" } } }

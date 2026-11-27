@@ -1,6 +1,0 @@
-{
- "order": [
-  "<repo>/tests/corpus/8515-js-undeclared-read.js"
- ],
- "diags": []
-}

@@ -1,3 +1,0 @@
-{
-    "node-builtin.dgram": ["tests/corpus/2597-dgram-send-ladders.cjs"]
-}

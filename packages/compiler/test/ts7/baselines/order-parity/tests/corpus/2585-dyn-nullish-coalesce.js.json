@@ -1,6 +1,0 @@
-{
- "order": [
-  "<repo>/tests/corpus/2585-dyn-nullish-coalesce.js"
- ],
- "diags": []
-}

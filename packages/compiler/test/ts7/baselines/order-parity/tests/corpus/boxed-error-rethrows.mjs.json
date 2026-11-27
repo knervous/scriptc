@@ -1,6 +1,0 @@
-{
- "order": [
-  "<repo>/tests/corpus/boxed-error-rethrows.mjs"
- ],
- "diags": []
-}

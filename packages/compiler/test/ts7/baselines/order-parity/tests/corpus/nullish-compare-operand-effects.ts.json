@@ -1,6 +1,0 @@
-{
- "order": [
-  "<repo>/tests/corpus/nullish-compare-operand-effects.ts"
- ],
- "diags": []
-}

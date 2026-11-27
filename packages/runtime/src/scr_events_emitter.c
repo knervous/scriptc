@@ -1,3 +1,4 @@
+// This file was modified from scriptc (Apache-2.0); see MODIFICATIONS.md.
 /* The node:events EventEmitter — the runtime-provided BASE CLASS behind
  * `new EventEmitter()` and `class My extends EventEmitter` (the ScrError
  * precedent: ScrEmitter lays out exactly like a compiler-emitted hierarchy
@@ -180,7 +181,7 @@ struct ScrEeReg {
  * stamps pre/post from the program's preorder numbering (the
  * scr_error_vts precedent). release is the direct teardown below. */
 static void scr_emitter_release_direct(void *obj);
-SCR_TL ScrVt scr_emitter_vt = {0, 0, &scr_emitter_release_direct};
+ScrVt scr_emitter_vt = {0, 0, &scr_emitter_release_direct};
 
 SCR_TL double scr_emitter_default_max = 10; /* EventEmitter.defaultMaxListeners */
 

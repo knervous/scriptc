@@ -143,12 +143,15 @@ test.each([
 });
 
 test("worker runtime packs refuse dynamic and WASI execution", async () => {
-  for (const target of [WASM32_WASI_TARGET]) {
+  for (const [target, dynamic] of [
+    [LINUX_X64_GNU_TARGET, true],
+    [WASM32_WASI_TARGET, false],
+  ] as const) {
     const pack = await fixture(target, true);
     await expect(
       loadRuntimePack({
         target,
-        features: { ...features, workers: true },
+        features: { ...features, workers: true, dynamic },
         optimization: "release",
         resolver: () => pack.packagePath,
       }),

@@ -1,6 +1,0 @@
-{
- "order": [
-  "<repo>/tests/corpus/2044-vtable-sibling-slots.ts"
- ],
- "diags": []
-}

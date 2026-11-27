@@ -1,0 +1,662 @@
+{
+ "schema": "scriptc-pgo-site-profile/1",
+ "key": "hand-made by make-fixture-profile.mjs: every o.<field> access monomorphic on {tag,lanes,val,next}",
+ "pathsRelativeTo": "this file",
+ "files": {
+  "js-ctor-structs-rcache-helper.js": {
+   "sha256": "16a0e2fe69c92928ea2986ad4ed0b411de3b63332426d80bcd35ccdc0d9747b9"
+  }
+ },
+ "sites": [
+  {
+   "kind": "load",
+   "property": "val",
+   "file": "js-ctor-structs-rcache-helper.js",
+   "span": {
+    "start": 645,
+    "end": 650
+   },
+   "state": "monomorphic",
+   "receivers": [
+    {
+     "kind": "plain-object",
+     "fields": [
+      "tag",
+      "lanes",
+      "val",
+      "next"
+     ],
+     "own": {
+      "index": 2,
+      "how": "field:h"
+     }
+    }
+   ]
+  },
+  {
+   "kind": "load",
+   "property": "tag",
+   "file": "js-ctor-structs-rcache-helper.js",
+   "span": {
+    "start": 659,
+    "end": 664
+   },
+   "state": "monomorphic",
+   "receivers": [
+    {
+     "kind": "plain-object",
+     "fields": [
+      "tag",
+      "lanes",
+      "val",
+      "next"
+     ],
+     "own": {
+      "index": 0,
+      "how": "field:s"
+     }
+    }
+   ]
+  },
+  {
+   "kind": "load",
+   "property": "tag",
+   "file": "js-ctor-structs-rcache-helper.js",
+   "span": {
+    "start": 668,
+    "end": 673
+   },
+   "state": "monomorphic",
+   "receivers": [
+    {
+     "kind": "plain-object",
+     "fields": [
+      "tag",
+      "lanes",
+      "val",
+      "next"
+     ],
+     "own": {
+      "index": 0,
+      "how": "field:s"
+     }
+    }
+   ]
+  },
+  {
+   "kind": "load",
+   "property": "lanes",
+   "file": "js-ctor-structs-rcache-helper.js",
+   "span": {
+    "start": 695,
+    "end": 702
+   },
+   "state": "monomorphic",
+   "receivers": [
+    {
+     "kind": "plain-object",
+     "fields": [
+      "tag",
+      "lanes",
+      "val",
+      "next"
+     ],
+     "own": {
+      "index": 1,
+      "how": "field:s"
+     }
+    }
+   ]
+  },
+  {
+   "kind": "store",
+   "property": "lanes",
+   "file": "js-ctor-structs-rcache-helper.js",
+   "span": {
+    "start": 719,
+    "end": 726
+   },
+   "state": "monomorphic",
+   "receivers": [
+    {
+     "kind": "plain-object",
+     "fields": [
+      "tag",
+      "lanes",
+      "val",
+      "next"
+     ],
+     "own": {
+      "index": 1,
+      "how": "field:s"
+     }
+    }
+   ]
+  },
+  {
+   "kind": "load",
+   "property": "lanes",
+   "file": "js-ctor-structs-rcache-helper.js",
+   "span": {
+    "start": 729,
+    "end": 736
+   },
+   "state": "monomorphic",
+   "receivers": [
+    {
+     "kind": "plain-object",
+     "fields": [
+      "tag",
+      "lanes",
+      "val",
+      "next"
+     ],
+     "own": {
+      "index": 1,
+      "how": "field:s"
+     }
+    }
+   ]
+  },
+  {
+   "kind": "load",
+   "property": "next",
+   "file": "js-ctor-structs-rcache-helper.js",
+   "span": {
+    "start": 750,
+    "end": 756
+   },
+   "state": "monomorphic",
+   "receivers": [
+    {
+     "kind": "plain-object",
+     "fields": [
+      "tag",
+      "lanes",
+      "val",
+      "next"
+     ],
+     "own": {
+      "index": 3,
+      "how": "field:h"
+     }
+    }
+   ]
+  },
+  {
+   "kind": "load",
+   "property": "tag",
+   "file": "js-ctor-structs-rcache-helper.js",
+   "span": {
+    "start": 911,
+    "end": 916
+   },
+   "state": "monomorphic",
+   "receivers": [
+    {
+     "kind": "plain-object",
+     "fields": [
+      "tag",
+      "lanes",
+      "val",
+      "next"
+     ],
+     "own": {
+      "index": 0,
+      "how": "field:s"
+     }
+    }
+   ]
+  },
+  {
+   "kind": "load",
+   "property": "lanes",
+   "file": "js-ctor-structs-rcache-helper.js",
+   "span": {
+    "start": 919,
+    "end": 926
+   },
+   "state": "monomorphic",
+   "receivers": [
+    {
+     "kind": "plain-object",
+     "fields": [
+      "tag",
+      "lanes",
+      "val",
+      "next"
+     ],
+     "own": {
+      "index": 1,
+      "how": "field:s"
+     }
+    }
+   ]
+  },
+  {
+   "kind": "load",
+   "property": "tag",
+   "file": "js-ctor-structs-rcache-helper.js",
+   "span": {
+    "start": 946,
+    "end": 951
+   },
+   "state": "monomorphic",
+   "receivers": [
+    {
+     "kind": "plain-object",
+     "fields": [
+      "tag",
+      "lanes",
+      "val",
+      "next"
+     ],
+     "own": {
+      "index": 0,
+      "how": "field:s"
+     }
+    }
+   ]
+  },
+  {
+   "kind": "load",
+   "property": "lanes",
+   "file": "js-ctor-structs-rcache-helper.js",
+   "span": {
+    "start": 960,
+    "end": 967
+   },
+   "state": "monomorphic",
+   "receivers": [
+    {
+     "kind": "plain-object",
+     "fields": [
+      "tag",
+      "lanes",
+      "val",
+      "next"
+     ],
+     "own": {
+      "index": 1,
+      "how": "field:s"
+     }
+    }
+   ]
+  },
+  {
+   "kind": "load",
+   "property": "val",
+   "file": "js-ctor-structs-rcache-helper.js",
+   "span": {
+    "start": 976,
+    "end": 981
+   },
+   "state": "monomorphic",
+   "receivers": [
+    {
+     "kind": "plain-object",
+     "fields": [
+      "tag",
+      "lanes",
+      "val",
+      "next"
+     ],
+     "own": {
+      "index": 2,
+      "how": "field:h"
+     }
+    }
+   ]
+  },
+  {
+   "kind": "store",
+   "property": "tag",
+   "file": "js-ctor-structs-rcache-helper.js",
+   "span": {
+    "start": 1001,
+    "end": 1006
+   },
+   "state": "monomorphic",
+   "receivers": [
+    {
+     "kind": "plain-object",
+     "fields": [
+      "tag",
+      "lanes",
+      "val",
+      "next"
+     ],
+     "own": {
+      "index": 0,
+      "how": "field:s"
+     }
+    }
+   ]
+  },
+  {
+   "kind": "load",
+   "property": "tag",
+   "file": "js-ctor-structs-rcache-helper.js",
+   "span": {
+    "start": 1041,
+    "end": 1046
+   },
+   "state": "monomorphic",
+   "receivers": [
+    {
+     "kind": "plain-object",
+     "fields": [
+      "tag",
+      "lanes",
+      "val",
+      "next"
+     ],
+     "own": {
+      "index": 0,
+      "how": "field:s"
+     }
+    }
+   ]
+  },
+  {
+   "kind": "load",
+   "property": "tag",
+   "file": "js-ctor-structs-rcache-helper.js",
+   "span": {
+    "start": 1204,
+    "end": 1209
+   },
+   "state": "monomorphic",
+   "receivers": [
+    {
+     "kind": "plain-object",
+     "fields": [
+      "tag",
+      "lanes",
+      "val",
+      "next"
+     ],
+     "own": {
+      "index": 0,
+      "how": "field:s"
+     }
+    }
+   ]
+  },
+  {
+   "kind": "store",
+   "property": "lanes",
+   "file": "js-ctor-structs-rcache-helper.js",
+   "span": {
+    "start": 1213,
+    "end": 1220
+   },
+   "state": "monomorphic",
+   "receivers": [
+    {
+     "kind": "plain-object",
+     "fields": [
+      "tag",
+      "lanes",
+      "val",
+      "next"
+     ],
+     "own": {
+      "index": 1,
+      "how": "field:s"
+     }
+    }
+   ]
+  },
+  {
+   "kind": "load",
+   "property": "lanes",
+   "file": "js-ctor-structs-rcache-helper.js",
+   "span": {
+    "start": 1259,
+    "end": 1266
+   },
+   "state": "monomorphic",
+   "receivers": [
+    {
+     "kind": "plain-object",
+     "fields": [
+      "tag",
+      "lanes",
+      "val",
+      "next"
+     ],
+     "own": {
+      "index": 1,
+      "how": "field:s"
+     }
+    }
+   ]
+  },
+  {
+   "kind": "load",
+   "property": "tag",
+   "file": "js-ctor-structs-rcache-helper.js",
+   "span": {
+    "start": 1315,
+    "end": 1320
+   },
+   "state": "monomorphic",
+   "receivers": [
+    {
+     "kind": "plain-object",
+     "fields": [
+      "tag",
+      "lanes",
+      "val",
+      "next"
+     ],
+     "own": {
+      "index": 0,
+      "how": "field:s"
+     }
+    }
+   ]
+  },
+  {
+   "kind": "store",
+   "property": "lanes",
+   "file": "js-ctor-structs-rcache-helper.js",
+   "span": {
+    "start": 1324,
+    "end": 1331
+   },
+   "state": "monomorphic",
+   "receivers": [
+    {
+     "kind": "plain-object",
+     "fields": [
+      "tag",
+      "lanes",
+      "val",
+      "next"
+     ],
+     "own": {
+      "index": 1,
+      "how": "field:s"
+     }
+    }
+   ]
+  },
+  {
+   "kind": "load",
+   "property": "lanes",
+   "file": "js-ctor-structs-rcache-helper.js",
+   "span": {
+    "start": 1370,
+    "end": 1377
+   },
+   "state": "monomorphic",
+   "receivers": [
+    {
+     "kind": "plain-object",
+     "fields": [
+      "tag",
+      "lanes",
+      "val",
+      "next"
+     ],
+     "own": {
+      "index": 1,
+      "how": "field:s"
+     }
+    }
+   ]
+  },
+  {
+   "kind": "load",
+   "property": "tag",
+   "file": "js-ctor-structs-rcache-helper.js",
+   "span": {
+    "start": 1424,
+    "end": 1429
+   },
+   "state": "monomorphic",
+   "receivers": [
+    {
+     "kind": "plain-object",
+     "fields": [
+      "tag",
+      "lanes",
+      "val",
+      "next"
+     ],
+     "own": {
+      "index": 0,
+      "how": "field:s"
+     }
+    }
+   ]
+  },
+  {
+   "kind": "load",
+   "property": "val",
+   "file": "js-ctor-structs-rcache-helper.js",
+   "span": {
+    "start": 1487,
+    "end": 1492
+   },
+   "state": "monomorphic",
+   "receivers": [
+    {
+     "kind": "plain-object",
+     "fields": [
+      "tag",
+      "lanes",
+      "val",
+      "next"
+     ],
+     "own": {
+      "index": 2,
+      "how": "field:h"
+     }
+    }
+   ]
+  },
+  {
+   "kind": "load",
+   "property": "lanes",
+   "file": "js-ctor-structs-rcache-helper.js",
+   "span": {
+    "start": 1629,
+    "end": 1636
+   },
+   "state": "monomorphic",
+   "receivers": [
+    {
+     "kind": "plain-object",
+     "fields": [
+      "tag",
+      "lanes",
+      "val",
+      "next"
+     ],
+     "own": {
+      "index": 1,
+      "how": "field:s"
+     }
+    }
+   ]
+  },
+  {
+   "kind": "store",
+   "property": "lanes",
+   "file": "js-ctor-structs-rcache-helper.js",
+   "span": {
+    "start": 1640,
+    "end": 1647
+   },
+   "state": "monomorphic",
+   "receivers": [
+    {
+     "kind": "plain-object",
+     "fields": [
+      "tag",
+      "lanes",
+      "val",
+      "next"
+     ],
+     "own": {
+      "index": 1,
+      "how": "field:s"
+     }
+    }
+   ]
+  },
+  {
+   "kind": "load",
+   "property": "lanes",
+   "file": "js-ctor-structs-rcache-helper.js",
+   "span": {
+    "start": 1672,
+    "end": 1679
+   },
+   "state": "monomorphic",
+   "receivers": [
+    {
+     "kind": "plain-object",
+     "fields": [
+      "tag",
+      "lanes",
+      "val",
+      "next"
+     ],
+     "own": {
+      "index": 1,
+      "how": "field:s"
+     }
+    }
+   ]
+  },
+  {
+   "kind": "load",
+   "property": "tag",
+   "file": "js-ctor-structs-rcache-helper.js",
+   "span": {
+    "start": 1688,
+    "end": 1693
+   },
+   "state": "monomorphic",
+   "receivers": [
+    {
+     "kind": "plain-object",
+     "fields": [
+      "tag",
+      "lanes",
+      "val",
+      "next"
+     ],
+     "own": {
+      "index": 0,
+      "how": "field:s"
+     }
+    }
+   ]
+  }
+ ]
+}

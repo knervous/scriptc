@@ -1,6 +1,0 @@
-{
- "order": [
-  "<repo>/tests/corpus/5372-zlib-stream-errors.cjs"
- ],
- "diags": []
-}

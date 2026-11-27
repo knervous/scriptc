@@ -1,3 +1,4 @@
+// This file was modified from scriptc (Apache-2.0); see MODIFICATIONS.md.
 export const MAX_INLINE_SANDBOX_COMMAND_BYTES = 768;
 // Outside the shell exit-code range, so an actual exit 125 stays a failure.
 export const REMOTE_COMMAND_PENDING = 256;
@@ -8,16 +9,13 @@ export async function waitForSandboxCommand(probe, { deadline, label, onPending 
   for (;;) {
     const remaining = deadline - Date.now();
     if (remaining <= 0) {
-      throw new Error(`${label} did not confirm completion before its timeout`, {
-        cause: lastError,
-      });
+      throw new Error(`${label} did not confirm completion before its timeout`, { cause: lastError });
     }
     try {
       await probe(remaining);
       return;
     } catch (error) {
-      if (error.remoteExitCode !== undefined && error.remoteExitCode !== REMOTE_COMMAND_PENDING)
-        throw error;
+      if (error.remoteExitCode !== undefined && error.remoteExitCode !== REMOTE_COMMAND_PENDING) throw error;
       lastError = error;
       onPending(error);
       const delay = Math.min(1000, deadline - Date.now());

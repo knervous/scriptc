@@ -1,6 +1,0 @@
-{
- "order": [
-  "<repo>/tests/corpus/2660-top-level-await-cycle-rejection/main.ts"
- ],
- "diags": []
-}

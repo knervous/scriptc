@@ -1,6 +1,0 @@
-{
- "order": [
-  "<repo>/tests/corpus/native-worker-terminate-exception-state.ts"
- ],
- "diags": []
-}

@@ -30,13 +30,17 @@ V8's adaptation of fdlibm, the code behind Node's Math.sin, Math.exp, Math.cbrt 
 - Commit: 3c8f3d68953955950074c41c6e4d999562ae82a7
 - License: MIT (see quickjs-ng/LICENSE)
 
-The QuickJS-ng engine is used only by the compiler's `comptime` evaluator (`native/llvm-codegen/comptime`), which each LLVM helper package builds from this tree. Compiled user programs never link it. The standalone regex and Unicode libraries from this tree still support native RegExp and string operations.
+The QuickJS-ng JavaScript engine, embedded by the opt-in `--dynamic` build mode (see packages/runtime/src/scr_island.c). Static builds never compile or link any of this.
+
+The compiler's `comptime` evaluator (`native/llvm-codegen/comptime`) also uses the engine; each LLVM helper package builds it from this tree. The standalone regex and Unicode libraries from this tree still support native RegExp and string operations.
 
 The tree is a snapshot of the upstream commit with directories the library build does not need removed (tests/, docs/, examples/, test262 fixtures, CI config, generator scripts), and two modifications, marked `scriptc:` in the source. To update, re-clone upstream at the new commit, delete its .git directory, apply the same trim, re-apply the modifications unless upstream has an equivalent, and update this file.
 
 The first modification is in `libregexp.c`, `re_parse_nested_class`: the single characters and ranges of a character class are collected and united with the class once (`re_class_add_intervals`), where upstream rebuilds the whole class for each of them. Upstream's cost for a class is its member count times its size, which is what a class such as `[\p{P}\p{S}\u3000-\u303f…]` with a few dozen ranges after a Unicode property pays every time a pattern names it. The class is the same set and the compiled bytecode is byte-identical.
 
 The second modification is in `libregexp.c`, the interpreter (`lre_exec` and the five character macros of `lre_exec_backtrack`): subject types 3 and 4 read a subject stored as WTF-8, the storage of every scriptc string, where upstream has 8-bit and 16-bit subjects only. Positions are byte pointers; type 4 (a `u` or `v` pattern) reads code points as type 2 does, and type 3 reads UTF-16 code units as type 1 does, with the position between the two units of an astral character at the third of its four bytes. A non-ASCII subject is then matched where it is stored instead of being converted to UTF-16 on every call, so a match costs what it reads. The interpreter is compiled twice, once for the 8-bit and 16-bit subjects and once for WTF-8 subjects, so the first copy is upstream's code and neither pays for the other's character readers; `packages/runtime/test/test_regex_wtf8.c` checks the new types against the 16-bit ones on random patterns and subjects.
+
+The engine archive (libqjs.a) is prebuilt best-effort during npm installation (or explicitly by `scriptc cache warm`) and otherwise built lazily on the first `--dynamic` compile. It lives under the per-user build cache's `vendor/<commit>-<flavor>-<target>-<toolchain>/` directory — one flavor per lane (plain, asan), native platform/architecture or explicit cross target, and compiler environment/identity.
 
 ## zlib/
 
@@ -50,6 +54,15 @@ Each target compiles the units and defines Node's `deps/zlib/zlib.gyp` selects f
 
 Runtime packs archive zlib at `-O3`, as Node builds it. Zig cross builds compile the objects lazily on the first zlib-using cross compile into the per-user build cache's `vendor/zlib-<version>-<flavor>-<target>-<toolchain>/` directory, one flavor per driver/target and compiler environment/identity (the lre-objects pattern). Zlib-free binaries compile and link none of it.
 
+## curl/
+
+- Project: https://curl.se/ (Debian bookworm's libcurl4-openssl-dev 7.88.1, the exact library the Linux lane's pinned container image ships)
+- Version: 7.88.1 (headers copied byte-for-byte from `node:24.15.0-bookworm`'s `/usr/include/aarch64-linux-gnu/curl/`; the arch-specific include dir is Debian multiarch layout — the headers themselves are architecture-independent, `system.h` selects per-arch typedefs at preprocessing time)
+- License: curl (see curl/COPYRIGHT — the Debian machine-readable copyright file for the package the headers came from)
+
+HEADERS ONLY — no curl C source is vendored and none is ever compiled. These headers now serve ONLY the RETIRED curl reference implementation of fetch (packages/runtime/src/scr_fetch_curl.c, selected by `SCRIPTC_FETCH_CURL=1`; kept compilable for one release as the native flip's reference — see scr_fetch.c, the default, which rides scr_net/scr_tls/scr_http/zlib and touches nothing here). Under the flag: host builds link the system `-lcurl` (macOS ships libcurl), and linux-gnu CROSS builds compile scr_fetch_curl.c against these headers, then link against a generated STUB `libcurl.so` (soname `libcurl.so.4`, empty definitions of exactly the symbols scr_fetch_curl.c calls — see CURL_STUB_SYMBOLS in packages/compiler/src/backend/vendor-archives.ts) so the produced binary records a plain `DT_NEEDED libcurl.so.4` that the TARGET system's real libcurl satisfies at load time, the standard cross-link import-stub technique. The 7.88.1 pin is a floor, not a lock: scr_fetch_curl.c's newest requirement is CURLOPT_PROTOCOLS_STR (7.85.0) and the unversioned symbol references bind to any libcurl.so.4. This whole directory leaves with scr_fetch_curl.c when the reference retires for good.
+
+The stub builds lazily on the first flag-selected fetch cross compile into the per-user build cache's `vendor/curl-stub-<target>-<toolchain>/` directory (the zlib-objects pattern). Default builds never see any of this, and no build ever compiles curl itself.
 ## brotli/
 
 - Project: https://github.com/google/brotli

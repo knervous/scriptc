@@ -1,6 +1,0 @@
-{
- "order": [
-  "<repo>/tests/corpus/async-hooks-clear-reentrancy.cjs"
- ],
- "diags": []
-}

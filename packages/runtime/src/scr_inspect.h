@@ -1,3 +1,4 @@
+// This file was modified from scriptc (Apache-2.0); see MODIFICATIONS.md.
 /* scriptc runtime — util.inspect (scr_inspect.c). Included by scr_runtime.h,
  * which says where new declarations go. */
 #ifndef SCR_INSPECT_H
@@ -62,6 +63,13 @@ ScrStr *scr_insp_typed_array(ScrBytes *b, double recurse, double depth);
 ScrStr *scr_insp_bytes(ScrBytes *b, double recurse, double depth);
 /* format's %s / rest-args twin: dyn strings pass verbatim. */
 ScrStr *scr_insp_dyn_s(ScrDyn *d, double depth);
+#ifdef SCR_DYNAMIC
+/* Island `any` (scr_inspect_island.c — linked when a --dynamic build's
+ * IR carries insp.* libCalls): the scalar kinds render exactly (typeof
+ * dispatch); composites THROW a catchable TypeError (callers are
+ * compiler-emitted pending checks). */
+ScrStr *scr_insp_jsval(ScrJsval *v, double recurse, double depth);
+#endif
 /* util.format over checked-dynamic arguments (formatWithOptionsInternal):
  * the options an inspect of each argument takes, and the API name the
  * SC2020 refusals name. These entries call program code, so they answer

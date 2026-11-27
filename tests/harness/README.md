@@ -45,14 +45,18 @@ RequestInit and ResponseInit WebIDL dictionary reads (including runtime members
 that may be newer than the installed declarations). Every item is classified:
 
 - `static`: engine-free and tied one-to-one to a differential-evidence row;
-- `unsupported`: an explicit SC2020 refusal that remains implementation work;
+- `dynamic-only`: fenced from static builds with SC2020, accepted under
+  `--dynamic`;
+- `unsupported`: SC2020 in both tiers; this is implementation work rather than
+  an implicit omission;
 - `out-of-scope`: reflection metadata such as `Symbol.toStringTag`, retained so
   the scope boundary is machine-readable.
 
 The selected adjacent interface families excluded from the census carry
 reasons too. A Node upgrade that adds/removes a public member or dictionary key
-fails the focused suite until that member is classified. The static and unsupported rows project into the shipped surface manifest;
-filter `node24FetchCompatProfile().inventory.entries` by `status`/`owner` for
+fails the focused suite until that member is classified. The static,
+dynamic-only, and unsupported rows project into the shipped surface manifest;
+filter `NODE24_FETCH_COMPAT_PROFILE.inventory.entries` by `status`/`owner` for
 the next cohesive implementation queue.
 
 When Node changes, update `.node-version` and the profile's Node/Undici tuple
@@ -62,14 +66,6 @@ surface changes, update the profile first; its evidence check makes the missing
 fixture or generated scenario the implementation worklist.
 
 Full-suite runs (`vitest run` with no filters) take an advisory machine-wide lock (a pidfile in the OS temp dir) so concurrent full suites — typically parallel agents — queue instead of oversubscribing the CPU, which is a known flake source (vitest worker RPC timeouts, event-loop timing failures). The lock is per flavor (plain vs `SCRIPTC_SAN=1`): the two lanes read the same committed tree through separate cache directories, so a merge gate may deliberately run one of each concurrently — split the cores between them with `SCRIPTC_TEST_WORKERS` (e.g. 5 and 5) or the oversubscription flakes come back. Two runs of the SAME flavor still queue. Filtered and watch runs never wait. `SCRIPTC_NO_LOCK=1` opts out; stale locks from dead processes are stolen automatically. `SCRIPTC_TEST_WORKERS=<n>` caps the vitest worker pool (default: unchanged, all cores).
-
-### Node island conformance
-
-A package must behave the same compiled natively, run in a Node island, and under Node. `tests/harness/island-conformance.test.ts` runs every program of the npm suite, the corpus directory programs that carry their own `node_modules`, and the pinned package programs under `tests/fixtures/island-conformance` three ways: under Node, as the default build, and once per imported package with that package forced into a Node island (`--node-island=<package>`). stdout, the exit status and (where the program compares it) stderr of each way are compared with Node's for every argv list. The lane measures the island, so it charges the island only with what the island changes: a default build that runs no package in an island and differs from Node is the native tier's difference (the npm suite and the corpus pin those; the lane skips that test with a note), and a forced island build whose result equals the default build's inherits the default build's difference.
-
-`tests/harness/island-conformance/known-failures.json` lists every island way that does not match Node, keyed by program and way (`island:<package>`, or `default` when the automatic policy ran one of the program's packages in an island), with a category (`build`, `not-islanded`, `crash`, `exit`, `stdout`, `stderr`) and a signature. The lane passes when exactly the listed failures occur: a new failure, a changed one, and a listed one that no longer occurs all fail it. A fix removes its entries in the same change; nothing else shrinks or grows the list. An entry marked `"unstable": true` is a race that matches Node in some runs: it is pinned by category when it fails, and added and removed by hand.
-
-The lane is opt-in because it compiles every program several times: `SCRIPTC_ISLAND_CONFORMANCE=1 SCRIPTC_LIBNODE=<pack> pnpm exec vitest run tests/harness/island-conformance.test.ts` runs it (Linux x64, whose results the list pins; `SCRIPTC_TEST_SHARD=i/n` splits it by program), and `SCRIPTC_ISLAND_CONFORMANCE=update` rewrites the entries of the programs it ran. Without the variable the file only checks that every entry names a program and a way the lane runs. `node tests/harness/island-conformance/scoreboard.mjs` prints the list's size by category: that number is the measure of island robustness.
 
 ## Build and oracle caches
 
@@ -101,4 +97,4 @@ For the external development toolchain, environment variables that can resolve m
 
 ## Test262
 
-The default static compiler has a pinned Test262 regression profile and a separate full-snapshot survey runner. See [tests/test262/README.md](../test262/README.md) for commands, outcome reporting, and the current strict-script and scalar-assertion limits. Both plain and sanitized Sandbox lanes run the regression profile.
+The default static compiler has a pinned Test262 regression profile and a separate full-snapshot survey runner. See [tests/test262/README.md](../test262/README.md) for commands, outcome reporting, and the current strict-script and scalar-assertion limits. Both plain and sanitized Sandbox lanes run the regression profile; dynamic islands are disabled.

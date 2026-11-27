@@ -1,6 +1,0 @@
-{
- "order": [
-  "<repo>/tests/corpus/http-disconnect-delayed-end.ts"
- ],
- "diags": []
-}

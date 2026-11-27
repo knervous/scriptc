@@ -1,6 +1,0 @@
-{
- "order": [
-  "<repo>/tests/corpus/6481-weak-drain-map-in-cycle.ts"
- ],
- "diags": []
-}

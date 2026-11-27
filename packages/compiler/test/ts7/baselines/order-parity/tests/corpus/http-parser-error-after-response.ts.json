@@ -1,6 +1,0 @@
-{
- "order": [
-  "<repo>/tests/corpus/http-parser-error-after-response.ts"
- ],
- "diags": []
-}

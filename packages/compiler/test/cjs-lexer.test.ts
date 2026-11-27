@@ -37,11 +37,7 @@ describe("cjsLexerVisibleNames unions CJS reexport targets", () => {
   });
 
   test("unresolvable targets contribute nothing", () => {
-    const names = cjsLexerVisibleNames(
-      "mid",
-      (k) => graph[k]!,
-      (_f, spec) => (spec === "./leaf" ? "leaf" : null),
-    );
+    const names = cjsLexerVisibleNames("mid", (k) => graph[k]!, (_f, spec) => (spec === "./leaf" ? "leaf" : null));
     expect([...names].sort()).toEqual(["leafName", "midName"]);
   });
 });

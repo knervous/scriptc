@@ -1,6 +1,0 @@
-{
- "order": [
-  "<repo>/tests/corpus/4413-nullable-null-and-undefined.ts"
- ],
- "diags": []
-}

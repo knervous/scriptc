@@ -1,6 +1,0 @@
-{
- "order": [
-  "<repo>/tests/corpus/regex-checked-casts.ts"
- ],
- "diags": []
-}

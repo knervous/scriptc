@@ -1,6 +1,0 @@
-{
- "order": [
-  "<repo>/tests/corpus/5390-interface-loop-element-lifetimes.ts"
- ],
- "diags": []
-}

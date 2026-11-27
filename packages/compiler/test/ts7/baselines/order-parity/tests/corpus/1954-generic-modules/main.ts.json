@@ -1,7 +1,0 @@
-{
- "order": [
-  "<repo>/tests/corpus/1954-generic-modules/lib.ts",
-  "<repo>/tests/corpus/1954-generic-modules/main.ts"
- ],
- "diags": []
-}

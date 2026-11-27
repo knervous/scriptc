@@ -1,6 +1,0 @@
-{
- "order": [
-  "<repo>/tests/corpus/merged-namespace-import-alias.ts"
- ],
- "diags": []
-}

@@ -1,6 +1,0 @@
-{
- "order": [
-  "<repo>/tests/corpus/1475-readline-closed-stdin.ts"
- ],
- "diags": []
-}

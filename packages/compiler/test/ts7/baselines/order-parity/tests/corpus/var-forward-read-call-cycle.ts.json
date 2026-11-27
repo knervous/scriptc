@@ -1,6 +1,0 @@
-{
- "order": [
-  "<repo>/tests/corpus/var-forward-read-call-cycle.ts"
- ],
- "diags": []
-}

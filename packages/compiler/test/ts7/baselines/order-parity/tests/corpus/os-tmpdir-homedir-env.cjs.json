@@ -1,6 +1,0 @@
-{
- "order": [
-  "<repo>/tests/corpus/os-tmpdir-homedir-env.cjs"
- ],
- "diags": []
-}

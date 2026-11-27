@@ -1,43 +1,19 @@
 node_modules/
-# A symlinked node_modules is a file to git, which node_modules/ does not match.
-/packages/*/node_modules
 .pnpm-store/
 # test-fixture packages are TEST DATA, committed on purpose
 !tests/diagnostics/npm-imports/node_modules/
-!tests/diagnostics/npm-program-type-error/node_modules/
-!tests/diagnostics/retired-engine-import-refusal/node_modules/
-!tests/diagnostics/package-value-shape-refusal/node_modules/
-!tests/diagnostics/types-only-workspace-package-value-import/node_modules/
-!tests/diagnostics/types-only-workspace-package-class-type/node_modules/
-!tests/diagnostics/node-island-function-value/node_modules/
-!tests/diagnostics/package-built-object-member/node_modules/
-!tests/diagnostics/umd-export-forced-native/node_modules/
-!tests/diagnostics/worker-island-value/node_modules/
-!tests/diagnostics/node-island-timer-native-use/node_modules/
 !tests/fixtures/commander-calc/node_modules/
 !tests/fixtures/npm/node_modules/
 !tests/corpus/*/node_modules/
-!tests/corpus/module-find-package-json/nested/node_modules/
 !tests/fixtures/npm-static/node_modules/
-!tests/fixtures/source-package/node_modules/
-!tests/coverage-fixtures/wasm/node_modules/
-!tests/coverage-fixtures/node-islands*/node_modules/
-!tests/coverage-fixtures/workspace-declared-rows/node_modules/
-!tests/fixtures/node-island/*/node_modules/
-!tests/fixtures/node-island/*/*/node_modules/
-!tests/coverage-fixtures/dynamic-tier/package/node_modules/
 !tests/fixtures/npm-static/nested/inner/node_modules/
-!tests/fixtures/npm-static/node_modules/*/node_modules/
 !tests/fixtures/npm/store/*/node_modules/
-!tests/fixtures/npm/node_modules/*/node_modules/
-!tests/fixtures/npm/workspace/*/node_modules/
 !tests/fixtures/npm/cases/*/node_modules/
 !tests/library-mode/*/node_modules/
 !tests/fixtures/provenance/node_modules/
 !tests/fixtures/fetch/node_modules/
 !tests/fixtures/gateway-e2e/node_modules/
 !tests/fixtures/node-types/node_modules/
-!tests/fixtures/island-conformance/node_modules/
 dist/
 output/
 /packages/llvm-darwin-arm64/bin/
@@ -49,27 +25,17 @@ output/
 /packages/runtime-*/artifacts/
 /packages/runtime-*/runtime-pack.json
 /packages/runtime-*/.runtime-pack-*
-/packages/runtime-*/runtime-pack.verified.json*
-# libnode packs: built by build:native, never committed
-/packages/libnode-*/libnode.so.*
-/packages/libnode-*/libnode.*.dylib
-/packages/libnode-*/libscr_node_bridge.*
-/packages/libnode-*/manifest.json
-/packages/libnode-*/LICENSE
+!tests/fixtures/fetch/node_modules/eventsource-parser/dist/
 !tests/fixtures/npm/node_modules/*/dist/
-!tests/fixtures/npm/node_modules/@*/*/dist/
 !tests/fixtures/npm/workspace/*/dist/
 !tests/fixtures/npm/cases/workspace-copied/members/*/dist/
 !tests/fixtures/npm/cases/workspace-copied/node_modules/*/dist/
 !tests/fixtures/provenance/node_modules/*/dist/
-!tests/fixtures/npm-static/node_modules/*/dist/
-!tests/corpus/*/node_modules/*/dist/
-!tests/fixtures/island-conformance/node_modules/*/dist/
 .scriptc/
 *.log
 .DS_Store
 packages/runtime/test/build/
-# Cached build-time evaluator archives (see packages/runtime/vendor/README.md)
+# lazily built engine archives for --dynamic (see packages/runtime/vendor/README.md)
 packages/runtime/vendor/.cache/
 # fs corpus scratch directories (created in the test cwd, removed on clean runs)
 tmp-*/
@@ -78,13 +44,8 @@ tmp-*/
 .env.local
 .env*
 .env*.local
-# the vendored fs-extra corpus package: its lib/output module and jsonfile's own universalify
-!tests/corpus/fs-extra-package/node_modules/fs-extra/lib/output/
-!tests/corpus/fs-extra-package/node_modules/jsonfile/node_modules/
 
-# the island start-up benchmark's fixture packages are committed on purpose
-!benchmarks/startup/islands/node_modules/
-
-# Vercel CI bootstrapping toolchain and turbo cache
-.ci/
-.turbo/
+# worktree helpers symlink node_modules; a symlink is not a directory, so node_modules/ alone misses it
+/packages/*/node_modules
+/node_modules
+wgc-scratch/

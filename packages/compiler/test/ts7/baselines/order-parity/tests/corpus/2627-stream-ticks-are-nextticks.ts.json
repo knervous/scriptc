@@ -1,6 +1,0 @@
-{
- "order": [
-  "<repo>/tests/corpus/2627-stream-ticks-are-nextticks.ts"
- ],
- "diags": []
-}

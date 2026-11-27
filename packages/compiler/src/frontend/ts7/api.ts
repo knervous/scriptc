@@ -1,3 +1,4 @@
+// This file was modified from scriptc (Apache-2.0); see MODIFICATIONS.md.
 import type { Ts7ConfigData } from "./session-schema.generated.js";
 import type { Ts7TimingInfo } from "./session-timing.js";
 import { Ts7RpcClient } from "./rpc-client.js";
@@ -12,26 +13,16 @@ export class Ts7Api {
 
   constructor(rpc: Ts7RpcClient, fs: Ts7FileSystem, collectTiming = false) {
     try {
-      const session = new Ts7Session(rpc, collectTiming);
-      // Callbacks run inside requests, after initialize chose the protocol.
-      registerTs7FileSystem(rpc, fs, () => session.speaksTs71());
-      this.session = session;
+      registerTs7FileSystem(rpc, fs);
+      this.session = new Ts7Session(rpc, collectTiming);
     } catch (error) {
       rpc.close();
       throw error;
     }
   }
 
-  parseConfigFile(file: string): Ts7ConfigData {
-    return this.session.parseConfigFile(file);
-  }
-  updateSnapshot(params: Ts7Update = {}): Ts7SessionSnapshot {
-    return this.session.updateSnapshot(params);
-  }
-  getTimingInfo(): Ts7TimingInfo {
-    return this.session.getTimingInfo();
-  }
-  close(): void {
-    this.session.close();
-  }
+  parseConfigFile(file: string): Ts7ConfigData { return this.session.parseConfigFile(file); }
+  updateSnapshot(params: Ts7Update = {}): Ts7SessionSnapshot { return this.session.updateSnapshot(params); }
+  getTimingInfo(): Ts7TimingInfo { return this.session.getTimingInfo(); }
+  close(): void { this.session.close(); }
 }

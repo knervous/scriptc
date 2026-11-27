@@ -1,7 +1,0 @@
-exports[`reentrant replacement 1`] = `
-first:a
-`;
-
-exports[`reentrant replacement 2`] = `
-second:b
-`;

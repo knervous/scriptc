@@ -1,3 +1,4 @@
+// This file was modified from scriptc (Apache-2.0); see MODIFICATIONS.md.
 /* Shared tables and emission shapes for LLVM standard-library dispatch. */
 import type { LibCallExpr, LlValue, LlvmEmitterContext } from "./expr-context.js";
 import { f64Lit } from "./common.js";
@@ -1438,6 +1439,10 @@ export const LIB_FN_SYMS: Record<string, string> = {
   "fetch.responseJson": "scr_fetch_response_json",
   "fetch.responseText": "scr_fetch_response_text",
   "fetch.responseBytes": "scr_fetch_response_bytes",
+  "fetch.abortControllerNew": "scr_fetch_abort_controller_new",
+  "fetch.abortTimeout": "scr_fetch_abort_timeout",
+  "fetch.abortNow": "scr_fetch_abort_now",
+  "fetch.abortAny": "scr_fetch_abort_any",
   "fetch.webIs": "scr_fetch_web_is",
   "fetch.streamIs": "scr_fetch_stream_is",
   "zlib.streamIs": "scr_zlib_stream_is",
@@ -1722,6 +1727,21 @@ export const LIB_FN_SYMS: Record<string, string> = {
   "atomics.op": "scr_atomics_op",
   "atomics.notify": "scr_atomics_notify",
   "atomics.wait": "scr_atomics_wait",
+  // LLVM lane Atomics (scr_lib.c): sequentially consistent operations over an integer typed array's storage, a real
+  // wait/notify across threads, isLockFree.
+  "atomics.load": "scr_atomics_load",
+  "atomics.store": "scr_atomics_store",
+  "atomics.add": "scr_atomics_add",
+  "atomics.sub": "scr_atomics_sub",
+  "atomics.and": "scr_atomics_and",
+  "atomics.or": "scr_atomics_or",
+  "atomics.xor": "scr_atomics_xor",
+  "atomics.exchange": "scr_atomics_exchange",
+  "atomics.compareExchange": "scr_atomics_compare_exchange",
+  "atomics.isLockFree": "scr_atomics_is_lock_free",
+  "atomics.waitAsyncStart": "scr_atomics_wait_async_start",
+  "atomics.waitAsyncPromise": "scr_atomics_wait_async_promise",
+  "atomics.waitAsyncResult": "scr_atomics_wait_async_result",
   "atomics.opDyn": "scr_atomics_op_dyn",
   "atomics.waitDyn": "scr_atomics_wait_dyn",
   "atomics.notifyDyn": "scr_atomics_notify_dyn",
@@ -2175,6 +2195,14 @@ export const LIB_FN_SYMS: Record<string, string> = {
   "http.clientDestroyed": "scr_http_client_destroyed",
   "http2.streamUndefCall": "scr_http2_stream_undef_call",
   "http.agentNew": "scr_http_agent_new",
+  // The island surface (--dynamic): eval/import bridge catchably (the
+  // may-throw seed's pending check); importDyn answers an engine promise
+  // and never throws itself. insp.jsval throws on composite island
+  // values (engine JSON.stringify inside).
+  "island.eval": "scr_island_eval",
+  "island.import": "scr_jsval_import",
+  "island.importDyn": "scr_jsval_import_dyn",
+  "insp.jsval": "scr_insp_jsval",
   // timers/promises (+1 promises; the await parks a fiber, so the async
   // loop gate already runs) and diagnostics_channel (scr_dc.c): all
   // generic shapes; the throwing members ride the pending check.
@@ -2327,6 +2355,8 @@ export const LIB_FN_SYMS: Record<string, string> = {
   "disposable.stackUseCallback": "scr_disposable_stack_use_callback",
   "dyn.reflectSet": "scr_dyn_reflect_set",
   "dyn.reflectDefine": "scr_dyn_reflect_define",
+  // The native runtime has no receiver-step entry yet: it keeps reflect_define's behavior (known gap).
+  "dyn.reflectSetData": "scr_dyn_reflect_define",
   "dyn.abstractEq": "scr_dyn_abstract_eq",
   "dyn.assignAll": "scr_dyn_assign_all",
   "dyn.objCreateNullProto": "scr_dyn_new_obj_null_proto",
@@ -2451,7 +2481,9 @@ export function mockTimerSym(
   return host.mockTimers && !e.realTimer ? MOCK_TIMER_SYMS[e.fn] : undefined;
 }
 
-export const USES_TIMERS_LIB_FNS = new Set<IrLibFn>([
+export const USES_TIMERS_LIB_FNS = new Set<string>([
+  // Atomics.waitAsync's promise settles on this thread's loop (a notify from another thread, or the timeout).
+  "atomics.waitAsyncStart",
   "crypto.generateKeyPairCb",
   "crypto.signOneshotCb",
   "crypto.signOneshotMaybe",
@@ -2542,6 +2574,7 @@ export const USES_TIMERS_LIB_FNS = new Set<IrLibFn>([
   "fetch.input",
   "fetch.function",
   "fetch.requestNew",
+  "fetch.abortTimeout",
   "abort.timeout",
   // EventTarget listeners report their exceptions from a nextTick.
   "event.targetNew",
@@ -2551,6 +2584,8 @@ export const USES_TIMERS_LIB_FNS = new Set<IrLibFn>([
   "perf.observerNew",
   "abort.controllerNew",
   "abort.any",
+  "fetch.abortControllerNew",
+  "fetch.abortAny",
   "fetch.streamNew",
   "fetch.streamFrom",
   "fetch.transformNew",

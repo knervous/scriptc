@@ -1,3 +1,4 @@
+// This file was modified from scriptc (Apache-2.0); see MODIFICATIONS.md.
 import { constructorEscapePoint } from "../cycle-mutability.js";
 import {
   VOID,
@@ -55,7 +56,7 @@ export function canStackObject(host: LlvmEmitterContext, e: IrExpr): e is StackO
     return false;
   if (e.type.kind === "record" && host.publishedTypes?.recordGuarded(e.type.shapeId) === true)
     return false;
-  if (e.type.kind === "record" && host.recordsById.get(e.type.shapeId)?.freezable === true)
+  if (e.type.kind === "record" && (host.recordsById.get(e.type.shapeId)?.freezable === true || host.freezableShapes.has(e.type.shapeId)))
     return false;
   // A producer with a result-slot entry builds its fresh result in the
   // caller's storage, unless the call roots a group: then the result goes

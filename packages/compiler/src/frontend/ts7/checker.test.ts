@@ -7,263 +7,198 @@ import { Ts7RpcClient } from "./rpc-client.js";
 import { registerTs7FileSystem, TS7_FILE_SYSTEM_CALLBACKS } from "./rpc-filesystem.js";
 import { spawnTs7Wire } from "./rpc-process.js";
 import { ts7Executable } from "./rpc-api.js";
-import { ts7TestServers, type Ts7TestServer } from "./test-servers.js";
 import { Ts7Session } from "./session.js";
 import { SemanticChecker } from "./semantic-checker.js";
 import { SemanticSnapshot } from "./semantic-model.js";
-import { SignatureKind, SymbolFlags, SyntaxKind, TypeFlags } from "./enums.js";
+import { TypeFlags } from "./enums.js";
 import { createProgram, Ts7Host } from "./program-adapter.js";
 import type { AstNode } from "./ast-node.js";
-import type { Identifier, SourceFile } from "./ast-types.js";
+import type { SourceFile } from "./ast-types.js";
 
 const tempRoot = process.platform === "win32" ? tmpdir() : "/tmp";
 const protocolPath = (path: string) => path.replaceAll("\\", "/");
 
-/** The default checker (tsc-ts) and tsc 7.1, which both speak the 7.1
- * protocol; SCRIPTC_CHECKER=tsgo makes the default checker tsc 7.1 itself. */
-const servers: Ts7TestServer[] = [
-  { name: "tsc-ts", executable: ts7Executable(), ts71: true },
-  ...ts7TestServers().filter((server) => server.ts71),
-].filter(
-  (server, index, list) =>
-    list.findIndex((other) => other.executable === server.executable) === index,
-);
-
-function connect(server: Ts7TestServer, files: Record<string, string>) {
+function connect(files: Record<string, string>) {
   const dir = mkdtempSync(join(tempRoot, "scriptc-checker-lifetime-"));
-  const paths = new Map(
-    Object.entries(files).map(([name, text]) => [protocolPath(join(dir, name)), text]),
-  );
-  const rpc = new Ts7RpcClient(
-    spawnTs7Wire(server.executable, [
-      "--api",
-      "--cwd",
-      dir,
-      `--callbacks=${TS7_FILE_SYSTEM_CALLBACKS}`,
-    ]),
-  );
-  registerTs7FileSystem(
-    rpc,
-    {
-      readFile: (path) => paths.get(path),
-      fileExists: (path) => (paths.has(path) ? true : undefined),
-      directoryExists: () => undefined,
-      realpath: () => undefined,
-      getAccessibleEntries: () => undefined,
-    },
-    () => server.ts71,
-  );
+  const paths = new Map(Object.entries(files).map(([name, text]) => [protocolPath(join(dir, name)), text]));
+  const rpc = new Ts7RpcClient(spawnTs7Wire(ts7Executable(), ["--api", "--cwd", dir, `--callbacks=${TS7_FILE_SYSTEM_CALLBACKS}`]));
+  registerTs7FileSystem(rpc, {
+    readFile: (path) => paths.get(path),
+    fileExists: (path) => paths.has(path) ? true : undefined,
+    directoryExists: () => undefined,
+    realpath: () => undefined,
+    getAccessibleEntries: () => undefined,
+  });
   const session = new Ts7Session(rpc);
   return {
-    session,
-    rpc,
-    paths,
+    session, rpc, paths,
     path: (name: string) => protocolPath(join(dir, name)),
-    close: () => {
-      session.close();
-      rmSync(dir, { recursive: true, force: true });
-    },
+    close: () => { session.close(); rmSync(dir, { recursive: true, force: true }); },
   };
 }
 
 function declaration(root: SourceFile, name: string): AstNode {
-  for (const statement of root.statements.nodes) {
+  for (const statement of root.statements) {
     if (statement.name?.text === name) return statement;
-    for (const node of statement.declarationList?.declarations?.nodes ?? [])
-      if (node.name?.text === name) return node;
+    for (const node of statement.declarationList?.declarations ?? []) if (node.name?.text === name) return node;
   }
   throw new Error(`Missing declaration ${name}`);
 }
 
-const config = JSON.stringify({
-  compilerOptions: { strict: true, target: "esnext", types: [] },
-  files: ["main.ts"],
+const config = JSON.stringify({ compilerOptions: { strict: true, target: "esnext", types: [] }, files: ["main.ts"] });
+
+test("unchanged AST identities receive independent semantic answers after a dependency update", () => {
+  const h = connect({
+    "tsconfig.json": config,
+    "main.ts": 'import { value } from "./dependency.js"; export const result = value;',
+    "dependency.ts": "export const value: number = 1;",
+  });
+  try {
+    const first = h.session.updateSnapshot({ openProjects: [h.path("tsconfig.json")] });
+    const oldProject = first.getProjects()[0]!;
+    const root = oldProject.program.getSourceFile(h.path("main.ts"))!;
+    const name = declaration(root, "result").name!;
+    const old = new CheckerFacade(oldProject.checker, { project: oldProject.checker.project });
+    const oldType = old.getTypeAtLocation(name);
+    const oldSymbol = old.getSymbolAtLocation(name)!;
+    expect(old.typeToString(oldType)).toBe("number");
+    expect(old.valueDeclarationOf(oldSymbol)).toBe(declaration(root, "result"));
+
+    h.paths.set(h.path("dependency.ts"), 'export const value: string = "changed";');
+    const second = h.session.updateSnapshot({ fileChanges: { changed: [h.path("dependency.ts")] } });
+    const newProject = second.getProjects()[0]!;
+    const nextRoot = newProject.program.getSourceFile(h.path("main.ts"))!;
+    expect(nextRoot).toBe(root);
+    expect(declaration(nextRoot, "result").name).toBe(name);
+    const next = new CheckerFacade(newProject.checker, { project: newProject.checker.project });
+    const newType = next.getTypeAtLocation(name);
+    expect(next.typeToString(newType)).toBe("string");
+    expect(newType).not.toBe(oldType);
+    expect(next.getSymbolAtLocation(name)).not.toBe(oldSymbol);
+    expect(old.typeToString(old.getTypeAtLocation(name))).toBe("number");
+    first.dispose();
+    expect(() => old.getTypeAtLocation(name)).toThrow("disposed");
+    expect(next.getTypeAtLocation(name)).toBe(newType);
+    expect(next.typeToString(newType)).toBe("string");
+    second.dispose();
+    expect(() => next.getTypeAtLocation(name)).toThrow("disposed");
+  } finally { h.close(); }
 });
 
-for (const server of servers)
-  test(`unchanged AST identities receive independent semantic answers after a dependency update (${server.name})`, () => {
-    const h = connect(server, {
-      "tsconfig.json": config,
-      "main.ts": 'import { value } from "./dependency.js"; export const result = value;',
-      "dependency.ts": "export const value: number = 1;",
-    });
-    try {
-      const first = h.session.updateSnapshot({ openProjects: [h.path("tsconfig.json")] });
-      const oldProject = first.getProjects()[0]!;
-      const root = oldProject.program.getSourceFile(h.path("main.ts"))!;
-      const name = declaration(root, "result").name!;
-      const old = new CheckerFacade(oldProject.checker, { project: oldProject.checker.project });
-      const oldType = old.getTypeAtLocation(name);
-      const oldSymbol = old.getSymbolAtLocation(name)!;
-      expect(old.typeToString(oldType)).toBe("number");
-      expect(oldSymbol.valueDeclaration).toBe(declaration(root, "result"));
+test("project-local type handles never alias across simultaneous checker caches", () => {
+  const h = connect({ "first.json": config, "second.json": config, "main.ts": 'export type Choice = string | number; export const value = 42;' });
+  try {
+    const snapshot = h.session.updateSnapshot({ openProjects: [h.path("first.json"), h.path("second.json")] });
+    const first = snapshot.getProject(h.path("first.json"))!;
+    const second = snapshot.getProject(h.path("second.json"))!;
+    const root = first.program.getSourceFile(h.path("main.ts"))!;
+    expect(second.program.getSourceFile(h.path("main.ts"))).toBe(root);
+    const a = new CheckerFacade(first.checker, { project: first.checker.project });
+    const b = new CheckerFacade(second.checker, { project: second.checker.project });
+    const name = declaration(root, "value").name!;
+    const firstType = a.getTypeAtLocation(name);
+    const secondType = b.getTypeAtLocation(name);
+    expect(firstType.project).not.toBe(secondType.project);
+    expect(firstType).not.toBe(secondType);
+    expect(a.typeToString(firstType)).toBe(b.typeToString(secondType));
+    const alias = declaration(root, "Choice").type!;
+    const firstArms = constituentTypes(a.getTypeFromTypeNode(alias));
+    const secondArms = constituentTypes(b.getTypeFromTypeNode(alias));
+    expect(firstArms).not.toBe(secondArms);
+    expect(firstArms.map((arm) => a.typeToString(arm))).toEqual(secondArms.map((arm) => b.typeToString(arm)));
+    first.checker.project.dispose();
+    expect(() => a.getTypeAtLocation(name)).toThrow("disposed");
+    expect(b.getTypeAtLocation(name)).toBe(secondType);
+    expect(b.getTypeFromTypeNode(alias).getTypes()).toBe(secondArms);
+  } finally { h.close(); }
+});
 
-      h.paths.set(h.path("dependency.ts"), 'export const value: string = "changed";');
-      const second = h.session.updateSnapshot({
-        fileChanges: { changed: [h.path("dependency.ts")] },
-      });
-      const newProject = second.getProjects()[0]!;
-      const nextRoot = newProject.program.getSourceFile(h.path("main.ts"))!;
-      expect(nextRoot).toBe(root);
-      expect(declaration(nextRoot, "result").name).toBe(name);
-      const next = new CheckerFacade(newProject.checker, { project: newProject.checker.project });
-      const newType = next.getTypeAtLocation(name);
-      expect(next.typeToString(newType)).toBe("string");
-      expect(newType).not.toBe(oldType);
-      expect(next.getSymbolAtLocation(name)).not.toBe(oldSymbol);
-      expect(old.typeToString(old.getTypeAtLocation(name))).toBe("number");
-      first.dispose();
-      expect(() => old.getTypeAtLocation(name)).toThrow("disposed");
-      expect(next.getTypeAtLocation(name)).toBe(newType);
-      expect(next.typeToString(newType)).toBe("string");
-      second.dispose();
-      expect(() => next.getTypeAtLocation(name)).toThrow("disposed");
-    } finally {
-      h.close();
-    }
-  });
+test("all public query and prefetch entry points reject a disposed facade before returning cached or local answers", () => {
+  const h = connect({ "tsconfig.json": config, "main.ts": 'export const value = 42; export function fn(v: number): number { return v; }' });
+  try {
+    const snapshot = h.session.updateSnapshot({ openProjects: [h.path("tsconfig.json")] });
+    const project = snapshot.getProjects()[0]!;
+    const root = project.program.getSourceFile(h.path("main.ts"))!;
+    const facade = new CheckerFacade(project.checker, { project: project.checker.project });
+    const name = declaration(root, "value").name!;
+    const fn = declaration(root, "fn");
+    const type = facade.getTypeAtLocation(name);
+    const symbol = facade.getSymbolAtLocation(name)!;
+    const signature = facade.getSignatureFromDeclaration(fn)!;
+    const never = project.checker.getNeverType();
+    facade.getUnknownType();
+    facade.typeToString(type);
+    facade.prefetchSourceFile(root);
+    const calls: Record<string, () => unknown> = {
+      declarationsOf: () => facade.declarationsOf(symbol),
+      valueDeclarationOf: () => facade.valueDeclarationOf(symbol),
+      signatureDeclaration: () => facade.signatureDeclaration(signature),
+      getCallSignatures: () => facade.getCallSignatures(type),
+      getConstructSignatures: () => facade.getConstructSignatures(type),
+      getPropertyOfType: () => facade.getPropertyOfType(type, "missing"),
+      prefetchSourceFile: () => facade.prefetchSourceFile(root),
+      prefetchSourceFileStructures: () => facade.prefetchSourceFileStructures([]),
+      prefetchRoots: () => facade.prefetchRoots([]),
+      prefetchSymbolRoots: () => facade.prefetchSymbolRoots([]),
+      prefetchSymbolNodesExact: () => facade.prefetchSymbolNodesExact([]),
+      prefetchCollectionTypes: () => facade.prefetchCollectionTypes([]),
+      prefetchClassCollection: () => facade.prefetchClassCollection([], []),
+      getTypeAtLocation: () => facade.getTypeAtLocation(name),
+      getSymbolAtLocation: () => facade.getSymbolAtLocation(name),
+      getTypeOfSymbol: () => facade.getTypeOfSymbol(symbol),
+      getAliasedSymbol: () => facade.getAliasedSymbol(symbol),
+      getDeclaredTypeOfSymbol: () => facade.getDeclaredTypeOfSymbol(symbol),
+      getContextualType: () => facade.getContextualType(name),
+      getTypeFromTypeNode: () => facade.getTypeFromTypeNode(fn.type!),
+      getShorthandAssignmentValueSymbol: () => facade.getShorthandAssignmentValueSymbol(name),
+      getResolvedSignature: () => facade.getResolvedSignature(name),
+      getSignatureFromDeclaration: () => facade.getSignatureFromDeclaration(fn),
+      getReturnTypeOfSignature: () => facade.getReturnTypeOfSignature(signature),
+      getTypePredicateOfSignature: () => facade.getTypePredicateOfSignature(signature),
+      getBaseTypeOfLiteralType: () => facade.getBaseTypeOfLiteralType(type),
+      getConstantValue: () => facade.getConstantValue(name),
+      getNonNullableType: () => facade.getNonNullableType(type),
+      getPropertiesOfType: () => facade.getPropertiesOfType(type),
+      getBaseTypes: () => facade.getBaseTypes(type),
+      isNeverType: () => facade.isNeverType(never),
+      isTypeAssignableTo: () => facade.isTypeAssignableTo(type, type),
+      getIndexInfosOfType: () => facade.getIndexInfosOfType(type),
+      getTypeArguments: () => facade.getTypeArguments(type),
+      isArrayType: () => facade.isArrayType(type),
+      isTupleType: () => facade.isTupleType(type),
+      isArrayLikeType: () => facade.isArrayLikeType(type),
+      typeToString: () => facade.typeToString(type),
+      getTypeOfSymbolAtLocation: () => facade.getTypeOfSymbolAtLocation(symbol, name),
+      getUnknownType: () => facade.getUnknownType(),
+      getStringType: () => facade.getStringType(),
+      getNumberType: () => facade.getNumberType(),
+      getBooleanType: () => facade.getBooleanType(),
+      getAwaitedType: () => facade.getAwaitedType(type),
+    };
+    const before = h.rpc.timing().requests;
+    facade.dispose();
+    facade.dispose();
+    for (const [name, call] of Object.entries(calls)) expect(call, name).toThrow("checker facade is disposed");
+    expect(h.rpc.timing().requests).toBe(before);
+    expect(project.checker.typeToString(type)).toBe("42");
+  } finally { h.close(); }
+});
 
-for (const server of servers)
-  test(`project-local type handles never alias across simultaneous checker caches (${server.name})`, () => {
-    const h = connect(server, {
-      "first.json": config,
-      "second.json": config,
-      "main.ts": "export type Choice = string | number; export const value = 42;",
-    });
-    try {
-      const snapshot = h.session.updateSnapshot({
-        openProjects: [h.path("first.json"), h.path("second.json")],
-      });
-      const first = snapshot.getProject(h.path("first.json"))!;
-      const second = snapshot.getProject(h.path("second.json"))!;
-      const root = first.program.getSourceFile(h.path("main.ts"))!;
-      expect(second.program.getSourceFile(h.path("main.ts"))).toBe(root);
-      const a = new CheckerFacade(first.checker, { project: first.checker.project });
-      const b = new CheckerFacade(second.checker, { project: second.checker.project });
-      const name = declaration(root, "value").name!;
-      const firstType = a.getTypeAtLocation(name);
-      const secondType = b.getTypeAtLocation(name);
-      expect(firstType.project).not.toBe(secondType.project);
-      expect(firstType).not.toBe(secondType);
-      expect(a.typeToString(firstType)).toBe(b.typeToString(secondType));
-      const alias = declaration(root, "Choice").type!;
-      const firstArms = constituentTypes(a.getTypeFromTypeNode(alias));
-      const secondArms = constituentTypes(b.getTypeFromTypeNode(alias));
-      expect(firstArms).not.toBe(secondArms);
-      expect(firstArms.map((arm) => a.typeToString(arm))).toEqual(
-        secondArms.map((arm) => b.typeToString(arm)),
-      );
-      first.checker.project.dispose();
-      expect(() => a.getTypeAtLocation(name)).toThrow("disposed");
-      expect(b.getTypeAtLocation(name)).toBe(secondType);
-      expect(b.getTypeFromTypeNode(alias).getTypes()).toBe(secondArms);
-    } finally {
-      h.close();
-    }
-  });
-
-for (const server of servers)
-  test(`all public query and prefetch entry points reject a disposed facade before returning cached or local answers (${server.name})`, () => {
-    const h = connect(server, {
-      "tsconfig.json": config,
-      "main.ts": "export const value = 42; export function fn(v: number): number { return v; }",
-    });
-    try {
-      const snapshot = h.session.updateSnapshot({ openProjects: [h.path("tsconfig.json")] });
-      const project = snapshot.getProjects()[0]!;
-      const root = project.program.getSourceFile(h.path("main.ts"))!;
-      const facade = new CheckerFacade(project.checker, { project: project.checker.project });
-      const name = declaration(root, "value").name!;
-      const fn = declaration(root, "fn");
-      const type = facade.getTypeAtLocation(name);
-      const symbol = facade.getSymbolAtLocation(name)!;
-      const signature = facade.getSignatureFromDeclaration(fn)!;
-      const never = project.checker.getNeverType();
-      facade.getUnknownType();
-      facade.typeToString(type);
-      facade.prefetchSourceFile(root);
-      const calls: Record<string, () => unknown> = {
-        getCallSignatures: () => facade.getCallSignatures(type),
-        getConstructSignatures: () => facade.getConstructSignatures(type),
-        getSignaturesOfType: () => facade.getSignaturesOfType(type, SignatureKind.Call),
-        resolveName: () => facade.resolveName("value", SymbolFlags.Value, name),
-        getResolvedSymbol: () => facade.getResolvedSymbol(name as Identifier),
-        getAnyType: () => facade.getAnyType(),
-        getNeverType: () => facade.getNeverType(),
-        getBigIntType: () => facade.getBigIntType(),
-        getPropertyOfType: () => facade.getPropertyOfType(type, "missing"),
-        prefetchSourceFile: () => facade.prefetchSourceFile(root),
-        prefetchSourceFileStructures: () => facade.prefetchSourceFileStructures([]),
-        prefetchRoots: () => facade.prefetchRoots([]),
-        prefetchSymbolRoots: () => facade.prefetchSymbolRoots([]),
-        prefetchSymbolNodesExact: () => facade.prefetchSymbolNodesExact([]),
-        prefetchSymbolsAtExact: () => facade.prefetchSymbolsAtExact([]),
-        prefetchCollectionTypes: () => facade.prefetchCollectionTypes([]),
-        prefetchClassCollection: () => facade.prefetchClassCollection([], []),
-        prefetchTypeQueries: () => facade.prefetchTypeQueries([]),
-        getTypeAtLocation: () => facade.getTypeAtLocation(name),
-        getSymbolAtLocation: () => facade.getSymbolAtLocation(name),
-        getTypeOfSymbol: () => facade.getTypeOfSymbol(symbol),
-        prefetchMemberTypes: () => facade.prefetchMemberTypes([symbol], 0),
-        getAliasedSymbol: () => facade.getAliasedSymbol(symbol),
-        getDeclaredTypeOfSymbol: () => facade.getDeclaredTypeOfSymbol(symbol),
-        getContextualType: () => facade.getContextualType(name),
-        getTypeFromTypeNode: () => facade.getTypeFromTypeNode(fn.type!),
-        getShorthandAssignmentValueSymbol: () => facade.getShorthandAssignmentValueSymbol(name),
-        getResolvedSignature: () => facade.getResolvedSignature(name),
-        getSignatureFromDeclaration: () => facade.getSignatureFromDeclaration(fn),
-        getReturnTypeOfSignature: () => facade.getReturnTypeOfSignature(signature),
-        getTypePredicateOfSignature: () => facade.getTypePredicateOfSignature(signature),
-        getBaseTypeOfLiteralType: () => facade.getBaseTypeOfLiteralType(type),
-        getConstantValue: () => facade.getConstantValue(name),
-        getNonNullableType: () => facade.getNonNullableType(type),
-        getPropertiesOfType: () => facade.getPropertiesOfType(type),
-        getBaseTypes: () => facade.getBaseTypes(type),
-        isNeverType: () => facade.isNeverType(never),
-        isTypeAssignableTo: () => facade.isTypeAssignableTo(type, type),
-        getIndexInfosOfType: () => facade.getIndexInfosOfType(type),
-        getTypeArguments: () => facade.getTypeArguments(type),
-        isArrayType: () => facade.isArrayType(type),
-        isTupleType: () => facade.isTupleType(type),
-        isArrayLikeType: () => facade.isArrayLikeType(type),
-        typeToString: () => facade.typeToString(type),
-        getTypeOfSymbolAtLocation: () => facade.getTypeOfSymbolAtLocation(symbol, name),
-        getUnknownType: () => facade.getUnknownType(),
-        getStringType: () => facade.getStringType(),
-        getNumberType: () => facade.getNumberType(),
-        getBooleanType: () => facade.getBooleanType(),
-        getAwaitedType: () => facade.getAwaitedType(type),
-      };
-      const before = h.rpc.timing().requests;
-      facade.dispose();
-      facade.dispose();
-      for (const [name, call] of Object.entries(calls))
-        expect(call, name).toThrow("checker facade is disposed");
-      expect(h.rpc.timing().requests).toBe(before);
-      expect(project.checker.typeToString(type)).toBe("42");
-    } finally {
-      h.close();
-    }
-  });
-
-for (const server of servers)
-  test(`session shutdown invalidates every retained facade without explicit program disposal (${server.name})`, () => {
-    const h = connect(server, { "tsconfig.json": config, "main.ts": "export const value = 1;" });
-    try {
-      const snapshot = h.session.updateSnapshot({ openProjects: [h.path("tsconfig.json")] });
-      const project = snapshot.getProjects()[0]!;
-      const facade = new CheckerFacade(project.checker);
-      const name = declaration(project.program.getSourceFile(h.path("main.ts"))!, "value").name!;
-      facade.getTypeAtLocation(name);
-      facade.getNumberType();
-      h.session.close();
-      expect(() => facade.getTypeAtLocation(name)).toThrow("disposed");
-      expect(() => facade.getNumberType()).toThrow("disposed");
-      expect(() => new CheckerFacade(project.checker)).toThrow("disposed");
-    } finally {
-      h.close();
-    }
-  });
+test("session shutdown invalidates every retained facade without explicit program disposal", () => {
+  const h = connect({ "tsconfig.json": config, "main.ts": 'export const value = 1;' });
+  try {
+    const snapshot = h.session.updateSnapshot({ openProjects: [h.path("tsconfig.json")] });
+    const project = snapshot.getProjects()[0]!;
+    const facade = new CheckerFacade(project.checker);
+    const name = declaration(project.program.getSourceFile(h.path("main.ts"))!, "value").name!;
+    facade.getTypeAtLocation(name);
+    facade.getNumberType();
+    h.session.close();
+    expect(() => facade.getTypeAtLocation(name)).toThrow("disposed");
+    expect(() => facade.getNumberType()).toThrow("disposed");
+    expect(() => new CheckerFacade(project.checker)).toThrow("disposed");
+  } finally { h.close(); }
+});
 
 test("program disposal and host close seal cached source and checker access", () => {
   const dir = mkdtempSync(join(tempRoot, "scriptc-program-lifetime-"));
@@ -289,10 +224,7 @@ test("program disposal and host close seal cached source and checker access", ()
     expect(() => next.getSourceFiles()).toThrow("closed");
     expect(() => next.getTypeChecker()).toThrow("closed");
     expect(() => nextChecker.getNumberType()).toThrow("disposed");
-  } finally {
-    host.close();
-    rmSync(dir, { recursive: true, force: true });
-  }
+  } finally { host.close(); rmSync(dir, { recursive: true, force: true }); }
 });
 
 test("negative assignability answers remain independent in both directions", () => {
@@ -304,10 +236,7 @@ test("negative assignability answers remain independent in both directions", () 
       requests.push(query);
       return JSON.stringify(query.source === 1 && query.target === 2);
     },
-    // Object replies are read as bytes; they carry the same JSON.
-    binary(method, payload) {
-      return Buffer.from(this.text(method, payload), "utf8");
-    },
+    binary(method, payload) { return Buffer.from(this.text(method, payload), "utf8"); },
   });
   const project = snapshot.addProject("project", () => undefined);
   const facade = new CheckerFacade(new SemanticChecker(project));
@@ -333,23 +262,12 @@ test("property lookup caches hits and misses by type and name within each projec
       expect(method).toBe("getPropertyOfType");
       const query = JSON.parse(payload) as { project: string; type: number; name: string };
       requests.push(`${query.project}:${query.type}:${query.name}`);
-      if (query.name === "retry" && fail) {
-        fail = false;
-        throw new Error("transient failure");
-      }
+      if (query.name === "retry" && fail) { fail = false; throw new Error("transient failure"); }
       if (query.name === "missing") return "null";
-      return JSON.stringify({
-        id: query.type * 10 + (query.project === "first" ? 1 : 2),
-        project: query.project,
-        name: query.name,
-        flags: 4,
-        checkFlags: 0,
-      });
+      return JSON.stringify({ id: query.type * 10 + (query.project === "first" ? 1 : 2), project: query.project,
+        name: query.name, flags: 4, checkFlags: 0 });
     },
-    // Object replies are read as bytes; they carry the same JSON.
-    binary(method, payload) {
-      return Buffer.from(this.text(method, payload), "utf8");
-    },
+    binary(method, payload) { return Buffer.from(this.text(method, payload), "utf8"); },
   });
   const first = snapshot.addProject("first", () => undefined);
   const second = snapshot.addProject("second", () => undefined);
@@ -377,218 +295,28 @@ test("property lookup caches hits and misses by type and name within each projec
   snapshot.dispose();
 });
 
-test("immediate alias and module export answers are memoized per project", () => {
-  const requests: string[] = [];
-  const snapshot = new SemanticSnapshot(1, {
-    text: (method, payload) => {
-      const query = JSON.parse(payload) as { project: string; symbol: number };
-      requests.push(`${method}:${query.project}:${query.symbol}`);
-      if (method === "getImmediateAliasedSymbol" && query.symbol === 2) return "null";
-      if (method === "getExportsOfModule")
-        return JSON.stringify([
-          { id: 20, project: query.project, name: "member", flags: 4, checkFlags: 0 },
-        ]);
-      return JSON.stringify({
-        id: query.symbol + 10,
-        project: query.project,
-        name: "target",
-        flags: 4,
-        checkFlags: 0,
-      });
-    },
-    // Object replies are read as bytes; they carry the same JSON.
-    binary(method, payload) {
-      return Buffer.from(this.text(method, payload), "utf8");
-    },
-  });
-  const project = snapshot.addProject("project", () => undefined);
-  const facade = new CheckerFacade(new SemanticChecker(project));
-  const alias = snapshot.symbol({
-    id: 1,
-    project: "project",
-    name: "alias",
-    flags: 4,
-    checkFlags: 0,
-  });
-  const end = snapshot.symbol({ id: 2, project: "project", name: "end", flags: 4, checkFlags: 0 });
-  const module = snapshot.symbol({
-    id: 3,
-    project: "project",
-    name: "module",
-    flags: 4,
-    checkFlags: 0,
-  });
-  const target = facade.getImmediateAliasedSymbol(alias);
-  expect(facade.getImmediateAliasedSymbol(alias)).toBe(target);
-  expect(facade.getImmediateAliasedSymbol(end)).toBeUndefined();
-  expect(facade.getImmediateAliasedSymbol(end)).toBeUndefined();
-  const exports = facade.getExportsOfModule(module);
-  expect(facade.getExportsOfModule(module)).toBe(exports);
-  expect(requests).toEqual([
-    "getImmediateAliasedSymbol:project:1",
-    "getImmediateAliasedSymbol:project:2",
-    "getExportsOfModule:project:3",
-  ]);
-  snapshot.dispose();
-  expect(() => facade.getImmediateAliasedSymbol(alias)).toThrow("disposed");
+test("dependency edits invalidate positive and negative property answers", () => {
+  const h = connect({ "tsconfig.json": config,
+    "main.ts": 'import { value } from "./dependency.js"; export const result = value;',
+    "dependency.ts": "export const value = { before: 1 };" });
+  try {
+    const first = h.session.updateSnapshot({ openProjects: [h.path("tsconfig.json")] });
+    const project = first.getProjects()[0]!;
+    const root = project.program.getSourceFile(h.path("main.ts"))!;
+    const old = new CheckerFacade(project.checker);
+    const type = old.getTypeAtLocation(declaration(root, "result").name!);
+    expect(old.getPropertyOfType(type, "before")).toBeDefined();
+    expect(old.getPropertyOfType(type, "after")).toBeUndefined();
+    h.paths.set(h.path("dependency.ts"), "export const value = { after: 2 };");
+    const second = h.session.updateSnapshot({ fileChanges: { changed: [h.path("dependency.ts")] } });
+    const nextProject = second.getProjects()[0]!;
+    const nextRoot = nextProject.program.getSourceFile(h.path("main.ts"))!;
+    expect(nextRoot).toBe(root);
+    const next = new CheckerFacade(nextProject.checker);
+    const nextType = next.getTypeAtLocation(declaration(nextRoot, "result").name!);
+    expect(next.getPropertyOfType(nextType, "before")).toBeUndefined();
+    expect(next.getPropertyOfType(nextType, "after")).toBeDefined();
+    expect(old.getPropertyOfType(type, "before")).toBeDefined();
+    expect(old.getPropertyOfType(type, "after")).toBeUndefined();
+  } finally { h.close(); }
 });
-
-for (const server of servers)
-  test(`dependency edits invalidate positive and negative property answers (${server.name})`, () => {
-    const h = connect(server, {
-      "tsconfig.json": config,
-      "main.ts": 'import { value } from "./dependency.js"; export const result = value;',
-      "dependency.ts": "export const value = { before: 1 };",
-    });
-    try {
-      const first = h.session.updateSnapshot({ openProjects: [h.path("tsconfig.json")] });
-      const project = first.getProjects()[0]!;
-      const root = project.program.getSourceFile(h.path("main.ts"))!;
-      const old = new CheckerFacade(project.checker);
-      const type = old.getTypeAtLocation(declaration(root, "result").name!);
-      expect(old.getPropertyOfType(type, "before")).toBeDefined();
-      expect(old.getPropertyOfType(type, "after")).toBeUndefined();
-      h.paths.set(h.path("dependency.ts"), "export const value = { after: 2 };");
-      const second = h.session.updateSnapshot({
-        fileChanges: { changed: [h.path("dependency.ts")] },
-      });
-      const nextProject = second.getProjects()[0]!;
-      const nextRoot = nextProject.program.getSourceFile(h.path("main.ts"))!;
-      expect(nextRoot).toBe(root);
-      const next = new CheckerFacade(nextProject.checker);
-      const nextType = next.getTypeAtLocation(declaration(nextRoot, "result").name!);
-      expect(next.getPropertyOfType(nextType, "before")).toBeUndefined();
-      expect(next.getPropertyOfType(nextType, "after")).toBeDefined();
-      expect(old.getPropertyOfType(type, "before")).toBeDefined();
-      expect(old.getPropertyOfType(type, "after")).toBeUndefined();
-    } finally {
-      h.close();
-    }
-  });
-
-test("member type batches are bounded, reuse warm entries, and isolate absent or panicking fields", () => {
-  const calls: number[][] = [];
-  const snapshot = new SemanticSnapshot(1, {
-    text: (method, payload) => {
-      if (method === "getAnyType") return JSON.stringify({ id: 1000, flags: TypeFlags.Any });
-      expect(method).toBe("getTypesOfSymbols");
-      const ids = (JSON.parse(payload) as { symbols: number[] }).symbols;
-      calls.push(ids);
-      if (ids.includes(7)) throw new Error("checker panic");
-      return JSON.stringify(ids.map((id) => (id === 11 ? null : { id, flags: TypeFlags.Number })));
-    },
-    // Object replies are read as bytes; they carry the same JSON.
-    binary(method, payload) {
-      return Buffer.from(this.text(method, payload), "utf8");
-    },
-  });
-  const project = snapshot.addProject("members", () => undefined);
-  const facade = new CheckerFacade(new SemanticChecker(project));
-  const symbols = Array.from({ length: 40 }, (_, index) =>
-    snapshot.symbol({
-      id: index + 1,
-      project: "members",
-      name: `field${index}`,
-      flags: 4,
-      checkFlags: 0,
-    }),
-  );
-  facade.getTypeOfSymbol(symbols[0]!);
-  facade.prefetchMemberTypes(symbols, 0);
-  expect(calls[1]).toEqual(symbols.slice(1, 32).map((symbol) => symbol.id));
-  expect(calls.every((ids) => ids.length <= 32 && ids.every((id) => id <= 32))).toBe(true);
-  const before = calls.length;
-  facade.prefetchMemberTypes(symbols, 0);
-  for (const symbol of symbols.slice(0, 32)) {
-    expect(facade.getTypeOfSymbol(symbol).flags).toBe(
-      symbol.id === 7 || symbol.id === 11 ? TypeFlags.Any : TypeFlags.Number,
-    );
-  }
-  expect(calls).toHaveLength(before);
-  facade.prefetchMemberTypes(symbols, 32);
-  expect(calls.at(-1)).toEqual(symbols.slice(32).map((symbol) => symbol.id));
-  snapshot.dispose();
-  expect(() => facade.prefetchMemberTypes(symbols, 0)).toThrow("disposed");
-});
-
-test("a server without getResolvedSignatures resolves the calls of a type query first, in order", () => {
-  for (const batches of [false, true]) {
-    const requests: string[] = [];
-    const snapshot = new SemanticSnapshot(1, {
-      text: (method, payload) => {
-        const query = JSON.parse(payload) as { location?: string; locations?: string[] };
-        requests.push(`${method} ${query.location ?? query.locations!.join(" ")}`.trimEnd());
-        if (method === "getResolvedSignatures") {
-          if (!batches)
-            throw new Error('api: invalid request: unknown API method "getResolvedSignatures"');
-          return JSON.stringify(query.locations!.map((_, index) => ({ id: index + 1, flags: 0 })));
-        }
-        if (method === "getResolvedSignature")
-          return JSON.stringify({ id: Number.parseInt(query.location!, 10), flags: 0 });
-        expect(method).toBe("getTypeAtLocations");
-        return JSON.stringify(query.locations!.map(() => ({ id: 14, flags: TypeFlags.Number })));
-      },
-      // Object replies are read as bytes; they carry the same JSON.
-      binary(method, payload) {
-        return Buffer.from(this.text(method, payload), "utf8");
-      },
-    });
-    const project = snapshot.addProject("project", () => undefined);
-    const facade = new CheckerFacade(new SemanticChecker(project));
-    const node = (index: number, kind: SyntaxKind) =>
-      ({ id: `${index}.${kind}`, kind }) as unknown as AstNode;
-    // `outer(argument, inner())`, in source order.
-    const outer = node(1, SyntaxKind.CallExpression);
-    const argument = node(2, SyntaxKind.Identifier);
-    const inner = node(3, SyntaxKind.CallExpression);
-    facade.prefetchTypeQueries([outer, argument, inner]);
-    facade.prefetchTypeQueries([outer, argument, inner]);
-    const types = `getTypeAtLocations ${outer.id} ${argument.id} ${inner.id}`;
-    expect(requests).toEqual(
-      batches
-        ? ["getResolvedSignatures", types]
-        : [
-            "getResolvedSignatures",
-            `getResolvedSignature ${outer.id}`,
-            `getResolvedSignature ${inner.id}`,
-            types,
-          ],
-    );
-    // The signatures resolved before the types answer the later queries.
-    const before = requests.length;
-    expect(facade.getResolvedSignature(inner)!.id).toBe(3);
-    expect(requests.length - before).toBe(batches ? 1 : 0);
-    snapshot.dispose();
-  }
-});
-
-for (const server of servers)
-  test(`a generic call in a call's argument resolves as in source order after a type sweep (${server.name})`, () => {
-    const h = connect(server, {
-      "tsconfig.json": config,
-      "main.ts": [
-        "interface Catalogue { models: string[] }",
-        "function has<T extends Catalogue>(entry: T | undefined, want: string): boolean {",
-        "  return entry !== undefined && entry.models.length > want.length;",
-        "}",
-        "declare function show(...data: any[]): void;",
-        'show(has(undefined, "alpha"));',
-      ].join("\n"),
-    });
-    try {
-      const snapshot = h.session.updateSnapshot({ openProjects: [h.path("tsconfig.json")] });
-      const project = snapshot.getProjects()[0]!;
-      const root = project.program.getSourceFile(h.path("main.ts"))!;
-      const facade = new CheckerFacade(project.checker, { project: project.checker.project });
-      const outer = root.statements.nodes[3]!.expression!;
-      const inner = outer.arguments!.nodes[0]!;
-      // The sweep asks the outer call's type before the inner call's.
-      facade.prefetchSourceFile(root);
-      expect(facade.typeToString(facade.getTypeAtLocation(outer))).toBe("void");
-      const [entry] = facade.getResolvedSignature(inner)!.getParameters();
-      // T is its constraint: `undefined` gives it no candidate that satisfies `T extends Catalogue`.
-      expect(facade.typeToString(facade.getTypeOfSymbol(entry!))).toBe("Catalogue | undefined");
-    } finally {
-      h.close();
-    }
-  });

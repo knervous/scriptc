@@ -1,1 +1,0 @@
-{ "name": "island-promisify", "private": true, "type": "module", "scriptc": { "packages": { "cb-pkg": "node" } } }

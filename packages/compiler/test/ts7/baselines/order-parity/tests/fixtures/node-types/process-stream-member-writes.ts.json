@@ -1,6 +1,0 @@
-{
- "order": [
-  "<repo>/tests/fixtures/node-types/process-stream-member-writes.ts"
- ],
- "diags": []
-}

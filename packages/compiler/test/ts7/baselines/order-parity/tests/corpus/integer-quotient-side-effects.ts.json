@@ -1,6 +1,0 @@
-{
- "order": [
-  "<repo>/tests/corpus/integer-quotient-side-effects.ts"
- ],
- "diags": []
-}

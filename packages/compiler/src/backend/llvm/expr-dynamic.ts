@@ -1,3 +1,4 @@
+// This file was modified from scriptc (Apache-2.0); see MODIFICATIONS.md.
 import { classMembershipIntervals } from "./classes.js";
 import {
   emitCaughtInstanceof,
@@ -28,12 +29,12 @@ import {
 import { BYTES_ELEM_NUM, closureIdentityEqual } from "./common.js";
 import { DYN_KIND } from "./dyn.js";
 import { elemAccess, releaseSym, vAdapters } from "./shapes.js";
-import { JS_BITS } from "./jsval-encoding.js";
+import { JS_BITS } from "./jsword-encoding.js";
 import { LlvmUnsupportedError } from "./unsupported.js";
 import type { LlvmEmitterContext, ExprOf, LlValue } from "./expr-context.js";
 import { emitUnionWiden } from "./expr-records.js";
 import { emitJsIcLiteralMember, emitJsIcMethod, jsIcMethods } from "./js-ic.js";
-import { jsImmediates } from "./jsval.js";
+import { jsImmediates } from "./jsword.js";
 import { jsIcLiteralKey } from "../../ir/js-ic.js";
 import {
   ARRAY_PROTOTYPE_MEMBER_NAMES,
@@ -45,6 +46,7 @@ export function emitDynamicExpr(
   host: LlvmEmitterContext,
   e: ExprOf<
     | "dynFrom"
+    | "dynFromJsval"
     | "dynCall"
     | "dynInvoke"
     | "dynArrLit"
@@ -126,6 +128,9 @@ export function emitDynamicExpr(
         // best-effort name rides along (null when the lowering had none). A
         // closure made here takes its name from the closure-name table at
         // compile time.
+        // A closure over a lifted function carrying its own JavaScript length (the native host's builtin values,
+        // Symbol's 0, Array.of's 0) boxes with that length (this fork).
+        const jsLength = e.value.kind === "closure" ? host.fnByName.get(e.value.fnName)?.jsLength : undefined;
         const t = B.tmp();
         const name =
           e.fnName !== undefined && e.fnName !== ""
@@ -133,10 +138,10 @@ export function emitDynamicExpr(
             : e.value.kind === "closure" && e.value.adapts !== true
               ? host.closureNameOf(e.value.fnName)
               : undefined;
-        if (name !== undefined) {
-          const box = host.dyn.dynFuncBoxHelper(v.type);
-          let nameArg = name === null ? "null" : host.cstr(name);
-          if (name !== null && e.fnNameMainThreadOnly) {
+        if (name !== undefined || jsLength !== undefined) {
+          const box = host.dyn.dynFuncBoxHelper(v.type, jsLength);
+          let nameArg = name === null || name === undefined ? "null" : host.cstr(name);
+          if (name !== null && name !== undefined && e.fnNameMainThreadOnly) {
             // Node's main thread wraps the function under this name; a
             // Worker hands out the unwrapped function, named "".
             host.declare(`declare zeroext i1 @scr_context_is_main()`);
@@ -158,6 +163,16 @@ export function emitDynamicExpr(
       const valTy = host.llType(v.type);
       const t = B.tmp();
       B.line(`${t} = call ptr @${conv}(${valTy} ${v.name})`);
+      return host.own({ name: t, type: e.type });
+    }
+    case "dynFromJsval": {
+      // Island value → dyn: the by-reference wrap (scr_dyn_from_jsval
+      // retains the cell in; engine scalars normalize to native dyn
+      // kinds at wrap time). Operand borrowed, result +1, never throws.
+      const v = emitBorrowedInput(host, e.value);
+      host.declare(`declare ptr @scr_dyn_from_jsval(ptr)`);
+      const t = B.tmp();
+      B.line(`${t} = call ptr @scr_dyn_from_jsval(ptr ${v.name})`);
       return host.own({ name: t, type: e.type });
     }
     case "dynCall": {
@@ -217,9 +232,9 @@ export function emitDynamicExpr(
       const args = e.args.map((a) => emitBorrowedInput(host, a));
       host.declare(`declare ptr @scr_dyn_call(ptr, ptr, ${host.sizeType}, ptr)`);
       const fast = jsEntrySites(host);
-      if (fast || args.some((a) => a.type.kind === "jsval")) {
+      if (fast || args.some((a) => a.type.kind === "jsword")) {
         const name = calleeName();
-        const t = emitJsvalArgumentsCall(
+        const t = emitJswordArgumentsCall(
           host,
           callee.name,
           receiver?.name ?? "null",
@@ -307,14 +322,14 @@ export function emitDynamicExpr(
       const discardedPush =
         discarded && e.method === "push" && invoke === "scr_dyn_invoke_prepared_id";
       const fast = !discardedPush && invoke === "scr_dyn_invoke_prepared_id" && jsEntrySites(host);
-      if (fast || args.some((a) => a.type.kind === "jsval")) {
+      if (fast || args.some((a) => a.type.kind === "jsword")) {
         const name = discardedPush ? host.cstr(e.calleeName) : dynInvokeCalleeName(host, e);
         if (discardedPush)
           host.declare(
             `declare void @scr_dyn_invoke_discard_id(ptr, ptr, ptr, ptr, ptr, ${host.sizeType}, ptr)`,
           );
         else host.declare(`declare ptr @${invoke}(ptr, ptr, ptr, ptr, ptr, ${host.sizeType}, ptr)`);
-        const t = emitJsvalArgumentsCall(host, prepared, recv.name, args, fast, (argsPtr) => {
+        const t = emitJswordArgumentsCall(host, prepared, recv.name, args, fast, (argsPtr) => {
           const site = `ptr ${recv.name}, ptr ${prepared}, ptr ${host.cstr(e.method)}, ptr ${host.methodIdSlot(e.method)}, ptr ${argsPtr}, ${host.sizeType} ${args.length}, ptr ${name}`;
           if (discardedPush) {
             B.line(`call void @scr_dyn_invoke_discard_id(${site})`);
@@ -900,19 +915,20 @@ export function emitDynamicExpr(
         host.declare(`declare zeroext i1 @scr_dyn_truthy(ptr)`);
         test = B.tmp();
         B.line(`${test} = call zeroext i1 @scr_dyn_truthy(ptr ${d.name})`);
-      } else if (e.test === "error") {
-        // `u instanceof Error`: the checked-dynamic tree's error encoding — an object
+      } else if (e.test === "error" || e.test === "errorInstance") {
+        // `u instanceof Error` (errorInstance: the compiled root %Error class, which WasmGC's engine path answers
+        // the same way): the checked-dynamic tree's error encoding — an object
         // carrying the reserved "%error" marker key, a registered native
-        // Error view.
+        // Error view, or a real engine Error held by reference.
         const kd = host.dynKind(d.name);
         const isObj = B.tmp();
         B.line(`${isObj} = icmp eq i32 ${kd}, ${DYN_KIND.OBJ}`);
         const slot = B.slot();
         B.entryAllocas.push(`${slot} = alloca i1`);
-        host.declare(`declare zeroext i1 @scr_dyn_ref_is_error(ptr)`);
-        const nativeError = B.tmp();
-        B.line(`${nativeError} = call zeroext i1 @scr_dyn_ref_is_error(ptr ${d.name})`);
-        B.line(`store i1 ${nativeError}, ptr ${slot}`);
+        host.declare(`declare zeroext i1 @scr_dyn_isl_is_error(ptr)`);
+        const isl = B.tmp();
+        B.line(`${isl} = call zeroext i1 @scr_dyn_isl_is_error(ptr ${d.name})`);
+        B.line(`store i1 ${isl}, ptr ${slot}`);
         const lObj = B.newLabel("dts.o");
         const lj = B.newLabel("dts.j");
         B.condBr(isObj, lObj, lj);
@@ -925,7 +941,7 @@ export function emitDynamicExpr(
         );
         B.line(`${has} = icmp ne ptr ${m}, null`);
         const branded = B.tmp();
-        B.line(`${branded} = or i1 ${has}, ${nativeError}`);
+        B.line(`${branded} = or i1 ${has}, ${isl}`);
         B.line(`store i1 ${branded}, ptr ${slot}`);
         B.br(lj);
         B.startBlock(lj);
@@ -948,9 +964,10 @@ export function emitDynamicExpr(
           }
           return acc;
         };
-
-        // Native reference capsules answer through materialization helpers.
-        const orNativeRef = (acc: string, helper: string, arg?: string): string => {
+        // ISLAND-held nodes route the tests that depend on the engine's
+        // answer through the scr_dyn_isl_* helpers (false on every
+        // other kind — the calls stay unconditional and branch-free).
+        const orIsl = (acc: string, helper: string, arg?: string): string => {
           host.declare(`declare zeroext i1 @${helper}(ptr${arg !== undefined ? ", ptr" : ""})`);
           const c = B.tmp();
           B.line(
@@ -978,7 +995,8 @@ export function emitDynamicExpr(
           B.line(`${test} = and i1 ${bytes}, ${buffer}`);
         } else if (e.test === "object") {
           // `typeof v === "object"`: objects, arrays, bytes, native
-          // handles, promises, null, and native reference capsules.
+          // handles, promises, null, and native reference capsules (engine-held
+          // island values by the engine's own typeof).
           // The kind alone answers for every value but a capsule, a handle
           // and a proxy: objects, arrays, bytes, promises and null are
           // objects and never callable, and every other kind is neither.
@@ -992,7 +1010,7 @@ export function emitDynamicExpr(
             DYN_KIND.PROMISE,
             DYN_KIND.NULL,
           ]);
-          const asks = oneOf([DYN_KIND.TYPED_REF, DYN_KIND.HANDLE, DYN_KIND.PROXY]);
+          const asks = oneOf([DYN_KIND.TYPED_REF, DYN_KIND.HANDLE, DYN_KIND.PROXY, DYN_KIND.JSVAL]);
           const answer = B.slot();
           B.entryAllocas.push(`${answer} = alloca i1`);
           B.line(`store i1 ${plain}, ptr ${answer}`);
@@ -1000,7 +1018,7 @@ export function emitDynamicExpr(
           const done = B.newLabel("dto.j");
           B.condBr(asks, ask, done);
           B.startBlock(ask);
-          const object = orNativeRef(
+          const object = orIsl(
             oneOf([
               DYN_KIND.OBJ,
               DYN_KIND.ARR,
@@ -1010,7 +1028,7 @@ export function emitDynamicExpr(
               DYN_KIND.PROXY,
               DYN_KIND.NULL,
             ]),
-            "scr_dyn_ref_typeof_is",
+            "scr_dyn_isl_typeof_is",
             host.cstr("object"),
           );
           host.declare("declare zeroext i1 @scr_dyn_is_callable(ptr)");
@@ -1026,8 +1044,9 @@ export function emitDynamicExpr(
           test = B.tmp();
           B.line(`${test} = load i1, ptr ${answer}`);
         } else if (e.test === "array") {
-          // Array.isArray accepts native arrays and typed array capsules.
-          test = orNativeRef(oneOf([DYN_KIND.ARR]), "scr_dyn_ref_is_array");
+          // Array.isArray: the checked-dynamic tree's array kind, or the engine's own
+          // answer for an engine-held value.
+          test = orIsl(oneOf([DYN_KIND.ARR]), "scr_dyn_isl_is_array");
         } else if (e.test === "function") {
           host.declare("declare zeroext i1 @scr_dyn_is_callable(ptr)");
           test = B.tmp();
@@ -1044,7 +1063,9 @@ export function emitDynamicExpr(
             bytes: DYN_KIND.BYTES,
             funcKind: DYN_KIND.FUNC,
           };
-          test = oneOf([kindOf[e.test]!]);
+          const kind = kindOf[e.test];
+          if (kind === undefined) throw new LlvmUnsupportedError(`dynTest:${e.test}`);
+          test = oneOf([kind]);
         }
       }
       if (!e.negated) return { name: test, type: e.type };
@@ -1568,8 +1589,8 @@ function messageListenerArg(e: ExprOf<"dynInvoke">): (IrType & { kind: "func" })
 }
 
 /** Whether a dynCall or dynInvoke site of the current function tests its
- * callee for a jsval entry (emitJsvalArgumentsCall): dynamic-tier code of
- * a module with closure jsval bodies, on targets with jsval words. */
+ * callee for a jsword entry (emitJswordArgumentsCall): dynamic-tier code of
+ * a module with closure jsword bodies, on targets with jsword words. */
 function jsEntrySites(host: LlvmEmitterContext): boolean {
   return (
     host.jsEntries &&
@@ -1579,14 +1600,14 @@ function jsEntrySites(host: LlvmEmitterContext): boolean {
 }
 
 /** A call of the function value `callee` (null for a site without one)
- * with `args`, which may include jsval words (ir/jsval.ts). With `fast`,
- * a callee boxed from a closure with a jsval body (ScrDyn.v.fn.js, +72)
+ * with `args`, which may include jsword words (ir/jsword.ts). With `fast`,
+ * a callee boxed from a closure with a jsword body (ScrDyn.v.fn.js, +72)
  * takes the arguments as words, a dyn argument under the cell tag, with
  * `receiver` bound as `this` around the call. Every other call goes
  * through `slow`, which takes an array of dyn arguments: the words boxed
  * for it and released after it. Returns the owned dyn result (null on
  * the slow path with an exception pending). */
-function emitJsvalArgumentsCall(
+function emitJswordArgumentsCall(
   host: LlvmEmitterContext,
   callee: string | null,
   receiver: string,
@@ -1607,7 +1628,7 @@ function emitJsvalArgumentsCall(
       B.entryAllocas.push(`${words} = alloca [${n} x ptr]`);
       args.forEach((a, i) => {
         let word = a.name;
-        if (a.type.kind !== "jsval") {
+        if (a.type.kind !== "jsword") {
           const bits = B.tmp();
           const tagged = B.tmp();
           word = B.tmp();
@@ -1669,7 +1690,7 @@ function emitJsvalArgumentsCall(
     B.entryAllocas.push(`${cells} = alloca [${n} x ptr]`);
     args.forEach((a, i) => {
       let cell = a.name;
-      if (a.type.kind === "jsval") {
+      if (a.type.kind === "jsword") {
         host.declare("declare ptr @scr_js_to_dyn_borrow(ptr)");
         cell = B.tmp();
         B.line(`${cell} = call ptr @scr_js_to_dyn_borrow(ptr ${a.name})`);

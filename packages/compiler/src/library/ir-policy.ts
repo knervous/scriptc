@@ -1,3 +1,4 @@
+// This file was modified from scriptc (Apache-2.0); see MODIFICATIONS.md.
 import type { IrExpr, IrModule, IrStmt, SrcLoc } from "../ir/ir.js";
 import { everyExprChild, everyModuleNode, everyStmtChild } from "../ir/traverse.js";
 import { moduleRuntimeFeatures } from "../ir/runtime-features.js";
@@ -28,11 +29,6 @@ const LIB_MODE_REFUSED_PREFIXES: readonly [string, string][] = [
   ["zlib.gzipCb", "the async node:zlib callback surface"],
   ["zlib.gunzipCb", "the async node:zlib callback surface"],
   ["zlib.unzipCb", "the async node:zlib callback surface"],
-  ["zlib.cbOpts", "the async node:zlib callback surface"],
-  ["zlib.promise", "the async node:zlib callback surface (util.promisify)"],
-  ["zlib.stream", "the node:zlib stream classes"],
-  ["zlib.brotliInstall", "node:zlib's Brotli forms"],
-  ["zlib.zstdInstall", "node:zlib's zstd forms"],
   ["process.stdoutWriteBytesCb", "process.stdout.write completion callbacks"],
   ["process.stderrWriteBytesCb", "process.stderr.write completion callbacks"],
   ["timers.", "the timers surface (setTimeout family)"],
@@ -42,72 +38,18 @@ const LIB_MODE_REFUSED_PREFIXES: readonly [string, string][] = [
   ["spawnRes.", "the child_process surface"],
   ["process.on", "process signal/exit listeners"],
   ["process.off", "process signal/exit listeners"],
-  // The flags object lives in a gated runtime unit (scr_process_features.c)
-  // that library archives do not carry. A flag read by name
-  // (process.features.tls) is a constant and links nothing.
-  ["process.features", "process.features as a value (read a flag by name instead)"],
   ["stdin.", "the stdin event surface"],
   ["rl.", "the node:readline surface"],
   ["net.", "the node:net surface"],
   ["http.", "the node:http surface"],
   ["https.", "the node:https surface"],
   ["http2.", "the node:http2 surface"],
+  ["h2.", "the node:http2 surface"],
   ["dgram.", "the node:dgram surface"],
   ["dns.", "the node:dns surface"],
   ["tls.", "the node:tls surface"],
-  ["crypto.cipherNew", "crypto.createCipheriv and createDecipheriv"],
-  ["crypto.ecdh", "crypto.createECDH and ECDH.convertKey"],
-  ["crypto.dhNew", "crypto.createDiffieHellman"],
-  ["crypto.dhGroupNew", "crypto.getDiffieHellman and createDiffieHellmanGroup"],
-  ["crypto.checkPrime", "crypto.checkPrime and checkPrimeSync"],
-  ["crypto.generatePrime", "crypto.generatePrime and generatePrimeSync"],
-  // crypto's callback forms run their callback from the crypto defer
-  // queue (or the thread pool), which library links exclude: a program
-  // that calls one must refuse rather than derive and discard the result.
-  // The synchronous spellings (pbkdf2Any, randomBytesAny, …) stay.
-  ["crypto.pbkdf2Cb", "the async crypto callback surface (pbkdf2)"],
-  ["crypto.pbkdf2AnyCb", "the async crypto callback surface (pbkdf2)"],
-  ["crypto.hkdfCb", "the async crypto callback surface (hkdf)"],
-  ["crypto.hkdfAnyCb", "the async crypto callback surface (hkdf)"],
-  ["crypto.scryptCb", "the async crypto callback surface (scrypt)"],
-  ["crypto.scryptAnyCb", "the async crypto callback surface (scrypt)"],
-  ["crypto.randomBytesCb", "the async crypto callback surface (randomBytes)"],
-  ["crypto.randomBytesAnyCb", "the async crypto callback surface (randomBytes)"],
-  ["crypto.randomIntCb", "the async crypto callback surface (randomInt)"],
-  ["crypto.randomIntAnyCb", "the async crypto callback surface (randomInt)"],
-  ["crypto.randomFillCb", "the async crypto callback surface (randomFill)"],
-  ["crypto.generateKeyCb", "the async crypto callback surface (generateKey)"],
-  ["crypto.createPrivateKey", "asymmetric KeyObjects, generateKeyPair, sign and verify"],
-  ["crypto.createPublicKey", "asymmetric KeyObjects, generateKeyPair, sign and verify"],
-  ["crypto.createSign", "asymmetric KeyObjects, generateKeyPair, sign and verify"],
-  ["crypto.createVerify", "asymmetric KeyObjects, generateKeyPair, sign and verify"],
-  ["crypto.generateKeyPair", "asymmetric KeyObjects, generateKeyPair, sign and verify"],
-  ["crypto.signOneshot", "asymmetric KeyObjects, generateKeyPair, sign and verify"],
-  ["crypto.signOneshotCb", "asymmetric KeyObjects, generateKeyPair, sign and verify"],
-  ["crypto.verifyOneshot", "asymmetric KeyObjects, generateKeyPair, sign and verify"],
-  ["crypto.verifyOneshotCb", "asymmetric KeyObjects, generateKeyPair, sign and verify"],
-  ["crypto.publicEncrypt", "asymmetric KeyObjects, generateKeyPair, sign and verify"],
-  ["crypto.privateDecrypt", "asymmetric KeyObjects, generateKeyPair, sign and verify"],
-  ["crypto.privateEncrypt", "asymmetric KeyObjects, generateKeyPair, sign and verify"],
-  ["crypto.publicDecrypt", "asymmetric KeyObjects, generateKeyPair, sign and verify"],
-  ["crypto.secureHeapUsed", "the secure-heap usage record"],
-  ["crypto.setEngine", "asymmetric KeyObjects, generateKeyPair, sign and verify"],
-  ["crypto.fipsGet", "getFips and the deprecated crypto.fips"],
-  ["crypto.x509PublicKey", "X509Certificate publicKey, verify and checkPrivateKey"],
-  ["crypto.x509Verify", "X509Certificate publicKey, verify and checkPrivateKey"],
-  ["crypto.x509CheckPrivateKey", "X509Certificate publicKey, verify and checkPrivateKey"],
-  ["crypto.spkacVerify", "Certificate (SPKAC)"],
-  ["crypto.spkacChallenge", "Certificate (SPKAC)"],
-  ["crypto.spkacPublicKey", "Certificate (SPKAC)"],
-  ["crypto.diffieHellman", "crypto.diffieHellman"],
-  ["webcrypto.", "WebCrypto (crypto.subtle)"],
   ["fs.watch", "fs.watch"],
   ["watcher.", "fs.watch"],
-  // The event-loop metrics sample the loop and its timers (scr_perf_loop.c),
-  // which library links exclude.
-  ["perf.loop", "performance.eventLoopUtilization"],
-  ["perf.idleTime", "performance.eventLoopUtilization"],
-  ["perf.eld", "perf_hooks.monitorEventLoopDelay"],
   ["test.", "the node:test surface"],
   ["readable.", "the node:stream surface"],
   ["writable.", "the node:stream surface"],
@@ -116,22 +58,9 @@ const LIB_MODE_REFUSED_PREFIXES: readonly [string, string][] = [
   ["passthrough.", "the node:stream surface"],
   ["stream.", "the node:stream surface"],
   ["als.", "AsyncLocalStorage"],
-  ["ar.", "AsyncResource"],
+  ["urj.", "unhandled-rejection tracking"],
   ["dc.", "the diagnostics_channel surface"],
-  ["ah.", "the node:async_hooks surface"],
-  ["te.", "the node:trace_events surface"],
   ["worker.new", "native worker threads"],
-  ["worker.channel", "native worker threads"],
-  ["worker.portConstruct", "native worker threads"],
-  ["worker.receiveMessageOnPort", "native worker threads"],
-  ["worker.setEnvironmentData", "native worker threads"],
-  ["worker.getEnvironmentData", "native worker threads"],
-  // Intl over ICU reads ambient locale state and a data file that ships
-  // beside an executable; a library archive carries neither.
-  ["icu.", "the Intl surface at the default locale (ICU data and locale state are ambient)"],
-  ["worker.markUntransferable", "native worker threads"],
-  ["worker.isMarkedUntransferable", "native worker threads"],
-  ["worker.broadcastChannel", "native worker threads"],
 ];
 
 /** Value/type kinds whose mere presence means an excluded unit's code (or
@@ -152,7 +81,6 @@ const LIB_MODE_REFUSED_KINDS: ReadonlyMap<string, string> = new Map([
   ["http2Stream", "the node:http2 surface"],
   ["dgramSocket", "the node:dgram surface"],
   ["fsWatcher", "fs.watch"],
-  ["statWatcher", "fs.watchFile"],
   ["testCtx", "the node:test surface"],
   ["httpReq", "the node:http surface"],
   ["httpRes", "the node:http surface"],
@@ -214,14 +142,10 @@ export function moduleLibAsyncSurface(mod: IrModule): { surface: string; loc: Sr
     [features.fsWatch, "fs.watch"],
     [features.stream, "the node:stream surface"],
     [features.tls, "the node:tls surface"],
-    [features.pki, "asymmetric KeyObjects, generateKeyPair, sign and verify"],
     [features.fetch, "fetch"],
-    [features.eventTarget, "the EventTarget surface"],
     [features.nodeTest, "the node:test surface"],
     [features.dynAsync, "the checked-dynamic async surface"],
     [features.dc, "the diagnostics_channel surface"],
-    [features.perfLoop, "the perf_hooks event-loop metrics"],
-    [features.nodeIsland, "calls into Node.js (@scriptc/node)"],
   ];
   for (const [on, surface] of coarse) {
     if (on) return { surface, loc: entryLoc };
@@ -257,11 +181,8 @@ export const LIB_NONDETERMINISTIC_PREFIXES: readonly [string, string][] = [
   ["crypto.random", "crypto randomness"],
   ["date.", "the live clock (Date)"],
   ["perf.", "the live clock (performance)"],
-  // new File() without lastModified reads Date.now().
-  ["blob.fileNew", "the live clock (File lastModified)"],
   ["process.env", "environment reads"],
   ["process.argv", "process.argv"],
-  ["process.execArgv", "process.execArgv"],
   ["process.cwd", "process.cwd"],
   ["process.chdir", "process.chdir"],
   ["process.pid", "process identity"],
@@ -271,14 +192,10 @@ export const LIB_NONDETERMINISTIC_PREFIXES: readonly [string, string][] = [
   ["process.uptime", "the live clock (process.uptime)"],
   ["process.availableMemory", "machine memory state"],
   ["process.constrainedMemory", "machine memory state"],
-  ["process.memoryUsage", "machine memory state (process.memoryUsage)"],
-  ["process.rss", "machine memory state (process.memoryUsage.rss)"],
-  ["process.ppid", "process identity"],
-  ["process.geteuid", "process identity"],
-  ["process.getegid", "process identity"],
-  ["process.getgroups", "process identity"],
-  ["process.title", "process identity"],
-  ["process.setTitle", "process authority (process.title)"],
+  // process.memoryUsage carries NO row: nothing lowers it — no IrLibFn
+  // spelling exists for it, so a prefix here would be dead. If a lowering
+  // ever lands, its spellings must join this table AND the manifest's
+  // ambient projection (the parity test fails until both agree).
   ["process.rusage", "machine resource usage (process.resourceUsage)"],
   ["process.cpu", "the process CPU clock (process.cpuUsage)"],
   ["process.threadCpu", "the thread CPU clock (process.threadCpuUsage)"],

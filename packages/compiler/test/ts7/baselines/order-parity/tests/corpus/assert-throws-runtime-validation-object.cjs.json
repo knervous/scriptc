@@ -1,6 +1,0 @@
-{
- "order": [
-  "<repo>/tests/corpus/assert-throws-runtime-validation-object.cjs"
- ],
- "diags": []
-}

@@ -1,6 +1,0 @@
-{
- "order": [
-  "<repo>/tests/corpus/stream-typed-chunk-mismatch.ts"
- ],
- "diags": []
-}

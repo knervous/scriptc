@@ -1,3 +1,4 @@
+// This file was modified from scriptc (Apache-2.0); see MODIFICATIONS.md.
 import { emitLookupConnect } from "./lib-lookup.js";
 import { emitConnectListener } from "./lib-connect.js";
 import {
@@ -10,6 +11,7 @@ import {
   ptr,
 } from "./lib-abi.js";
 import { emitTlsLibCall } from "./lib-tls.js";
+import { emitAlwaysThrowLibCall } from "./lib-shared.js";
 /* Focused LLVM library-call emission extracted from emitter.ts. */
 import { InternalCompilerError } from "../../errors.js";
 import { undefinedArmTag } from "../../ir/analysis.js";
@@ -190,6 +192,10 @@ export function emitNetworkHttpLibCall(host: LlvmEmitterContext, e: LibCallExpr)
     );
     host.emitPendingCheck();
     return { name: "", type: e.type };
+  }
+  if (e.fn === "net.connectOptsChk") {
+    // The fork's frontend: the runtime option bag's validation, then its fence (always throws).
+    return emitAlwaysThrowLibCall(host, e, "scr_net_connect_opts_chk");
   }
   if (e.fn === "net.createServer" || e.fn === "net.createServerCb") {
     const args = e.args.map((a) => host.emitExpr(a));

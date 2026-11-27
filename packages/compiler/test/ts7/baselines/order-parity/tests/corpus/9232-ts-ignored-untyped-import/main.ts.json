@@ -1,6 +1,0 @@
-{
- "order": [
-  "<repo>/tests/corpus/9232-ts-ignored-untyped-import/main.ts"
- ],
- "diags": []
-}

@@ -1,6 +1,0 @@
-{
- "order": [
-  "<repo>/tests/corpus/crypto-sign-listener-cycle.ts"
- ],
- "diags": []
-}

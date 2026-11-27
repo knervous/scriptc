@@ -1,6 +1,0 @@
-{
- "order": [
-  "<repo>/tests/corpus/typeof-ambient-undefined-names.ts"
- ],
- "diags": []
-}

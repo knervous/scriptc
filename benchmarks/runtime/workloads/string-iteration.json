@@ -1,7 +1,0 @@
-{
-  "entry": "workloads/string-iteration.ts",
-  "args": [
-    "1"
-  ],
-  "scaleArg": 0
-}

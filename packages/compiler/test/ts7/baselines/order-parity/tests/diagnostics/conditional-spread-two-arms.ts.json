@@ -1,6 +1,0 @@
-{
- "order": [
-  "<repo>/tests/diagnostics/conditional-spread-two-arms.ts"
- ],
- "diags": []
-}

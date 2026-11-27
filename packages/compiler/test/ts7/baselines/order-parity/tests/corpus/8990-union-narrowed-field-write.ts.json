@@ -1,6 +1,0 @@
-{
- "order": [
-  "<repo>/tests/corpus/8990-union-narrowed-field-write.ts"
- ],
- "diags": []
-}

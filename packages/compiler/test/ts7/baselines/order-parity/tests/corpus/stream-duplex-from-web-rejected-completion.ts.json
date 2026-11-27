@@ -1,6 +1,0 @@
-{
- "order": [
-  "<repo>/tests/corpus/stream-duplex-from-web-rejected-completion.ts"
- ],
- "diags": []
-}

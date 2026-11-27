@@ -1,1 +1,0 @@
-{ "name": "island-shared-read", "private": true, "scriptc": { "packages": { "host-kit": "node" } } }

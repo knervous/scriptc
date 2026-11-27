@@ -1,6 +1,0 @@
-{
- "order": [
-  "<repo>/tests/corpus/8725-missing-element-async-lambda.ts"
- ],
- "diags": []
-}

@@ -1,6 +1,0 @@
-{
- "order": [
-  "<repo>/tests/corpus/localized-failure-push-down.ts"
- ],
- "diags": []
-}

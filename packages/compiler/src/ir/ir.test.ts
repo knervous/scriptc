@@ -10,6 +10,7 @@ import {
   canConvertToDyn,
   canDynCheckTo,
   type IrBytesElem,
+  isIslandCallbackParamType,
   holdsFieldlessRecord,
   isJsonSafeType,
   iterableArmsElem,
@@ -177,10 +178,12 @@ describe("checked records with opaque payloads", () => {
       expect(isJsonSafeType(type, record, union)).toBe(false);
       expect(isJsonStringifySafeType(type, record, union)).toBe(false);
       expect(isJsonStringifyDynamicType(type, record, union)).toBe(true);
+      expect(isIslandCallbackParamType(type, record, union)).toBe(false);
     },
   );
 
   test("opaque arrays and optional records retain their actual payload representation", () => {
+    expect(isIslandCallbackParamType(DYN, record, union)).toBe(true);
     expect(canDynCheckTo(arrayOf(DYN), record, union)).toBe(true);
     expect(canDynCheckTo({ kind: "union", unionId: "optional" }, record, union)).toBe(true);
   });
@@ -236,6 +239,7 @@ describe("native typed-array boundaries", () => {
       expect(canConvertToDyn(shape, record, union)).toBe(true);
       expect(canDynCheckTo(shape, record, union)).toBe(true);
       expect(isJsonSafeType(shape, record, union)).toBe(false);
+      expect(isIslandCallbackParamType(shape, record, union)).toBe(false);
     },
   );
 });
@@ -255,6 +259,7 @@ describe("native bigint checked storage", () => {
       expect(canDynCheckTo(type, record, union)).toBe(true);
       expect(isJsonSafeType(type, record, union)).toBe(false);
       expect(isJsonStringifySafeType(type, record, union)).toBe(false);
+      expect(isIslandCallbackParamType(type, record, union)).toBe(false);
     }
   });
 });
@@ -276,6 +281,7 @@ describe("native process stream checked storage", () => {
       expect(canConvertToDyn(type, record, union)).toBe(true);
       expect(canDynCheckTo(type, record, union)).toBe(true);
       expect(isJsonSafeType(type, record, union)).toBe(false);
+      expect(isIslandCallbackParamType(type, record, union)).toBe(false);
     }
     expect(canConvertToDyn(arrayOf(stream), record, union)).toBe(false);
     expect(canDynCheckTo(arrayOf(stream), record, union)).toBe(false);
@@ -474,7 +480,7 @@ describe("recursive checked graphs", () => {
   test("a union whose function arm returns it and whose other arm does not convert is refused", () => {
     const loop: IrType = { kind: "union", unionId: "loop" };
     const loops = new Map<string, IrUnionDef>([
-      ["loop", { id: "loop", arms: [{ kind: "func", params: [], ret: loop }, { kind: "jsval" }] }],
+      ["loop", { id: "loop", arms: [{ kind: "func", params: [], ret: loop }, { kind: "jsword" }] }],
     ]);
     expect(canConvertToDyn(loop, record, (id) => loops.get(id))).toBe(false);
   });
@@ -529,7 +535,7 @@ describe("checked conversion graph traversal", () => {
           id: "parent",
           fields: [
             { name: "child", type: { kind: "record", shapeId: "child" } },
-            { name: "unsupported", type: { kind: "caught" } },
+            { name: "unsupported", type: { kind: "jsval" } },
           ],
         },
       ],
@@ -552,6 +558,35 @@ describe("checked conversion graph traversal", () => {
     expect(
       canConvertToDyn({ kind: "record", shapeId: "child" }, getRecord, () => undefined, visiting),
     ).toBe(false);
+  });
+});
+
+describe("arm sorting (sortArms, sortArmsTotal)", () => {
+  // Every kind typeKey distinguishes, shared objects (equal keys) and distinct objects with equal keys.
+  const pool = (): IrType[] => [
+    F64, STRING, DYN, arrayOf(F64), arrayOf(STRING), { kind: "record", shapeId: "r1" }, { kind: "record", shapeId: "r0" },
+    { kind: "union", unionId: "u9" }, { kind: "object", className: "B" }, { kind: "object", className: "A" },
+    { kind: "promise", inner: F64 }, { kind: "undefinedT" }, { kind: "nullT" }, { kind: "func", params: [F64], ret: F64 },
+    { kind: "func", params: [F64], ret: F64 },
+  ];
+  const base = pool();
+  const shuffled = (n: number, seed: number): IrType[] => {
+    const arms: IrType[] = [];
+    for (let i = 0; i < n; i++) { seed = (seed * 1103515245 + 12345) % 2147483648; arms.push(base[seed % base.length]!); }
+    return arms;
+  };
+  test("leave the arms in the inline comparators' order, in place", () => {
+    for (const n of [0, 1, 2, 3, 7, 16, 40, 100]) for (const seed of [1, 7, 12345]) {
+      const inline = shuffled(n, seed).sort((a, b) => (typeKey(a) < typeKey(b) ? -1 : 1));
+      const arms = shuffled(n, seed);
+      expect(sortArms(arms)).toBe(arms);
+      expect(arms).toEqual(inline);
+      for (let i = 0; i < n; i++) expect(arms[i]).toBe(inline[i]);
+      const inlineTotal = shuffled(n, seed).sort((a, b) => (typeKey(a) < typeKey(b) ? -1 : typeKey(a) > typeKey(b) ? 1 : 0));
+      const total = shuffled(n, seed);
+      expect(sortArmsTotal(total)).toBe(total);
+      for (let i = 0; i < n; i++) expect(total[i]).toBe(inlineTotal[i]);
+    }
   });
 });
 

@@ -1,7 +1,0 @@
-{
- "order": [
-  "<repo>/tests/diagnostics/dynamic-import/helper.ts",
-  "<repo>/tests/diagnostics/dynamic-import/main.ts"
- ],
- "diags": []
-}

@@ -1,7 +1,0 @@
-{
-  "name": "compiled-cli",
-  "version": "3.2.1",
-  "port": 8080,
-  "tags": ["fast", "native"],
-  "nested": { "deep": true }
-}

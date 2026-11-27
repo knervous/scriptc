@@ -1,6 +1,0 @@
-{
- "order": [
-  "<repo>/tests/corpus/5614-readable-from-iterable-errors.cjs"
- ],
- "diags": []
-}

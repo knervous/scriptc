@@ -1,6 +1,0 @@
-{
- "order": [
-  "<repo>/tests/corpus/child-fork-spawn-failure/main.ts"
- ],
- "diags": []
-}

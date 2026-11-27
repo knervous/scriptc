@@ -1,6 +1,0 @@
-{
- "order": [
-  "<repo>/tests/corpus/constant-array-length-specialization.ts"
- ],
- "diags": []
-}

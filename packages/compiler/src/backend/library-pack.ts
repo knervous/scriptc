@@ -1,3 +1,4 @@
+// This file was modified from scriptc (Apache-2.0); see MODIFICATIONS.md.
 import { execFile } from "node:child_process";
 import { mkdir, mkdtemp, readFile, rm } from "node:fs/promises";
 import { tmpdir } from "node:os";
@@ -21,12 +22,14 @@ const run = promisify(execFile);
  * entry point the program calls. */
 export function libraryArchiveFeatures(options: LibArchiveOptions): NativeLinkFeatures {
   return {
+    dynamic: false,
     regex: options.regex ?? false,
     copying: options.copying ?? false,
     textDecoderLegacy: options.textDecoderLegacy ?? false,
     bigintBytes: options.bigintBytes ?? false,
     fileHandle: false,
     fetch: false,
+    netIsland: false,
     zlib: options.zlib ?? false,
     assert: options.assert ?? false,
     inspect: options.inspect ?? false,

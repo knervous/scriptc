@@ -1,6 +1,0 @@
-{
- "order": [
-  "<repo>/tests/corpus/saturating-loop-jams.ts"
- ],
- "diags": []
-}

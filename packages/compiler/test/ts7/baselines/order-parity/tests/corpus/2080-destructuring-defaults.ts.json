@@ -1,6 +1,0 @@
-{
- "order": [
-  "<repo>/tests/corpus/2080-destructuring-defaults.ts"
- ],
- "diags": []
-}

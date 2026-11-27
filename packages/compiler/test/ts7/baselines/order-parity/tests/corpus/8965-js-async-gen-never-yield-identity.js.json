@@ -1,6 +1,0 @@
-{
- "order": [
-  "<repo>/tests/corpus/8965-js-async-gen-never-yield-identity.js"
- ],
- "diags": []
-}

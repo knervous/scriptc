@@ -1,3 +1,10 @@
+stdlib-fence.ts:15:15 - error SC1090: statically-decided Array.isArray on computed arguments (bind the value to a variable first) are not supported yet
+
+  14 | const n5 = Number.NaN; // lowers now, with the other Number constants
+  15 | const isArr = Array.isArray([1]);
+     |               ^~~~~~~~~~~~~~~~~~
+  16 | const merged = Object.assign({}, { a: 1 }); // the empty-target literal-source shape lowers now (it IS the source literal)
+
 stdlib-fence.ts:17:23 - error SC2020: 'Object.assign' is part of the standard library types but has no scriptc lowering yet
 
   16 | const merged = Object.assign({}, { a: 1 }); // the empty-target literal-source shape lowers now (it IS the source literal)
@@ -7,72 +14,192 @@ stdlib-fence.ts:17:23 - error SC2020: 'Object.assign' is part of the standard li
 
   hint: spread instead: { ...a, ...b } builds the merged record; what lowers: the empty-target literal-source shape (Object.assign({}, { ... }) IS the source literal) and merges INTO an index-signature record whose value slot every source value enters — other aliased targets are real mutation, and a function target (Object.assign(fn, { prop })) is a function-with-properties value the model cannot represent: bind the property separately
 
+stdlib-fence.ts:18:14 - error SC2020: 'Reflect.has' is part of the standard library types but has no scriptc lowering yet
+
+  17 | const aliasedAssign = Object.assign(merged, { b: 2 }); // aliased targets stay fenced (real mutation of a live object)
+  18 | const refl = Reflect.has({ a: 1 }, "a");
+     |              ^~~~~~~~~~~
+  19 | const parsedMs = Date.parse;
+
+  hint: the type checker sees the full standard library, but only the supported surface compiles (https://scriptc.dev/limitations)
+
 stdlib-fence.ts:19:18 - error SC2020: 'Date.parse' is part of the standard library types but has no scriptc lowering yet
 
   18 | const refl = Reflect.has({ a: 1 }, "a");
   19 | const parsedMs = Date.parse;
      |                  ^~~~~~~~~~
-  20 | const fmt = new Intl.PluralRules();
+  20 | const fmt = new Intl.NumberFormat();
 
   hint: the type checker sees the full standard library, but only the supported surface compiles (https://scriptc.dev/limitations)
 
-stdlib-fence.ts:20:7 - error SC2020: 'PluralRules' is part of the standard library types but has no scriptc lowering yet
+stdlib-fence.ts:20:7 - error SC2020: 'NumberFormat' is part of the standard library types but has no scriptc lowering yet
 
   19 | const parsedMs = Date.parse;
-  20 | const fmt = new Intl.PluralRules();
+  20 | const fmt = new Intl.NumberFormat();
      |       ^~~
   21 | 
 
-  hint: values of this Intl type have no representation — what compiles: Intl.NumberFormat and Intl.DateTimeFormat objects with format(), the toLocaleString(), toLocaleDateString() and toLocaleTimeString() forms with a locale and options, and Intl.Segmenter with grapheme or word granularity; locale negotiation, resolvedOptions and the other Intl constructors remain unsupported
+  hint: Intl formatter values have no representation — the COMPOSED en-US forms lower: new Intl.NumberFormat("en-US").format(x) and x.toLocaleString("en-US") with default options; the rest is ICU locale data the binary does not carry
 
-stdlib-fence.ts:20:13 - error SC2020: 'new Intl.PluralRules' is part of the standard library types but has no scriptc lowering yet
+stdlib-fence.ts:20:13 - error SC2020: 'new Intl.NumberFormat' is part of the standard library types but has no scriptc lowering yet
 
   19 | const parsedMs = Date.parse;
-  20 | const fmt = new Intl.PluralRules();
-     |             ^~~~~~~~~~~~~~~~~~~~~~
+  20 | const fmt = new Intl.NumberFormat();
+     |             ^~~~~~~~~~~~~~~~~~~~~~~
   21 | 
 
   hint: the type checker sees the full standard library, but only the supported surface compiles (https://scriptc.dev/limitations)
 
-stdlib-fence.ts:23:11 - error SC2020: 'new Date with spread arguments' is part of the standard library types but has no scriptc lowering yet
+stdlib-fence.ts:23:11 - error SC2020: 'new Date with 2 arguments' is part of the standard library types but has no scriptc lowering yet
 
   22 | // Constructors.
-  23 | const d = new Date(...([2024, 0] as const)); // spread field arguments stay fenced
-     |           ^~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~
-  24 | const wr = new BigInt64Array(8);
+  23 | const d = new Date(2024, 0); // the local-time year/month field constructor stays fenced
+     |           ^~~~~~~~~~~~~~~~~
+  24 | const mutableDate = new Date(0);
 
-  hint: new Date(), new Date(milliseconds), new Date(dateString), and new Date(year, monthIndex, ...) with listed arguments are supported
+  hint: new Date(), new Date(milliseconds), and new Date(dateString) are supported; the local-time year/month field constructor has no lowering
 
-stdlib-fence.ts:24:7 - error SC2020: 'BigInt64Array<ArrayBuffer>' is part of the standard library types but has no scriptc lowering yet
+stdlib-fence.ts:25:1 - error SC2020: 'Date.prototype.setUTCFullYear with arguments' is part of the standard library types but has no scriptc lowering yet
 
-  23 | const d = new Date(...([2024, 0] as const)); // spread field arguments stay fenced
-  24 | const wr = new BigInt64Array(8);
+  24 | const mutableDate = new Date(0);
+  25 | mutableDate.setUTCFullYear(2024); // mutation is outside the read-only Date slice
+     | ^~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~
+  26 | const sameDate = mutableDate === mutableDate; // scalar storage must not fake object identity
+
+  hint: getTime(), valueOf(), toISOString(), the local/UTC calendar getters, and getTimezoneOffset() are supported; Date setters and locale/string formatters have no lowering
+
+stdlib-fence.ts:26:18 - error SC1043: comparing non-number, non-string values are not supported yet
+
+  25 | mutableDate.setUTCFullYear(2024); // mutation is outside the read-only Date slice
+  26 | const sameDate = mutableDate === mutableDate; // scalar storage must not fake object identity
+     |                  ^~~~~~~~~~~~~~~~~~~~~~~~~~~
+  27 | const wr = new WeakRef({});
+
+stdlib-fence.ts:27:7 - error SC2020: 'WeakRef<{}>' is part of the standard library types but has no scriptc lowering yet
+
+  26 | const sameDate = mutableDate === mutableDate; // scalar storage must not fake object identity
+  27 | const wr = new WeakRef({});
      |       ^~
-  25 | const px = new Proxy({ a: 1 }, {});
+  28 | const px = new Proxy({ a: 1 }, {});
 
   hint: the type checker sees the full standard library, but only the supported surface compiles (https://scriptc.dev/limitations)
 
-stdlib-fence.ts:24:12 - error SC2020: 'new BigInt64Array' is part of the standard library types but has no scriptc lowering yet
+stdlib-fence.ts:27:12 - error SC2020: 'new WeakRef' is part of the standard library types but has no scriptc lowering yet
 
-  23 | const d = new Date(...([2024, 0] as const)); // spread field arguments stay fenced
-  24 | const wr = new BigInt64Array(8);
-     |            ^~~~~~~~~~~~~~~~~~~~
-  25 | const px = new Proxy({ a: 1 }, {});
+  26 | const sameDate = mutableDate === mutableDate; // scalar storage must not fake object identity
+  27 | const wr = new WeakRef({});
+     |            ^~~~~~~~~~~~~~~
+  28 | const px = new Proxy({ a: 1 }, {});
+
+  hint: deref()-after-collect exposes GC timing — genuinely dynamic; hold a strong reference instead
+
+stdlib-fence.ts:34:7 - error SC2020: 'AggregateError' is part of the standard library types but has no scriptc lowering yet
+
+  33 | // and the unlowered members of lowered error objects.)
+  34 | const agg = new AggregateError([]);
+     |       ^~~
+  35 | const stack = new Error("boom").stack;
 
   hint: the type checker sees the full standard library, but only the supported surface compiles (https://scriptc.dev/limitations)
 
-stdlib-fence.ts:39:31 - error SC1090: '.split()' on a 'RegExp | string' separator (pass a string, or a regex literal) is not supported yet
+stdlib-fence.ts:34:13 - error SC2020: 'new AggregateError' is part of the standard library types but has no scriptc lowering yet
 
-  38 | const norm = "abc".normalize();
-  39 | const limited = "a,b,c".split(Math.random() ? "," : /,/, 2); // union separators stay fenced; limits lower
+  33 | // and the unlowered members of lowered error objects.)
+  34 | const agg = new AggregateError([]);
+     |             ^~~~~~~~~~~~~~~~~~~~~~
+  35 | const stack = new Error("boom").stack;
+
+  hint: the type checker sees the full standard library, but only the supported surface compiles (https://scriptc.dev/limitations)
+
+stdlib-fence.ts:40:17 - error SC2020: 'Math.min' is part of the standard library types but has no scriptc lowering yet
+
+  39 | // corpus; the mixed spread/positional list is the form that stays fenced.)
+  40 | const clamped = Math.min(1, ...[2, 3]);
+     |                 ^~~~~~~~
+  41 | const entries = [1, 2].entries();
+
+  hint: Math.min lowers with any number of plain arguments or ONE number[] spread — mixed spread/positional lists don't: spread a single array (Math.min(...xs))
+
+stdlib-fence.ts:41:7 - error SC2020: 'ArrayIterator<[number, number]>' is part of the standard library types but has no scriptc lowering yet
+
+  40 | const clamped = Math.min(1, ...[2, 3]);
+  41 | const entries = [1, 2].entries();
+     |       ^~~~~~~
+  42 | const arrAt = [1, 2].at(0);
+
+  hint: the type checker sees the full standard library, but only the supported surface compiles (https://scriptc.dev/limitations)
+
+stdlib-fence.ts:41:17 - error SC2020: 'number[].entries' is part of the standard library types but has no scriptc lowering yet
+
+  40 | const clamped = Math.min(1, ...[2, 3]);
+  41 | const entries = [1, 2].entries();
+     |                 ^~~~~~~~~~~~~~
+  42 | const arrAt = [1, 2].at(0);
+
+  hint: the type checker sees the full standard library, but only the supported surface compiles (https://scriptc.dev/limitations)
+
+stdlib-fence.ts:44:31 - error SC1090: '.split()' on a 'RegExp | string' separator (pass a string, or a regex literal) is not supported yet
+
+  43 | const norm = "abc".normalize();
+  44 | const limited = "a,b,c".split(Math.random() ? "," : /,/, 2); // union separators stay fenced; limits lower
      |                               ^~~~~~~~~~~~~~~~~~~~~~~~~
-  40 | const fixed = (1.5).toFixed(); // digit-free toFixed lowers now (the static ties-up integer)
+  45 | const fixed = (1.5).toFixed(); // digit-free toFixed lowers now (the static ties-up integer)
 
-stdlib-fence.ts:41:43 - error SC2020: 'Number.prototype.toLocaleString at locale "de-DE"' is part of the standard library types but has no scriptc lowering yet
+stdlib-fence.ts:46:19 - error SC2020: 'Number.prototype.toLocaleString without a locale' is part of the standard library types but has no scriptc lowering yet
 
-  40 | const fixed = (1.5).toFixed(); // digit-free toFixed lowers now (the static ties-up integer)
-  41 | const localized = (1234.5).toLocaleString("de-DE");
-     |                                           ^~~~~~~
-  42 | // Unlowered call FORMS of lowered members. (push is fully variadic now —
+  45 | const fixed = (1.5).toFixed(); // digit-free toFixed lowers now (the static ties-up integer)
+  46 | const localized = (1234.5).toLocaleString();
+     |                   ^~~~~~~~~~~~~~~~~~~~~~~~~
+  47 | // Unlowered call FORMS of lowered members. (push is fully variadic now —
 
-  hint: which locale Node picks for a requested tag is locale negotiation, which is not modelled; the default locale (no argument), "en-US" and "en" compile
+  hint: the default locale is the host environment's, which a compiled binary cannot carry — pass it explicitly: x.toLocaleString("en-US")
+
+stdlib-fence.ts:52:1 - error SC2020: '.forEach with 2 arguments' is part of the standard library types but has no scriptc lowering yet
+
+  51 | const joined = nums.join(); // the omitted separator lowers
+  52 | nums.forEach((x) => console.log(x), { unused: true }); // thisArg stays fenced
+     | ^~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~
+  53 | const pos = "abc".includes("b", 1); // the position form lowers now (indexOf's clamp)
+
+  hint: the thisArg parameter has no lowering — use an arrow function
+
+stdlib-fence.ts:75:10 - error SC2020: 'Object.is over these union operands' is part of the standard library types but has no scriptc lowering yet
+
+  74 | function pick(a: string | number, b: number | boolean): boolean {
+  75 |   return Object.is(a, b); // partially-overlapping unions: narrow first
+     |          ^~~~~~~~~~~~~~~
+  76 | }
+
+  hint: union-typed comparisons need one comparable shape (narrow first: check a discriminant field, or compare with '!== undefined'/'!== null' for unit arms)
+
+stdlib-fence.ts:82:23 - error SC2009: values of type 'Date | undefined' cannot be compiled: the union shape is supported, but 'Date' arms have no home in a compiled union yet (no runtime narrowing test exists against sibling arms)
+
+  81 | // scalar/ref mismatch.
+  82 | function optionalDate(value: Date | undefined): number {
+     |                       ^~~~~
+  83 |   return value === undefined ? -1 : value.getTime();
+
+  hint: the outer shape is supported — the named component is the blocker; restate it inside the compilable set (number, string, boolean, arrays, Maps, Sets, RegExp, functions, classes, records, unions of those, and 'unknown')
+
+stdlib-fence.ts:85:1 - error SC2004: uses of 'optionalDate' inherit the blocker on its declaration
+
+  84 | }
+  85 | optionalDate(undefined);
+     | ^~~~~~~~~~~~
+  86 | function throwDate(): void {
+
+  hint: the declaration of 'optionalDate' did not compile — fix the diagnostic reported there and these sites clear with it
+
+stdlib-fence.ts:87:9 - error SC1090: throwing Date values (catch bindings cannot preserve Date's object kind; throw an Error or primitive instead) are not supported yet
+
+  86 | function throwDate(): void {
+  87 |   throw new Date(0); // the exception cell cannot preserve Date's object kind
+     |         ^~~~~~~~~~~
+  88 | }
+
+stdlib-fence.ts:93:23 - error SC1090: .throw() with a Date value (the exception channel cannot preserve Date's object kind; throw an Error or primitive instead) is not supported yet
+
+  92 | }
+  93 | dateGenerator().throw(new Date(0));
+     |                       ^~~~~~~~~~~
+  94 | // End of the diagnostic fixture.

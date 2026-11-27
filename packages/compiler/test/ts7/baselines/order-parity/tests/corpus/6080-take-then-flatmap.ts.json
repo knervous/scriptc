@@ -1,6 +1,0 @@
-{
- "order": [
-  "<repo>/tests/corpus/6080-take-then-flatmap.ts"
- ],
- "diags": []
-}

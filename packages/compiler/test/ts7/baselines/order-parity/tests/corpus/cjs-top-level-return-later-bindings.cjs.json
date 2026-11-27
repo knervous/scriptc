@@ -1,6 +1,0 @@
-{
- "order": [
-  "<repo>/tests/corpus/cjs-top-level-return-later-bindings.cjs"
- ],
- "diags": []
-}

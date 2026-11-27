@@ -1,6 +1,0 @@
-{
- "order": [
-  "<repo>/tests/corpus/5843-qs-parse-null-prototype-js.mjs"
- ],
- "diags": []
-}

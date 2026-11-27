@@ -1,6 +1,0 @@
-{
- "order": [
-  "<repo>/tests/corpus/builtin-polyfill-keep-value-assignment-sloppy.cjs"
- ],
- "diags": []
-}

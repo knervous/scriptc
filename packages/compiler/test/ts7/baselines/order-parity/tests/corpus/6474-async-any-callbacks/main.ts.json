@@ -1,6 +1,0 @@
-{
- "order": [
-  "<repo>/tests/corpus/6474-async-any-callbacks/main.ts"
- ],
- "diags": []
-}

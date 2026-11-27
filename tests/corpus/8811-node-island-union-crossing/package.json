@@ -1,6 +1,0 @@
-{
-  "name": "island-union-crossing",
-  "private": true,
-  "type": "module",
-  "scriptc": { "packages": { "union-pkg": "node" } }
-}

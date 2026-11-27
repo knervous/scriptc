@@ -1,6 +1,0 @@
-{
- "order": [
-  "<repo>/tests/corpus/1667-dyn-fn-not-callable.cjs"
- ],
- "diags": []
-}

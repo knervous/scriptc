@@ -1,3 +1,4 @@
+// This file was modified from scriptc (Apache-2.0); see MODIFICATIONS.md.
 /* Loop-entry range versions (ir/loop-entry-ranges.ts): a while or for loop whose
  * integer work depends on locals entering it without range facts runs as
  * two copies. A test on entry checks that each such local holds an integer
@@ -16,6 +17,8 @@ interface LoopEntryState {
   fn: IrFunction | null;
   facts: IntegerRangeFacts | null;
   slots: IntegerSlotFacts;
+  /** The fork's proved in-bounds typed-array reads the facts were computed with. */
+  inBounds: ReadonlySet<unknown>;
   /** Found on the first while or for loop the function emits. */
   versions: Map<IrStmt, LoopEntryVersion> | null;
   /** Loops whose copies are being emitted: a loop is versioned once. */
@@ -31,6 +34,7 @@ const ENTRY_VERSIONS = defineModuleState<LoopEntryState>(() => ({
   fn: null,
   facts: null,
   slots: {},
+  inBounds: new Set(),
   versions: null,
   versioning: new Set<IrStmt>(),
   calls: null,
@@ -48,8 +52,10 @@ export function beginLoopEntryVersions(
   numericFn: IrFunction,
   slots: IntegerSlotFacts,
   facts: IntegerRangeFacts,
+  inBounds: ReadonlySet<unknown> = new Set(),
 ): void {
   const state = ENTRY_VERSIONS.of(emitter);
+  state.inBounds = inBounds;
   state.fn = emitter.debug === null ? numericFn : null;
   state.slots = slots;
   state.facts = facts;
@@ -71,7 +77,7 @@ export function loopEntryVersion(emitter: LlEmitter, loop: IrStmt): LoopEntryVer
     emitter.currentCoro !== null
   )
     return null;
-  state.versions ??= findLoopEntryVersions(state.fn, state.facts, state.slots);
+  state.versions ??= findLoopEntryVersions(state.fn, state.facts, state.slots, state.inBounds);
   const version = state.versions.get(loop);
   if (!version) return null;
   for (const id of version.entry.keys())

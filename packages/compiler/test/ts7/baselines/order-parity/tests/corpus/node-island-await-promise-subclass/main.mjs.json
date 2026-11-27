@@ -1,6 +1,0 @@
-{
- "order": [
-  "<repo>/tests/corpus/node-island-await-promise-subclass/main.mjs"
- ],
- "diags": []
-}

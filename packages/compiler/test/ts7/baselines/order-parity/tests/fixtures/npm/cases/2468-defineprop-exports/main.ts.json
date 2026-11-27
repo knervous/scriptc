@@ -1,6 +1,0 @@
-{
- "order": [
-  "<repo>/tests/fixtures/npm/cases/2468-defineprop-exports/main.ts"
- ],
- "diags": []
-}

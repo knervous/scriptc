@@ -1,6 +1,0 @@
-{
- "order": [
-  "<repo>/tests/corpus/5745-atomics-semaphore-stress.ts"
- ],
- "diags": []
-}

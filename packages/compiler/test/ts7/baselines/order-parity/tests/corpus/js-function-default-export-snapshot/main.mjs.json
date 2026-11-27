@@ -1,7 +1,0 @@
-{
- "order": [
-  "<repo>/tests/corpus/js-function-default-export-snapshot/lib.mjs",
-  "<repo>/tests/corpus/js-function-default-export-snapshot/main.mjs"
- ],
- "diags": []
-}

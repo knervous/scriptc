@@ -1,6 +1,0 @@
-{
- "order": [
-  "<repo>/tests/corpus/native-npm-imports/main.ts"
- ],
- "diags": []
-}

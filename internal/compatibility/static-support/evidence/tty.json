@@ -1,3 +1,0 @@
-{
-    "node-builtin.tty": ["tests/corpus/1448-stream-columns.ts", "tests/corpus/terminal-stream-properties.ts", "tests/harness/terminal-geometry.test.ts"]
-}

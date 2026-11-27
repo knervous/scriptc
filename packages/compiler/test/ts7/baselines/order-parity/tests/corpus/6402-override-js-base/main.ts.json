@@ -1,7 +1,0 @@
-{
- "order": [
-  "<repo>/tests/corpus/6402-override-js-base/pool.js",
-  "<repo>/tests/corpus/6402-override-js-base/main.ts"
- ],
- "diags": []
-}

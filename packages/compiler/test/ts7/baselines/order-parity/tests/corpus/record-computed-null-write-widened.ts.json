@@ -1,6 +1,0 @@
-{
- "order": [
-  "<repo>/tests/corpus/record-computed-null-write-widened.ts"
- ],
- "diags": []
-}

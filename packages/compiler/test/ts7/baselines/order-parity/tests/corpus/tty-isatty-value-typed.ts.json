@@ -1,6 +1,0 @@
-{
- "order": [
-  "<repo>/tests/corpus/tty-isatty-value-typed.ts"
- ],
- "diags": []
-}

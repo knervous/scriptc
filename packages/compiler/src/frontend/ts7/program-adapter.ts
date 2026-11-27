@@ -1,10 +1,6 @@
+// This file was modified from scriptc (Apache-2.0); see MODIFICATIONS.md.
 import { dirname, resolve } from "node:path";
-import {
-  Ts7Host as ProgramHost,
-  type Ts7HostOptions,
-  type Ts7CompilerOptions,
-  Ts7Program,
-} from "./program-host.js";
+import { Ts7Host as ProgramHost, type Ts7HostOptions, type Ts7CompilerOptions, Ts7Program } from "./program-host.js";
 import { Ts7Api } from "./rpc-api.js";
 
 export { Ts7Program, findConfigFile, getPreEmitDiagnostics, sys } from "./program-host.js";

@@ -34,8 +34,8 @@ class GenericOver extends PlainBase {
 }
 new GenericOver();
 
-// A generic method lowers as a plain function; `this` in its body is the
-// receiver the call binds, so this form compiles.
+// `this` in an object-literal generic method is the receiver object —
+// records don't model it.
 const withThis = {
   n: 1,
   m<T>(x: T): T {
@@ -45,10 +45,31 @@ const withThis = {
 };
 console.log(withThis.m(2));
 
-// Generic methods as VALUES: a bound-method reference and an unpinned
-// object-literal reference both erase to the method's dynamic closure, so
-// neither reports here — the fences above are the receiver and override
-// rules, not the value form.
+// The defining literal must sit at module scope: compiled instances are
+// plain module functions and cannot capture the enclosing frame.
+function makeObj(): number {
+  const local = { m<T>(x: T): T { return x; } };
+  return local.m(3);
+}
+console.log(makeObj());
+
+// Static resolution needs a never-reassigned binding: this let is written
+// again with a same-typed literal whose body differs — resolving against
+// the first would silently call the wrong body.
+let rebindable = { m<T>(x: T): T { return x; } };
+console.log(rebindable.m(4));
+rebindable = { m<T>(x: T): T { return x; } };
+
+// An interface-typed receiver has no defining object literal to resolve.
+interface HasGeneric {
+  m<T>(x: T): T;
+}
+const viaInterface: HasGeneric = { m<T>(x: T): T { return x; } };
+console.log(viaInterface.m(5));
+
+// Generic methods as VALUES: bound-method references stay fenced (class
+// receivers), and an unpinned object-literal reference keeps the
+// generic-value fence.
 class Inst {
   g<T>(x: T): T {
     return x;

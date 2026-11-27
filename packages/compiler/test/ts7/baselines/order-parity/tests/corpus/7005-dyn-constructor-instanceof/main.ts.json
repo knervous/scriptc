@@ -1,6 +1,0 @@
-{
- "order": [
-  "<repo>/tests/corpus/7005-dyn-constructor-instanceof/main.ts"
- ],
- "diags": []
-}

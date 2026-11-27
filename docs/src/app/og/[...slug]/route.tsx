@@ -1,7 +1,5 @@
 import { NextResponse } from "next/server";
-import { getPageTitle } from "@/lib/page-titles";
-import { siteName } from "@/lib/site";
-import { renderLabsOg } from "../labs-og";
+import { getPageTitle, renderOgImage } from "../og-image";
 
 export async function GET(_request: Request, { params }: { params: Promise<{ slug: string[] }> }) {
   const { slug } = await params;
@@ -11,5 +9,5 @@ export async function GET(_request: Request, { params }: { params: Promise<{ slu
     return NextResponse.json({ error: "Not found" }, { status: 404 });
   }
 
-  return renderLabsOg({ product: siteName, title });
+  return renderOgImage(title);
 }

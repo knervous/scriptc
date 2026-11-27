@@ -1,7 +1,0 @@
-{
- "order": [
-  "<repo>/tests/corpus/map-checked-boundary/consumer.js",
-  "<repo>/tests/corpus/map-checked-boundary/main.ts"
- ],
- "diags": []
-}

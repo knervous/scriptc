@@ -1,3 +1,4 @@
+// This file was modified from scriptc (Apache-2.0); see MODIFICATIONS.md.
 /* scriptc runtime — exceptions and catch bindings (scr_exception.c). Included
  * by scr_runtime.h, which says where new declarations go. */
 #ifndef SCR_EXCEPTION_H
@@ -123,7 +124,7 @@ void scr_exc_cell_changed(void);
 
 bool scr_exc_pending(void);
 
-#if !((defined(SCR_LIB) && defined(SCR_THREAD_INSTANCES)) || defined(SCR_WORKERS))
+#if !(defined(SCR_THREAD_INSTANCES) || defined(SCR_WORKERS))
 /* Runtime units test the active cell's kind inline, as emitted exception
  * polls do (scr_exc_active is never NULL outside thread-instanced libraries
  * and worker executables, which also poll cross-thread termination in

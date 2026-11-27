@@ -1,3 +1,4 @@
+// This file was modified from scriptc (Apache-2.0); see MODIFICATIONS.md.
 import { CaptureFlow } from "./capture-values.js";
 import {
   typeEquals,
@@ -132,7 +133,7 @@ export function resolveSelfCaptures(mod: IrModule, nodes?: IrNodeIndex): IrModul
     }
   }
   if (resolved.size === 0) return mod;
-  // A closure's jsval body (IrFunction.jsEntry) runs in the closure's own
+  // A closure's jsword body (IrFunction.jsEntry) runs in the closure's own
   // environment, so it drops the same capture.
   for (const fn of mod.functions) {
     const index = resolved.get(fn.name);

@@ -1,6 +1,0 @@
-{
- "order": [
-  "<repo>/tests/corpus/7309-globalthis-buffer-aliases.ts"
- ],
- "diags": []
-}

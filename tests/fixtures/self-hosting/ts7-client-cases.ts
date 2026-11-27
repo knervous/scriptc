@@ -5,14 +5,13 @@ import { join } from "node:path";
 import { Ts7RpcClient } from "../../../packages/compiler/src/frontend/ts7/rpc-client.js";
 import { registerTs7FileSystem } from "../../../packages/compiler/src/frontend/ts7/rpc-filesystem.js";
 import { Ts7Wire } from "../../../packages/compiler/src/frontend/ts7/rpc-wire.js";
-import { AstFile, AstNode, AstNodeList } from "../../../packages/compiler/src/frontend/ts7/ast-node.js";
+import { AstFile, AstNode } from "../../../packages/compiler/src/frontend/ts7/ast-node.js";
 import { AstKind, KIND_NODE_LIST, astChildNames } from "../../../packages/compiler/src/frontend/ts7/ast-schema.generated.js";
 import { decodeAstString } from "../../../packages/compiler/src/frontend/ts7/ast-bytes.js";
 import { SyntaxKind, ScriptTarget, ModuleKind, ModuleResolutionKind, ModuleDetectionKind, syntaxKindName, scriptTargetName, moduleKindName, moduleResolutionKindName, moduleDetectionKindName } from "../../../packages/compiler/src/frontend/ts7/enums.js";
 import { Ts7Session } from "../../../packages/compiler/src/frontend/ts7/session.js";
 import { Ts7Paths, ts7DocumentFile } from "../../../packages/compiler/src/frontend/ts7/session-path.js";
 import { parseSemanticJson } from "../../../packages/compiler/src/frontend/ts7/semantic-json.js";
-import { symbolName, symbolNameOf } from "../../../packages/compiler/src/frontend/ts7/semantic-model.js";
 import { checkSemanticModel, semanticSource } from "./ts7-semantic-cases.js";
 import { checkAstViews } from "./ts7-ast-views.js";
 
@@ -57,7 +56,7 @@ function checkSemanticSurrogateBoundary(): string {
 function checkAst(ast: AstFile, source: string): void {
   check(ast.root.text === source, "decoded source text");
   check(ast.root.getSourceFile() === ast.root, "source identity");
-  check(ast.root.statements?.nodes === ast.root.statements?.nodes, "stable child list nodes");
+  check(ast.root.statements === ast.root.statements, "stable child list");
   for (let index = 1; index < ast.wire.nodeCount; index++) {
     if (ast.wire.kind(index) === KIND_NODE_LIST) { ast.list(index); continue; }
     const node = ast.node(index);
@@ -71,15 +70,15 @@ function checkAst(ast: AstFile, source: string): void {
     check(node.getFullStart() === node.pos && node.getEnd() === node.end, "span endpoints");
     for (const name of astChildNames(node.kind).split(",")) {
       const child = node.child(name!);
-      if (child instanceof AstNodeList) {
-        for (const item of child.nodes) check(item.parent === node, "list child parent");
+      if (Array.isArray(child)) {
+        for (const item of child) check(item.parent === node, "list child parent");
       } else if (child !== undefined) check(child.parent === node, "named child parent");
     }
     const seen: AstNode[] = [];
     node.forEachChild((child) => { seen.push(child); });
     check(node.forEachChild((child) => child.index) === seen[0]?.index, "visitor early return");
     let listElements = 0;
-    node.forEachChild(() => {}, (list) => { listElements += list.nodes.length; });
+    node.forEachChild(() => {}, (list) => { listElements += list.length; });
     check(listElements <= seen.length, "array visitor");
     for (const doc of node.jsDoc ?? []) check(doc.kind === AstKind.JSDoc, "JSDoc children");
   }
@@ -172,10 +171,8 @@ export function runTs7Client(client: Ts7RpcClient, directory: string, report: st
   const windowsPaths = new Ts7Paths("C:/Work", false);
   check(windowsPaths.canonical("..\\Lib\\File.ts") === "c:/lib/file.ts", "Windows path identity");
   check(new Ts7Paths("/work", true).canonical("bundled:///lib.esnext.d.ts") === "bundled:///lib.esnext.d.ts", "bundled path identity");
-  // The pinned SDK's documentURIToFileName keeps the volume's own case; the
-  // protocol path's canonical form folds it where the server is insensitive.
-  check(ts7DocumentFile({uri: "file:///C%3A/dir/a%20b.ts"}) === "C:/dir/a b.ts", "file URI decoding");
-  check(ts7DocumentFile({uri: "untitled:Untitled-1"}) === "^/~ts-uri~/untitled/ts-nul-authority/Untitled-1", "virtual URI decoding");
+  check(ts7DocumentFile({uri: "file:///C%3A/dir/a%20b.ts"}) === "c:/dir/a b.ts", "file URI decoding");
+  check(ts7DocumentFile({uri: "untitled:Untitled-1"}) === "^/untitled/ts-nul-authority/Untitled-1", "virtual URI decoding");
 
   function protocolPath(path: string): string {
     return process.platform === "win32" ? path.split("\\").join("/") : path;
@@ -193,7 +190,6 @@ export function runTs7Client(client: Ts7RpcClient, directory: string, report: st
   content += semanticSource();
   content += checkerSource();
   let reads = 0;
-  // The harness starts the pinned server, which speaks 7.1's callback replies.
   registerTs7FileSystem(client, {
     readFile: (path) => {
       reads++;
@@ -210,7 +206,7 @@ export function runTs7Client(client: Ts7RpcClient, directory: string, report: st
     directoryExists: () => undefined,
     realpath: () => undefined,
     getAccessibleEntries: () => undefined,
-  }, () => true);
+  });
 
   const session = new Ts7Session(client, true);
   try {
@@ -245,25 +241,20 @@ export function runTs7Client(client: Ts7RpcClient, directory: string, report: st
     check(session.parseConfigFile(configPath).options["strict"] === true, "raw config option decoding");
     const uri = "file:///" + file.replace(/^\//, "");
     check(project.program.getSourceFile({uri}) === root, "document URI cache identity");
-    check(project.program.getSourceFile(hidden) === undefined, "missing source response");
-    const sourceRequests = client.timing().requests;
-    check(project.program.getSourceFile(file) === root, "snapshot source lookup");
-    check(project.program.getSourceFile(hidden) === undefined, "snapshot missing lookup");
-    check(client.timing().requests === sourceRequests, "source hits and misses do not repeat requests");
     check(project.program.getSourceFileMetadata(file)!.isDefaultLibrary === false, "source metadata");
     check(!project.program.isSourceFileFromExternalLibrary(root) && !project.program.isSourceFileDefaultLibrary(root), "source library flags");
     checkAst(tree, content);
-    const statements = tree.root.statements!.nodes;
-    check(statements[1]!.declarationList!.declarations!.nodes[0]!.initializer!.text === "\uFEFFhéllo 🌍", "string BOM retained");
+    const statements = tree.root.statements!;
+    check(statements[1]!.declarationList!.declarations![0]!.initializer!.text === "\uFEFFhéllo 🌍", "string BOM retained");
     const box = statements[2]!;
-    check(box.getStart(undefined, true) < box.getStart() && box.members!.nodes.length === 2, "class JSDoc and members");
-    check(box.members!.nodes[0]!.modifierFlags !== 0, "readonly modifier flag");
-    check(statements[3]!.declarationList!.declarations!.nodes[0]!.initializer!.elements!.nodes.length === 40, "long native node list");
-    const template = statements[4]!.declarationList!.declarations!.nodes[0]!.initializer!;
+    check(box.getStart(undefined, true) < box.getStart() && box.members!.length === 2, "class JSDoc and members");
+    check(box.members![0]!.modifierFlags !== 0, "readonly modifier flag");
+    check(statements[3]!.declarationList!.declarations![0]!.initializer!.elements!.length === 40, "long native node list");
+    const template = statements[4]!.declarationList!.declarations![0]!.initializer!;
     check(template.head!.text === "head\n" && template.head!.rawText === "head\\n", "cooked and raw template text");
     check(project.program.getSemanticDiagnostics(file).length === 0, "valid program diagnostics");
     check(project.program.getSyntacticDiagnostics(file).length === 0 && project.program.getBindDiagnostics(file).length === 0, "parse and bind diagnostics");
-    const declaration = root.statements.nodes[0]!.declarationList!.declarations?.nodes[0]!;
+    const declaration = root.statements![0]!.declarationList!.declarations![0]!;
     const identifier = declaration.name!;
     const checker = project.checker;
     const ownedType = checker.getTypeAtLocation(identifier)!;
@@ -271,7 +262,7 @@ export function runTs7Client(client: Ts7RpcClient, directory: string, report: st
     const typeText = checker.typeToString(ownedType);
     check(checker.getTypeAtPosition(file, content.indexOf("answer")) === ownedType, "semantic type identity");
     check(checker.getSymbolAtPosition(file, content.indexOf("answer")) === ownedSymbol, "semantic symbol identity");
-    check(ownedSymbol.declarationHandles[0]!.resolve() === declaration, "semantic declaration identity");
+    check(ownedSymbol.declarations[0]!.resolve() === declaration, "semantic declaration identity");
     check(typeText === "42" && ownedType.isNumberLiteralType() && ownedType.value === 42, "semantic literal metadata");
     // The semantic exercise disposes its graph; the session still owns the
     // server snapshot and its program until explicit snapshot disposal.
@@ -317,7 +308,7 @@ export function runTs7Client(client: Ts7RpcClient, directory: string, report: st
     const timing = client.timing();
     check(timing.requests > 20 && timing.callbacks > 0 && reads > 0, "requests and filesystem callbacks executed");
     writeFileSync(report, JSON.stringify({
-      typeText, symbol: symbolName(ownedSymbol), diagnostics: diagnostics.map((diagnostic) => diagnostic.code),
+      typeText, symbol: ownedSymbol.name, diagnostics: diagnostics.map((diagnostic) => diagnostic.code),
       surrogateBoundary: checkSurrogateBoundary(),
       semanticSurrogateBoundary: checkSemanticSurrogateBoundary(), semanticModel: true, sessionLifecycle: true,
       echo: true, binaryAst: true, astIdentity: true, astViews: true, checkerFacade: true, checkerSnapshots: true, virtualFiles: true, retainedSnapshot: true, serverErrorRecovery: true, protocolFailures: true,

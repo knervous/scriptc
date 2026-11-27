@@ -1,7 +1,0 @@
-{
- "order": [
-  "<repo>/tests/corpus/cjs-module-from-esm-entry/child.cjs",
-  "<repo>/tests/corpus/cjs-module-from-esm-entry/main.mjs"
- ],
- "diags": []
-}

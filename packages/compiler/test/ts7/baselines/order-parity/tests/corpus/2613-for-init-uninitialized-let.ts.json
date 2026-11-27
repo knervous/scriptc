@@ -1,6 +1,0 @@
-{
- "order": [
-  "<repo>/tests/corpus/2613-for-init-uninitialized-let.ts"
- ],
- "diags": []
-}

@@ -1,6 +1,0 @@
-{
- "order": [
-  "<repo>/tests/corpus/5068-global-var-let-const-updates.ts"
- ],
- "diags": []
-}

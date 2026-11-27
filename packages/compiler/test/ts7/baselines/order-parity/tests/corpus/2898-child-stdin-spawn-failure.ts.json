@@ -1,6 +1,0 @@
-{
- "order": [
-  "<repo>/tests/corpus/2898-child-stdin-spawn-failure.ts"
- ],
- "diags": []
-}

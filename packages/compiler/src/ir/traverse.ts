@@ -1,3 +1,4 @@
+// This file was modified from scriptc (Apache-2.0); see MODIFICATIONS.md.
 import type { IrExpr, IrModule, IrStmt, IrType, SrcLoc } from "./ir.js";
 
 // Child lists are walked with these loops rather than with `every` or `map`
@@ -240,6 +241,7 @@ export function everyTypeChild(node: IrType, visit: (node: IrType) => boolean): 
     case "union":
     case "dyn":
     case "jsval":
+    case "jsword":
     case "caught":
     case "undefinedT":
     case "nullT":
@@ -479,6 +481,8 @@ export function everyExprChild(
       return expr(node.obj);
     case "recordKeyGet":
       return expr(node.obj) && expr(node.key);
+    case "dynFromJsval":
+      return expr(node.value);
     case "dynInvoke":
       return (
         expr(node.recv) &&
@@ -534,6 +538,14 @@ export function everyExprChild(
     case "intrinsic":
       return everyOf(node.args, expr);
     case "jsonStringify":
+      return expr(node.value);
+    case "jsMarshal":
+      return expr(node.value);
+    case "jsOp":
+      return node.args.every((child) => expr(child));
+    case "jsExit":
+      return expr(node.value);
+    case "jsBridgePromise":
       return expr(node.value);
   }
   node satisfies never;
@@ -1044,6 +1056,9 @@ export function mapExprChildren(
       if (kept2(a, node.obj, b, node.key)) return node;
       return { ...node, obj: a, key: b };
     }
+    // The fork's island value -> dyn conversion.
+    case "dynFromJsval":
+      return { ...node, value: expr(node.value) };
     case "dynInvoke": {
       a = expr(node.recv);
       optional = node.calleeNameValue === undefined ? undefined : expr(node.calleeNameValue);
@@ -1182,6 +1197,15 @@ export function mapExprChildren(
       if (kept(a, node.value)) return node;
       return { ...node, value: a };
     }
+    // The fork's island operations.
+    case "jsMarshal":
+      return { ...node, value: expr(node.value) };
+    case "jsOp":
+      return { ...node, args: node.args.map((child) => expr(child)) };
+    case "jsExit":
+      return { ...node, value: expr(node.value) };
+    case "jsBridgePromise":
+      return { ...node, value: expr(node.value) };
   }
   node satisfies never;
   throw new Error("unhandled IR node");

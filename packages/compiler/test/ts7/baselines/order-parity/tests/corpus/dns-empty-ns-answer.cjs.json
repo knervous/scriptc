@@ -1,6 +1,0 @@
-{
- "order": [
-  "<repo>/tests/corpus/dns-empty-ns-answer.cjs"
- ],
- "diags": []
-}

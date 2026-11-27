@@ -1,7 +1,0 @@
-{
- "order": [
-  "<repo>/tests/corpus/symbol-class-methods/keys.ts",
-  "<repo>/tests/corpus/symbol-class-methods/main.ts"
- ],
- "diags": []
-}

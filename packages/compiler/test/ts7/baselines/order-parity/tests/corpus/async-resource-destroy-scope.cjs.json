@@ -1,6 +1,0 @@
-{
- "order": [
-  "<repo>/tests/corpus/async-resource-destroy-scope.cjs"
- ],
- "diags": []
-}

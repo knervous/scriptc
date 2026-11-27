@@ -1,4 +1,5 @@
 #!/usr/bin/env tsx
+// This file was modified from scriptc (Apache-2.0); see MODIFICATIONS.md.
 // Generates packages/compiler/surface-manifest.json — the machine-readable
 // manifest of the language and stdlib surface the static tier compiles at
 // this release, with stable per-entry ids so tooling can diff two releases
@@ -22,10 +23,7 @@
 // build step) — `pnpm manifest` wires that up.
 import { readFileSync, writeFileSync } from "node:fs";
 import { fileURLToPath } from "node:url";
-import {
-  generateSurfaceManifest,
-  renderSurfaceManifest,
-} from "../packages/compiler/src/coverage/surface-manifest.ts";
+import { generateSurfaceManifest, renderSurfaceManifest } from "../packages/compiler/src/coverage/surface-manifest.ts";
 
 const root = fileURLToPath(new URL("..", import.meta.url));
 const readJson = (path) => JSON.parse(readFileSync(root + path, "utf8"));
@@ -33,21 +31,13 @@ const readJson = (path) => JSON.parse(readFileSync(root + path, "utf8"));
 const version = readJson("packages/cli/package.json").version;
 for (const pkg of [
   "runtime",
-  "runtime-darwin-arm64",
-  "runtime-darwin-x64",
-  "runtime-linux-x64-gnu",
-  "runtime-linux-arm64-gnu",
-  "runtime-linux-x64-musl",
-  "runtime-linux-arm64-musl",
-  "runtime-win32-x64-msvc",
-  "runtime-wasm32-wasi",
-  "llvm-darwin-arm64",
-  "llvm-darwin-x64",
-  "llvm-linux-x64-gnu",
-  "llvm-linux-arm64-gnu",
-  "llvm-linux-x64-musl",
-  "llvm-linux-arm64-musl",
-  "llvm-win32-x64-msvc",
+  "runtime-darwin-arm64", "runtime-darwin-x64",
+  "runtime-linux-x64-gnu", "runtime-linux-arm64-gnu",
+  "runtime-linux-x64-musl", "runtime-linux-arm64-musl",
+  "runtime-win32-x64-msvc", "runtime-wasm32-wasi",
+  "llvm-darwin-arm64", "llvm-darwin-x64",
+  "llvm-linux-x64-gnu", "llvm-linux-arm64-gnu",
+  "llvm-linux-x64-musl", "llvm-linux-arm64-musl", "llvm-win32-x64-msvc",
   "compiler",
 ]) {
   const v = readJson(`packages/${pkg}/package.json`).version;
@@ -80,13 +70,9 @@ if (process.argv.includes("--check")) {
     console.error("surface-manifest.json is stale — run 'pnpm manifest' and commit the result");
     process.exit(1);
   }
-  console.log(
-    `surface-manifest.json is current (${manifest.entries.length} entries, version ${version})`,
-  );
+  console.log(`surface-manifest.json is current (${manifest.entries.length} entries, version ${version})`);
 } else {
   writeFileSync(outPath, rendered);
-  console.log(
-    `wrote packages/compiler/surface-manifest.json (version ${version}, ${manifest.entries.length} entries)`,
-  );
+  console.log(`wrote packages/compiler/surface-manifest.json (version ${version}, ${manifest.entries.length} entries)`);
   for (const [key, n] of [...counts].sort()) console.log(`  ${key}: ${n}`);
 }

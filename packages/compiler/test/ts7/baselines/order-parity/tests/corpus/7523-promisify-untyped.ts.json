@@ -1,6 +1,0 @@
-{
- "order": [
-  "<repo>/tests/corpus/7523-promisify-untyped.ts"
- ],
- "diags": []
-}

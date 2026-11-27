@@ -1,6 +1,0 @@
-{
- "order": [
-  "<repo>/tests/fixtures/strictness/json-any/main.ts"
- ],
- "diags": []
-}

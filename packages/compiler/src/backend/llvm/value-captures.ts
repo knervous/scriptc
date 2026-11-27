@@ -1,3 +1,4 @@
+// This file was modified from scriptc (Apache-2.0); see MODIFICATIONS.md.
 import {
   typeEquals,
   type IrExpr,
@@ -52,7 +53,7 @@ import { everyExprChild, everyStmtChild } from "../../ir/traverse.js";
  * site of G supplies a source that is ready there (a stable local as
  * above, or a capture its creator itself received by value), no site is a
  * signature adapter (the runtime reads an adapter's first capture as a
- * box), and nothing rebinds the capture in G, in the jsval twin that
+ * box), and nothing rebinds the capture in G, in the jsword twin that
  * shares G's environment, or below. */
 export class ValueCaptures {
   private readonly facts = new Map<string, Facts>();
@@ -60,7 +61,7 @@ export class ValueCaptures {
   private readonly quietMemo = new Map<string, boolean>();
   private readonly plainMemo = new Map<string, ReadonlySet<string>>();
   private sites: Map<string, Site[]> | null = null;
-  /** A jsval twin (IrFunction.jsEntry) to the closure body it copies. */
+  /** A jsword twin (IrFunction.jsEntry) to the closure body it copies. */
   private primaries: Map<string, string> | null = null;
 
   constructor(

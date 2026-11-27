@@ -1,3 +1,4 @@
+// This file was modified from scriptc (Apache-2.0); see MODIFICATIONS.md.
 /* scriptc runtime — node:readline (scr_readline.c) and the event-loop entry
  * points (scr_async.c). Included by scr_runtime.h, which says where new
  * declarations go. */
@@ -202,11 +203,35 @@ double scr_now_ms(void); /* the loop's monotonic clock, in ms */
  * already selected and reported exit status 1. */
 bool scr_loop_run(ScrPromise *top_level);
 void scr_loop_commonjs_entry(void);
+/* External I/O hook, polled at loop quiescence like the child registry:
+ * `pending` keeps the loop alive; `poll` makes progress and may SLEEP up
+ * to max_wait_ms (on real fds — socket readiness wakes it early), so the
+ * loop skips its own nanosleep for that turn. One registrant: the dynamic
+ * island (engine promise jobs + in-flight fetch transfers). Static builds
+ * never set it. */
+void scr_loop_set_io(bool (*pending)(void), void (*poll)(double max_wait_ms));
 bool scr_report_unhandled_rejections(void); /* true = exit 1 */
 void scr_discard_unhandled_rejections(void);
+/* The island's unhandled-rejection ledger joins the report above (one
+ * registrant, set at engine boot; static builds never set it): called with
+ * print=true when the static ledger reported nothing, prints its FIRST
+ * never-observed rejection in the same voice, frees the ledger either way,
+ * and returns whether it had any. */
+void scr_loop_set_island_rejections(bool (*fn)(bool print),
+                                    int (*drain_jobs)(void));
+/* The island's earliest armed timer deadline (scr_island_timers_deadline;
+ * HUGE_VAL when none) joins the loop's sleep computation: an armed
+ * AbortSignal.timeout must fire on time while the loop sleeps on socket
+ * readiness, without keeping the loop alive by itself (Node's unref'd
+ * timer). One registrant, set at engine boot; static builds never set it. */
+void scr_loop_set_island_deadline(double (*fn)(void));
 long scr_abandoned_fiber_count(void);
-
-
+/* True while executing on an async fiber (vs the main stack) — the island
+ * sizes its engine stack budget per stack (see scr_island.c). */
+bool scr_on_fiber(void);
+/* Identity of the running fiber (NULL on the main stack) — the island's
+ * stack-anchor bookkeeping tells STACKS apart, not just fiber-vs-main
+ * (a host callback may spawn a fiber that re-enters the engine). */
 void *scr_fiber_self(void);
 void scr_note_abandoned_fibers(long n); /* scr_console.c owns the flag */
 

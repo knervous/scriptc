@@ -1,6 +1,0 @@
-{
- "order": [
-  "<repo>/tests/corpus/9223-callable-own-tostring.ts"
- ],
- "diags": []
-}

@@ -1,6 +1,0 @@
-{
- "order": [
-  "<repo>/tests/corpus/5305-json-stringify-typed-arrays.ts"
- ],
- "diags": []
-}

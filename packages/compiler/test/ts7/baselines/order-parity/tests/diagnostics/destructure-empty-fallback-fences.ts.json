@@ -1,6 +1,0 @@
-{
- "order": [
-  "<repo>/tests/diagnostics/destructure-empty-fallback-fences.ts"
- ],
- "diags": []
-}

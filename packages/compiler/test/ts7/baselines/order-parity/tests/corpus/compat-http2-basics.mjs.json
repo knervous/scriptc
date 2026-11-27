@@ -1,6 +1,0 @@
-{
- "order": [
-  "<repo>/tests/corpus/compat-http2-basics.mjs"
- ],
- "diags": []
-}

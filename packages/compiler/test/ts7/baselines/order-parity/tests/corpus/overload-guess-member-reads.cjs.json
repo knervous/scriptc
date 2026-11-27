@@ -1,6 +1,0 @@
-{
- "order": [
-  "<repo>/tests/corpus/overload-guess-member-reads.cjs"
- ],
- "diags": []
-}

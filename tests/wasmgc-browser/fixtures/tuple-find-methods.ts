@@ -1,0 +1,12 @@
+const items = [{ id: "a", label: "A" }, { id: "b", label: "B" }, { id: "b", label: "C" }] as const;
+console.log(items.find((x) => x.id === "b")?.label);
+console.log(items.find((x) => (x.id as string) === "z")?.label);
+console.log(items.findIndex((x) => x.id === "b"));
+console.log(items.findIndex((x) => (x.id as string) === "z"));
+console.log(items.findLast((x) => x.id === "b")?.label);
+console.log(items.findLastIndex((x) => x.id === "b"));
+console.log(items.findIndex((_x, i) => i === 2));
+const pair = [1, "two"] as const;
+console.log(pair.findIndex((v) => typeof v === "string"));
+console.log(pair.find((v) => typeof v === "string"));
+console.log(pair.find((v) => (v as unknown) === 9));

@@ -1,6 +1,0 @@
-{
- "order": [
-  "<repo>/tests/corpus/dyn-class-key-dispatch.ts"
- ],
- "diags": []
-}

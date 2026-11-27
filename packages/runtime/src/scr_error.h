@@ -1,3 +1,4 @@
+// This file was modified from scriptc (Apache-2.0); see MODIFICATIONS.md.
 /* scriptc runtime — class hierarchies, class objects, and the Error,
  * DOMException and AggregateError objects (scr_error.c, scr_object.c).
  * Included by scr_runtime.h, which says where new declarations go. */
@@ -89,6 +90,26 @@ void scr_dyn_bag_set(struct ScrDyn *bag, ScrStr *key, struct ScrDyn *value, stru
  * monomorphic-struct divergence). scr_object.c. */
 void scr_record_key_miss(ScrStr *k);
 
+/* ── error objects (scr_error.c) ──────────────────────────────────────
+ * `Error` and its standard subclasses are a
+ * RUNTIME-PROVIDED hierarchy: ScrError lays out exactly like a compiler-
+ * emitted hierarchy class (rc, vt, then the fields), so `class MyError
+ * extends Error` compiles as an ordinary derived class whose struct embeds
+ * this prefix, and every vtable mechanism (base-typed release, preorder-
+ * interval instanceof) applies unchanged.
+ *
+ * The builtin classes' vtables live HERE as mutable globals because
+ * the runtime itself creates error instances (JSON/dynCheck/regex failures,
+ * the island bridge) — but their preorder intervals depend on the whole
+ * program's class forest, which only the compiler knows. Every emitted
+ * main() stamps pre/post into these vtables before user code runs (the
+ * defaults below only cover the moments before that), so runtime-made and
+ * compiler-made error objects always agree on instanceof.
+ *
+ * Cycle capability is hierarchy-uniform and program-dependent (a user
+ * subclass may hold closures): when the compiler's fixpoint marks the Error
+ * hierarchy cycle-capable, main() also calls scr_error_set_traced() and
+ * the runtime allocates its own error objects with collector headers. */
 typedef struct ScrError {
   size_t rc;
   const ScrVt *vt;
@@ -137,7 +158,7 @@ enum {
   SCR_ERR_COUNT = 11,
 };
 
-extern SCR_TL ScrVt scr_error_vts[SCR_ERR_COUNT]; /* indexed by SCR_ERR_*; main() stamps pre/post */
+extern ScrVt scr_error_vts[SCR_ERR_COUNT]; /* indexed by SCR_ERR_*; main() stamps pre/post */
 
 struct ScrDyn; /* full declaration below (the checked-dynamic tree section) */
 
@@ -257,8 +278,8 @@ void scr_error_delete_cause(ScrError *e);
 /* ECMA Error.prototype.toString: "", name, message, or "name: message".
  * Borrows e, returns +1. */
 ScrStr *scr_error_to_string(ScrError *e);
-void scr_error_install_message_reader(ScrStr *(*reader)(ScrError *));
-void scr_error_install_name_reader(ScrStr *(*reader)(ScrError *));
+void scr_error_install_message_view(struct ScrDyn *(*reader)(ScrError *));
+void scr_error_install_name_view(struct ScrDyn *(*reader)(ScrError *));
 ScrStr *scr_error_default_name(const ScrError *e);
 /* The `name` a read of the error gives: its own, or what its class answers
  * (a `name` getter), or the inherited default. +1, or NULL with the
@@ -285,7 +306,7 @@ bool scr_error_is(const void *obj);
 
 /* Throw a fresh builtin error through the exception cell. scr_throw_error
  * takes ownership of message; the _msg form copies the C string. The _named
- * form takes ownership of both strings and picks the
+ * form (island bridge) takes ownership of both strings and picks the
  * builtin vtable whose class name matches `name` (Error otherwise). */
 SCR_COLD void scr_throw_error(int kind, ScrStr *message);
 SCR_COLD void scr_throw_error_msg(int kind, const char *message, size_t len);

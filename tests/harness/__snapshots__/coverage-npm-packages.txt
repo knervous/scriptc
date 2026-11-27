@@ -1,16 +1,10 @@
-scriptc coverage tests/corpus/native-npm-imports/main.ts
+scriptc coverage tests/diagnostics/npm-imports/main.ts
 
-  statements analyzed   14
-  compile statically    14  (100%)
-    in dynamic tier     1  (operate on values typed only at runtime; --explain-dynamic lists them)
+  statements analyzed   6
+  compile statically    0  (0%)
 
-  npm package compilation:
-    mathkit      static
-    @acme/units  static
-
-  fully static — all analyzed statements compile to native code.
-
-  trusts unverified types   1 checked conversion on 1 claim (compiles; a value that contradicts its claimed type throws a TypeError at the conversion)
-      ×1  mathkit@1.0.0, compiled from its JavaScript: 1 conversion trusts 1 declaration of its own
-          at tests/corpus/native-npm-imports/node_modules/mathkit/index.js:14:13
-          fix: run the package in a Node island (--node-island=mathkit), or patch the declaration that is wrong: scriptc types patch mathkit <selector> '<type>' (--print=diagnostics lists each declaration's selector)
+  runs with --dynamic   9 sites (embeds a JS engine, ~620KB — static stays the default)
+      ×6  values from the 'mathkit' package run in the embedded dynamic engine, which this build does not include                                    SC2013
+      ×1  importing 'mathkit' requires the embedded dynamic engine, which this build does not include — the package's implementation runs there      SC2013
+      ×1  importing '@acme/units' requires the embedded dynamic engine, which this build does not include — the package's implementation runs there  SC2013
+      ×1  values from the '@acme/units' package run in the embedded dynamic engine, which this build does not include                                SC2013

@@ -1,3 +1,4 @@
+// This file was modified from scriptc (Apache-2.0); see MODIFICATIONS.md.
 import { dirname } from "node:path";
 import { fileURLToPath } from "node:url";
 process.env.SCRIPTC_RUNTIME_PACK_ROOT = dirname(dirname(fileURLToPath(import.meta.url)));
@@ -34,6 +35,7 @@ process.env.SCRIPTC_RUNTIME_PACK_CONFIG = JSON.stringify({
     "scr_webcrypto_aes.c",
     "scr_wasm.c",
     "scr_fetch.c",
+    "scr_net_island.c",
   ],
   omitArchives: ["mbedtls"],
   compiler: "zig",

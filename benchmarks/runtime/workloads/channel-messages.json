@@ -1,7 +1,0 @@
-{
-  "entry": "workloads/channel-messages.ts",
-  "args": [
-    "200000"
-  ],
-  "scaleArg": 0
-}

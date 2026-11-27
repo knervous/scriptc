@@ -1,6 +1,0 @@
-{
- "order": [
-  "<repo>/tests/corpus/constructor-returns-this-super.js"
- ],
- "diags": []
-}

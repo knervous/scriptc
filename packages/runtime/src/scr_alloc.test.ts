@@ -33,6 +33,15 @@ test.each([
     ["-fsanitize=undefined", "-DSCR_SA_WINDOW_TEST_CHUNKS=4", "-DSCR_WORKERS", "-pthread"],
     {},
   ],
+  // Thread-instanced executables: per-thread arenas on Windows, the system
+  // allocator elsewhere (scr_rc.h).
+  [
+    process.platform === "win32" ? "size-class threads" : "system",
+    ["-DSCR_THREAD_INSTANCES", "-pthread"],
+    {},
+  ],
+  // The way back to the system allocator.
+  ["system", ["-DSCR_NO_SMALL_ALLOC"], {}],
 ])("small-object allocator contracts hold (%s, %j, %j)", async (mode, sanitize, extraEnv) => {
   const scratch = await mkdtemp(join(tmpdir(), "scriptc-alloc-"));
   try {

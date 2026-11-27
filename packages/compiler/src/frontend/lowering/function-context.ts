@@ -1,3 +1,4 @@
+// This file was modified from scriptc (Apache-2.0); see MODIFICATIONS.md.
 import type * as ts from "../ts7/adapter.js";
 import type { IrBindingSource, IrLocal, IrParam, IrStmt, IrType } from "../../ir/ir.js";
 import { InternalCompilerError } from "../../errors.js";
@@ -12,22 +13,6 @@ export interface FnCtx {
   /** Lexical this has no checker symbol and one binding per function.
    * Direct parameters and threaded captures use this same slot. */
   thisLocal: IrLocal | null;
-  /** A constructor whose `this` a base constructor's returned instance may
-   * rebind: the statements it runs where it finishes (a bare `return`
-   * included), which publish the instance it ends with
-   * (constructor-returns.ts publishConstructorResult). `site` is the
-   * completion the statements run at: the constructor's own `return`, or
-   * the end of a `finally` block, where a construction nested in the block
-   * may have published its own result. */
-  constructorEpilogue?: (site: "return" | "finally") => IrStmt[];
-  /** Set for a constructor that can answer a value of its own: records that
-   * such a return published the instance it answers, so a `finally` that
-   * runs afterwards does not publish this constructor's `this` over it
-   * (constructor-returns.ts lowerConstructorReturn). */
-  constructorValueReturn?: IrLocal;
-  /** Set when a lookup of `this` returned thisLocal, from this function's
-   * body or from a nested function that captures it. */
-  thisRead?: true;
   /** Derived constructors initialize fields at the actual super() site,
    * including sites nested in a try/finally block. Nested functions do not
    * inherit this hook. */
@@ -48,9 +33,6 @@ export interface FnCtx {
   /** Parent-function localIds feeding each capture, parallel to captures. */
   captureSources: string[];
   captureBySymbol: Map<ts.Symbol, IrLocal>;
-  /** The same capture entries keyed by the enclosing context's local, for
-   * slots that have no checker symbol (lowering-owned hidden locals). */
-  captureByLocal: Map<IrLocal, IrLocal>;
   /** Named function expressions/declarations: the function's own name
    * symbol. Self-references become `selfRef` (NOT a capture — a box holding
    * its own closure would be an RC cycle and leak). */
@@ -65,21 +47,8 @@ export interface FnCtx {
    * rest param): the synthetic trailing dyn-array param `arguments`
    * reads resolve to. */
   argumentsLocal?: IrLocal | null;
-  /** The count `arguments.length` reads in a top-level function declaration
-   * that is also used as a value (argument-counts.ts). */
-  argumentCount?: IrLocal;
   /** Arrows inherit the nearest ordinary function's arguments binding. */
   inheritsArguments?: boolean;
-  /** A function lowered on demand on top of an unrelated caller's frames
-   * (a generic instance): lexical `this` resolution stops here, so the
-   * body sees what it sees when lowered alone. */
-  thisBoundary?: true;
-  /** Tuple bindings of this function that are only forwarded
-   * (typed-arguments.ts onlyForwarded): binding local id → the native
-   * slots forwarding reads. Such a binding is never materialized. Local ids
-   * are unique within one function only, and nested functions never read
-   * these bindings (a read there needs the tuple). */
-  pureTuples: Map<string, IrLocal[]>;
   /** Declared return type — lets `return` detect record-shape mismatches
    * (SC2002) before the validator would ICE on them. */
   returnType: IrType;
@@ -88,11 +57,6 @@ export interface FnCtx {
    * and record themselves here; the post-pass unifies the types and wraps
    * each return onto the settled one. `returnType` holds the DYN pin. */
   inferReturn?: { entries: { stmt: IrStmt; node: ts.Expression | null }[] } | null;
-  /** Set on an async arrow that an enclosing field initializer calls on the
-   * spot: `in this` tests nested inside it may sit on either side of a
-   * suspension, so they answer from this flag, which every await in the
-   * arrow sets. */
-  suspendedFlag?: IrLocal;
   /** Enclosing jump targets, innermost last. `labels` carries the source
    * statement's JS label names so labeled break/continue resolve. Finally
    * regions do not appear here: the backends route every abrupt completion
@@ -118,8 +82,6 @@ export function newFnCtx(
     captures: lifted ? [] : null,
     captureSources: [],
     captureBySymbol: new Map(),
-    captureByLocal: new Map(),
-    pureTuples: new Map(),
     selfSymbol,
     selfType,
     returnType,
@@ -156,14 +118,8 @@ export function declareContextThis(ctx: FnCtx, type: IrType): IrLocal {
 }
 
 /** Look up a binding without allocating captures or boxing its source. */
-export function bindingInContext(
-  ctx: FnCtx,
-  symbol: ts.Symbol | "arguments" | undefined,
-): IrLocal | null {
-  if (symbol === undefined) {
-    if (ctx.thisLocal !== null) ctx.thisRead = true;
-    return ctx.thisLocal;
-  }
+export function bindingInContext(ctx: FnCtx, symbol: ts.Symbol | "arguments" | undefined): IrLocal | null {
+  if (symbol === undefined) return ctx.thisLocal;
   if (symbol === "arguments") return ctx.argumentsLocal ?? null;
   for (let i = ctx.scopes.length - 1; i >= 0; i--) {
     const local = ctx.scopes[i]!.get(symbol);
@@ -192,44 +148,22 @@ export function captureContextBinding(
   onCapture: (parent: IrLocal, child: IrLocal) => void,
 ): ContextBindingResult {
   const current = stack[stack.length - 1];
-  if (current === undefined)
-    throw new InternalCompilerError("lowerer bug: no active function context");
+  if (current === undefined) throw new InternalCompilerError("lowerer bug: no active function context");
   const direct = bindingInContext(current, symbol);
   if (direct !== null) return { local: direct, origin: direct, error: null };
-  let floor = 0;
-  if (symbol === undefined) {
-    for (let depth = stack.length - 1; depth >= 0; depth--) {
-      if (stack[depth]!.thisBoundary) {
-        floor = depth;
-        break;
-      }
-    }
-  }
-  for (let depth = stack.length - 2; depth >= floor; depth--) {
+  for (let depth = stack.length - 2; depth >= 0; depth--) {
     const origin = bindingInContext(stack[depth]!, symbol);
     if (origin === null) continue;
-
+    // dyn/jsval retain their existing untraced box contract. Typed
     // references use the backends' box tracing for capture cycles.
     origin.boxed = true;
     let parentEntry = origin;
     for (let j = depth + 1; j < stack.length; j++) {
       const ctx = stack[j]!;
-      let entry =
-        symbol === undefined
-          ? ctx.thisLocal
-          : symbol === "arguments"
-            ? ctx.argumentsLocal
-            : ctx.captureBySymbol.get(symbol);
+      let entry = symbol === undefined ? ctx.thisLocal : symbol === "arguments" ? ctx.argumentsLocal : ctx.captureBySymbol.get(symbol);
       if (!entry) {
         if (ctx.captures === null) return { local: null, origin, error: "plain" };
-        entry = declareContextLocal(
-          ctx,
-          origin.name,
-          origin.type,
-          origin.mutable,
-          undefined,
-          origin.source,
-        );
+        entry = declareContextLocal(ctx, origin.name, origin.type, origin.mutable, undefined, origin.source);
         entry.boxed = true;
         if (origin.tdz) entry.tdz = true;
         if (symbol === undefined) ctx.thisLocal = entry;
@@ -244,44 +178,6 @@ export function captureContextBinding(
     return { local: parentEntry, origin, error: null };
   }
   return { local: null, origin: null, error: null };
-}
-
-/** Thread a function-scope slot that has no checker symbol (a value the
- * lowering keeps for itself, such as a condition saved at a declaration)
- * into the current function, the way captureContextBinding threads a source
- * binding: the slot is boxed at its owner and one capture per function in
- * between is allocated. Returns null when the owner is not an enclosing
- * context or an intermediate function cannot capture. */
-export function captureContextLocal(stack: FnCtx[], origin: IrLocal, owner: FnCtx): IrLocal | null {
-  const current = stack[stack.length - 1];
-  if (current === undefined) return null;
-  if (current === owner) return origin;
-  const depth = stack.lastIndexOf(owner);
-  if (depth < 0) return null;
-  origin.boxed = true;
-  let parentEntry = origin;
-  for (let j = depth + 1; j < stack.length; j++) {
-    const ctx = stack[j]!;
-    let entry = ctx.captureByLocal.get(origin);
-    if (!entry) {
-      if (ctx.captures === null) return null;
-      entry = declareContextLocal(
-        ctx,
-        origin.name,
-        origin.type,
-        origin.mutable,
-        undefined,
-        origin.source,
-      );
-      entry.boxed = true;
-      if (origin.tdz) entry.tdz = true;
-      ctx.captureByLocal.set(origin, entry);
-      ctx.captures.push({ localId: entry.id, name: entry.name, type: entry.type });
-      ctx.captureSources.push(parentEntry.id);
-    }
-    parentEntry = entry;
-  }
-  return parentEntry;
 }
 
 export function captureContextArguments(stack: FnCtx[]): IrLocal | null {

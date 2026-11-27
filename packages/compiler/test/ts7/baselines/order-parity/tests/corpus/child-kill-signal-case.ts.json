@@ -1,6 +1,0 @@
-{
- "order": [
-  "<repo>/tests/corpus/child-kill-signal-case.ts"
- ],
- "diags": []
-}

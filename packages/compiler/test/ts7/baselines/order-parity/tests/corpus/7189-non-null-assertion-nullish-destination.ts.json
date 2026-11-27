@@ -1,6 +1,0 @@
-{
- "order": [
-  "<repo>/tests/corpus/7189-non-null-assertion-nullish-destination.ts"
- ],
- "diags": []
-}

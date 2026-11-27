@@ -1,3 +1,4 @@
+// This file was modified from scriptc (Apache-2.0); see MODIFICATIONS.md.
 /* Object guard groups (shape-tier design 3.3): runs of constant-key reads
  * and stores on one dynamic subject inside one straight-line piece of a
  * function.
@@ -34,7 +35,7 @@
  * through the guard's entry directly.
  *
  * What is not a clobber (design 3.3): grouped reads, grouped stores of a
- * primitive into a key the group holds, jsval arithmetic and comparison
+ * primitive into a key the group holds, jsword arithmetic and comparison
  * fast paths, local moves and constants, number boxing. Every
  * other call may run user code that adds, deletes, defines, freezes or
  * replaces a property, so the default for an unrecognized node is a

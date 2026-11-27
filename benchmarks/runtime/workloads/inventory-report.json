@@ -1,7 +1,0 @@
-{
-  "entry": "../builds/inventory-report/main.ts",
-  "input": "inventory-report",
-  "args": [
-    "{input}"
-  ]
-}

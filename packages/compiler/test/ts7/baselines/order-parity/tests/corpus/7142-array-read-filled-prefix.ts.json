@@ -1,6 +1,0 @@
-{
- "order": [
-  "<repo>/tests/corpus/7142-array-read-filled-prefix.ts"
- ],
- "diags": []
-}

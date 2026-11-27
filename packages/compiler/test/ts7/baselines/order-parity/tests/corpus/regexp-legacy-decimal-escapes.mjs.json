@@ -1,6 +1,0 @@
-{
- "order": [
-  "<repo>/tests/corpus/regexp-legacy-decimal-escapes.mjs"
- ],
- "diags": []
-}

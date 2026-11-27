@@ -1,30 +1,37 @@
-import { readFileSync, readdirSync, statSync } from "node:fs";
-import { join, relative } from "node:path";
-import { fileURLToPath } from "node:url";
 import { expect, test, vi } from "vitest";
-import {
-  DYN,
-  F64,
-  NULL_T,
-  STRING,
-  UNDEFINED_T,
-  VOID,
-  type IrFunction,
-  type IrType,
-} from "../../ir/ir.js";
+import { BOOL, F64, JSVAL, NULL_T, STRING, UNDEFINED_T, VOID, type IrExpr, type IrFunction, type IrStmt, type IrType } from "../../ir/ir.js";
 import type { Node, Program, SourceFile, Symbol, Type } from "../ts7/adapter.js";
-import { Lowerer } from "./lowerer.js";
-import { UnionRegistry } from "../type-mapper.js";
+import { Lowerer, stmtUsesIsland } from "./lowerer.js";
 import { classMethodValue } from "./class-method-values.js";
 
 const loc = { file: "island.ts", start: 0, end: 1 };
+const island: IrExpr = { kind: "jsOp", op: "undefLit", args: [], type: JSVAL, loc };
+const statement: IrStmt = { kind: "exprStmt", expr: island, loc };
+
+test("accounts only the expressions owned by the current source statement", () => {
+  expect(stmtUsesIsland(statement)).toBe(true);
+  expect(stmtUsesIsland([statement])).toBe(true);
+  expect(stmtUsesIsland({ kind: "block", body: [statement], loc })).toBe(false);
+  expect(stmtUsesIsland({ kind: "if", cond: { kind: "boolLit", value: true, type: BOOL, loc }, then: [statement], else_: null, loc })).toBe(false);
+  expect(stmtUsesIsland({ kind: "if", cond: { kind: "jsExit", value: island, type: BOOL, loc }, then: [], else_: null, loc })).toBe(true);
+});
+
+test("inspects expression results without recounting embedded statement lists", () => {
+  const expr: IrExpr = { kind: "seqExpr", stmts: [statement], result: { kind: "numLit", value: 0, type: F64, loc }, type: F64, loc };
+  expect(stmtUsesIsland({ kind: "exprStmt", expr, loc })).toBe(false);
+  expr.result = { kind: "jsExit", value: island, type: F64, loc };
+  expect(stmtUsesIsland({ kind: "exprStmt", expr, loc })).toBe(true);
+});
+
+test("retains accounting for island library calls and generated loop conditions", () => {
+  const call: IrExpr = { kind: "libCall", fn: "island.eval", args: [], type: JSVAL, loc };
+  const loop: IrStmt = { kind: "for", init: null, cond: { kind: "jsExit", value: call, type: BOOL, loc }, update: null, body: [], loc };
+  expect(stmtUsesIsland({ kind: "block", body: [loop], loc })).toBe(true);
+  expect(stmtUsesIsland({ kind: "exprStmt", expr: { kind: "numLit", value: 1, type: F64, loc }, loc })).toBe(false);
+});
+
 const record = (shapeId: string): IrType => ({ kind: "record", shapeId });
-const context = () =>
-  new Lowerer(
-    { getTypeChecker: () => ({}), getImplementationSourceFiles: () => [] } as unknown as Program,
-    { fileName: loc.file } as SourceFile,
-    [],
-  );
+const context = () => new Lowerer({ getTypeChecker: () => ({}) } as Program, { fileName: loc.file } as SourceFile, [], false);
 
 test("reuses complete copy routes without repeating discriminator planning", () => {
   const lowerer = context();
@@ -41,7 +48,7 @@ test("reuses complete copy routes without repeating discriminator planning", () 
   expect(plan).not.toHaveBeenCalled();
   expect(lowerer.liftedFns.filter((fn) => fn.name === helper)).toHaveLength(1);
   const recursive = {} as Type;
-  lowerer.shapes.recursiveRef(recursive, () => "Recursive");
+  lowerer.shapes.recursiveRef(recursive);
   lowerer.shapes.finalizeRecursive(recursive, [{ name: "kind", type: STRING }]);
   expect(lowerer.unionRetagHelper(from, to, loc)).toBe(helper);
   expect(plan).toHaveBeenCalled();
@@ -59,51 +66,27 @@ test("keeps narrowing evidence local to each conversion request", () => {
   expect(lowerer.unionRetagHelper(from, to, loc, new Set([1, 0]))).toBe(helper);
 });
 
-test("a class route checks the stored base arm before viewing the subclass", () => {
-  const lowerer = context();
-  const animal: IrType & { kind: "object" } = { kind: "object", className: "Animal" };
-  const dog: IrType & { kind: "object" } = { kind: "object", className: "Dog" };
-  const from = lowerer.unions.intern([animal, F64]);
-  const to = lowerer.unions.intern([dog, F64]);
-  const routes = new Map([
-    [lowerer.armTag(from, animal), [{ tag: lowerer.armTag(to, dog), arm: dog }]],
-  ]);
-  const helper = lowerer.unionRetagHelper(from, to, loc, undefined, routes);
-  expect(helper).not.toBeNull();
-  const body = JSON.stringify(lowerer.liftedFns.find((fn) => fn.name === helper)?.body);
-  expect(body).toContain('"kind":"instanceOf"');
-  expect(body).toContain('"kind":"downcast"');
-  expect(lowerer.unionRetagHelper(from, to, loc, undefined, routes)).toBe(helper);
-  // Without the route the base arm has no destination and the plan declines.
-  expect(lowerer.unionRetagHelper(from, to, loc)).toBeNull();
-});
-
 test("replans after a recursive union gains its final arms", () => {
   const lowerer = context();
   const recursive = {} as Type;
   const from = lowerer.unions.intern([UNDEFINED_T, NULL_T]);
-  const to = lowerer.unions.recursiveRef(recursive, () => "Recursive");
+  const to = lowerer.unions.recursiveRef(recursive);
   const trapped = lowerer.unionRetagHelper(from, to, loc);
   expect(trapped).not.toBeNull();
   lowerer.unions.finalizeRecursive(recursive, [UNDEFINED_T]);
   const completed = lowerer.unionRetagHelper(from, to, loc);
   expect(completed).not.toBeNull();
   expect(completed).not.toBe(trapped);
-  expect(lowerer.liftedFns.find((fn) => fn.name === completed)?.body).toEqual(
-    expect.arrayContaining([
-      expect.objectContaining({
-        kind: "if",
-        then: expect.arrayContaining([expect.objectContaining({ kind: "return" })]),
-      }),
-    ]),
-  );
+  expect(lowerer.liftedFns.find((fn) => fn.name === completed)?.body).toEqual(expect.arrayContaining([
+    expect.objectContaining({ kind: "if", then: expect.arrayContaining([expect.objectContaining({ kind: "return" })]) }),
+  ]));
 });
 
 test("rechecks width conversions after recursive record definitions settle", () => {
   const lowerer = context();
   const recursive = {} as Type;
   const source = record(lowerer.shapes.intern([{ name: "value", type: F64 }]));
-  const target = record(lowerer.shapes.recursiveRef(recursive, () => "Recursive"));
+  const target = record(lowerer.shapes.recursiveRef(recursive));
   const from = lowerer.unions.intern([source, UNDEFINED_T]);
   const to = lowerer.unions.intern([target, NULL_T]);
   expect(lowerer.unionRetagHelper(from, to, loc)).not.toBeNull();
@@ -115,20 +98,8 @@ test("method adapter interning does not inspect unrelated lifted functions", () 
   const lowerer = context();
   let nameReads = 0;
   for (let i = 0; i < 100; i++) {
-    const fn: IrFunction = {
-      name: `unrelated.${i}`,
-      params: [],
-      returnType: VOID,
-      locals: [],
-      body: [],
-      loc,
-    };
-    Object.defineProperty(fn, "name", {
-      get() {
-        nameReads++;
-        return `unrelated.${i}`;
-      },
-    });
+    const fn: IrFunction = { name: `unrelated.${i}`, params: [], returnType: VOID, locals: [], body: [], loc };
+    Object.defineProperty(fn, "name", { get() { nameReads++; return `unrelated.${i}`; } });
     lowerer.liftedFns.push(fn);
   }
   const owner = lowerer.classes.get("%Error")!;
@@ -145,10 +116,7 @@ test("method adapter interning does not inspect unrelated lifted functions", () 
 test("literal ownership is reused across values and rechecked when recursive records close", () => {
   const lowerer = context();
   const shape = record(lowerer.shapes.intern([{ name: "kind", type: STRING }]));
-  const union = lowerer.unions.intern([shape, UNDEFINED_T], {
-    field: "kind",
-    cases: [{ tag: 0, values: ["a", "b"] }],
-  });
+  const union = lowerer.unions.intern([shape, UNDEFINED_T], { field: "kind", cases: [{ tag: 0, values: ["a", "b"] }] });
   const inspect = vi.spyOn(lowerer.shapes, "get");
   expect(lowerer.literalUnionArm(union, ["a"])).toEqual(shape);
   inspect.mockClear();
@@ -157,11 +125,8 @@ test("literal ownership is reused across values and rechecked when recursive rec
   expect(inspect).not.toHaveBeenCalled();
 
   const recursive = {} as Type;
-  const pendingShape = record(lowerer.shapes.recursiveRef(recursive, () => "Recursive"));
-  const pending = lowerer.unions.intern([pendingShape], {
-    field: "kind",
-    cases: [{ tag: 0, values: ["a"] }],
-  });
+  const pendingShape = record(lowerer.shapes.recursiveRef(recursive));
+  const pending = lowerer.unions.intern([pendingShape], { field: "kind", cases: [{ tag: 0, values: ["a"] }] });
   expect(lowerer.literalUnionArm(pending, ["a"])).toBeNull();
   lowerer.shapes.finalizeRecursive(recursive, [{ name: "kind", type: STRING }]);
   expect(lowerer.literalUnionArm(pending, ["a"])).toEqual(pendingShape);
@@ -171,49 +136,29 @@ test("literal ownership is reused across values and rechecked when recursive rec
 test("literal ownership sees a recursive union's finalized discriminator", () => {
   const lowerer = context();
   const recursive = {} as Type;
-  const union = lowerer.unions.recursiveRef(recursive, () => "Recursive");
+  const union = lowerer.unions.recursiveRef(recursive);
   const shape = record(lowerer.shapes.intern([{ name: "kind", type: STRING }]));
   expect(lowerer.literalUnionArm(union, ["ready"])).toBeNull();
-  lowerer.unions.finalizeRecursive(recursive, [shape], {
-    field: "kind",
-    cases: [{ tag: 0, values: ["ready"] }],
-  });
+  lowerer.unions.finalizeRecursive(recursive, [shape], { field: "kind", cases: [{ tag: 0, values: ["ready"] }] });
   expect(lowerer.literalUnionArm(union, ["ready"])).toEqual(shape);
 });
 
 test("removing undefined reuses the discriminator transformation without hiding recursive completion", () => {
   const lowerer = context();
   const a = record(lowerer.shapes.intern([{ name: "kind", type: STRING }]));
-  const b = record(
-    lowerer.shapes.intern([
-      { name: "kind", type: STRING },
-      { name: "value", type: F64 },
-    ]),
-  );
-  const union: IrType = {
-    kind: "union",
-    unionId: lowerer.unions.intern([a, b, UNDEFINED_T], {
-      field: "kind",
-      cases: [
-        { tag: 0, values: ["a"] },
-        { tag: 1, values: ["b"] },
-      ],
-    }),
-  };
+  const b = record(lowerer.shapes.intern([{ name: "kind", type: STRING }, { name: "value", type: F64 }]));
+  const union: IrType = { kind: "union", unionId: lowerer.unions.intern([a, b, UNDEFINED_T], {
+    field: "kind", cases: [{ tag: 0, values: ["a"] }, { tag: 1, values: ["b"] }],
+  }) };
   const transform = vi.spyOn(lowerer.unions, "transform");
   const stripped = lowerer.stripUndefinedArm(union);
   for (let i = 0; i < 20; i++) expect(lowerer.stripUndefinedArm(union)).toEqual(stripped);
   expect(transform).toHaveBeenCalledTimes(1);
   if (stripped.kind !== "union") throw new Error("expected two remaining arms");
-  expect(lowerer.unions.get(stripped.unionId)?.discriminant).toEqual(
-    lowerer.unions.get(union.unionId)?.discriminant,
-  );
+  expect(lowerer.unions.get(stripped.unionId)?.discriminant).toEqual(lowerer.unions.get(union.unionId)?.discriminant);
 
   const recursive = {} as Type;
-  const pending: IrType = {
-    kind: "union",
-    unionId: lowerer.unions.recursiveRef(recursive, () => "Recursive"),
-  };
+  const pending: IrType = { kind: "union", unionId: lowerer.unions.recursiveRef(recursive) };
   expect(lowerer.stripUndefinedArm(pending)).toEqual(pending);
   lowerer.unions.finalizeRecursive(recursive, [STRING, UNDEFINED_T]);
   expect(lowerer.stripUndefinedArm(pending)).toEqual(STRING);
@@ -224,19 +169,8 @@ test("removing undefined reuses the discriminator transformation without hiding 
 test("adding undefined reuses semantic union transformations and sees recursive completion", () => {
   const lowerer = context();
   const a = record(lowerer.shapes.intern([{ name: "kind", type: STRING }]));
-  const b = record(
-    lowerer.shapes.intern([
-      { name: "kind", type: STRING },
-      { name: "value", type: F64 },
-    ]),
-  );
-  const discriminant = {
-    field: "kind",
-    cases: [
-      { tag: 0, values: ["a"] },
-      { tag: 1, values: ["b"] },
-    ],
-  };
+  const b = record(lowerer.shapes.intern([{ name: "kind", type: STRING }, { name: "value", type: F64 }]));
+  const discriminant = { field: "kind", cases: [{ tag: 0, values: ["a"] }, { tag: 1, values: ["b"] }] };
   const union: IrType = { kind: "union", unionId: lowerer.unions.intern([a, b], discriminant) };
   const transform = vi.spyOn(lowerer.unions, "transform");
   const added = lowerer.withUndefinedArmOf(union);
@@ -246,10 +180,7 @@ test("adding undefined reuses semantic union transformations and sees recursive 
   expect(lowerer.unions.get(added.unionId)?.discriminant).toEqual(discriminant);
 
   const recursive = {} as Type;
-  const pending: IrType = {
-    kind: "union",
-    unionId: lowerer.unions.recursiveRef(recursive, () => "Recursive"),
-  };
+  const pending: IrType = { kind: "union", unionId: lowerer.unions.recursiveRef(recursive) };
   const before = lowerer.withUndefinedArmOf(pending);
   lowerer.unions.finalizeRecursive(recursive, [a, b], discriminant);
   expect(lowerer.withUndefinedArmOf(pending)).toEqual(added);
@@ -261,291 +192,33 @@ test("adding undefined reuses semantic union transformations and sees recursive 
 test("optional union widening keeps refused and missing contracts current", () => {
   const lowerer = context();
   const recursive = {} as Type;
-  const pending: IrType = {
-    kind: "union",
-    unionId: lowerer.unions.recursiveRef(recursive, () => "Recursive"),
-  };
+  const pending: IrType = { kind: "union", unionId: lowerer.unions.recursiveRef(recursive) };
   expect(lowerer.withUndefinedArmOf(pending)).not.toBeNull();
-  lowerer.unions.finalizeRecursive(recursive, [{ kind: "promise", inner: F64 }, STRING]);
+  lowerer.unions.finalizeRecursive(recursive, [{ kind: "date" }, STRING]);
   expect(lowerer.withUndefinedArmOf(pending)).toBeNull();
   expect(lowerer.withUndefinedArmOf(pending)).toBeNull();
 
-  // Union ids come from their arms, so a fresh registry names the union
-  // this one has not interned yet.
-  const missing: IrType = { kind: "union", unionId: new UnionRegistry().intern([F64, STRING]) };
+  const missing: IrType = { kind: "union", unionId: `u${lowerer.unions.unions.length}` };
   expect(lowerer.withUndefinedArmOf(missing)).toBeNull();
   expect(lowerer.unions.intern([F64, STRING])).toBe(missing.unionId);
   expect(lowerer.withUndefinedArmOf(missing)?.kind).toBe("union");
   expect(lowerer.withUndefinedArmOf(VOID)).toBeNull();
+  expect(lowerer.withUndefinedArmOf(JSVAL)).toBe(JSVAL);
 });
 
 test("stdlib provenance is cached by symbol identity, including merged and shadowed declarations", () => {
+  const builtin = {} as Symbol, shadow = {} as Symbol;
   const userFile = { fileName: "user.ts" } as SourceFile;
   const library = { fileName: "library.d.ts" } as SourceFile;
   const userDeclaration = { getSourceFile: () => userFile } as Node;
   const libraryDeclaration = { getSourceFile: () => library } as Node;
-  let declarationReads = 0;
-  const symbolWith = (declarations: readonly Node[]): Symbol =>
-    ({
-      get declarations() {
-        declarationReads++;
-        return declarations;
-      },
-    }) as unknown as Symbol;
-  const builtin = symbolWith([userDeclaration, libraryDeclaration]),
-    shadow = symbolWith([userDeclaration]);
-  const lowerer = new Lowerer({ getTypeChecker: () => ({}) } as unknown as Program, userFile, []);
+  const declarationsOf = vi.fn((symbol: Symbol) => symbol === builtin ? [userDeclaration, libraryDeclaration] : [userDeclaration]);
+  const lowerer = new Lowerer({ getTypeChecker: () => ({ declarationsOf }) } as unknown as Program, userFile, [], false);
   vi.spyOn(lowerer, "isStdlibFile").mockImplementation((file) => file === library);
   for (let i = 0; i < 20; i++) {
     expect(lowerer.isStdlibSymbol(builtin)).toBe(true);
     expect(lowerer.isStdlibSymbol(shadow)).toBe(false);
     expect(lowerer.isStdlibSymbol(undefined)).toBe(false);
   }
-  expect(declarationReads).toBe(2);
-});
-
-/** A credentials-shaped record pair: the source declares every target
- * field plus `type`, both carry an `unknown` index signature. */
-function credentialPair(lowerer: Lowerer): {
-  source: IrType;
-  target: IrType;
-  sourceId: string;
-  targetId: string;
-} {
-  const sourceId = lowerer.shapes.intern(
-    [
-      { name: "access", type: STRING },
-      { name: "expires", type: F64 },
-      { name: "refresh", type: STRING },
-      { name: "type", type: STRING },
-    ],
-    false,
-    DYN,
-    ["refresh", "access", "expires", "type"],
-  );
-  const targetId = lowerer.shapes.intern(
-    [
-      { name: "access", type: STRING },
-      { name: "expires", type: F64 },
-      { name: "refresh", type: STRING },
-    ],
-    false,
-    DYN,
-  );
-  return { source: record(sourceId), target: record(targetId), sourceId, targetId };
-}
-
-test("an index-signature record destination takes the overflow capture reshape", () => {
-  const lowerer = context();
-  const { source, target } = credentialPair(lowerer);
-  expect(lowerer.widthLiftPlan(source, target)).toEqual({ how: "ovf" });
-  // A required destination field the source does not declare has no
-  // fresh-record default: the reshape declines.
-  const required = record(
-    lowerer.shapes.intern(
-      [
-        { name: "access", type: STRING },
-        { name: "scope", type: STRING },
-      ],
-      false,
-      DYN,
-    ),
-  );
-  expect(lowerer.widthLiftPlan(source, required)).toBeNull();
-});
-
-test("a union record arm routes into an index-signature arm by overflow capture", () => {
-  const lowerer = context();
-  const { source, target, sourceId, targetId } = credentialPair(lowerer);
-  const from = lowerer.unions.intern([source, UNDEFINED_T]);
-  const to = lowerer.unions.intern([target, UNDEFINED_T]);
-  const helper = lowerer.unionRetagHelper(from, to, loc);
-  expect(helper).not.toBeNull();
-  const capture = lowerer.valueHelpers.get(`ovf:${sourceId}:${targetId}`);
-  expect(capture).toBeDefined();
-  // The retag helper applies the capture to the record arm and keeps the
-  // unit arm's tag.
-  expect(JSON.stringify(lowerer.liftedFns.find((fn) => fn.name === helper)?.body)).toContain(
-    capture!,
-  );
-  expect(lowerer.unionRetagHelper(from, to, loc)).toBe(helper);
-  expect(lowerer.liftedFns.filter((fn) => fn.name === capture)).toHaveLength(1);
-});
-
-test("a destination declaring required members the source lacks takes the checked widening", () => {
-  const lowerer = context();
-  const source = record(
-    lowerer.shapes.intern([{ name: "role", type: STRING }], false, undefined, ["role"]),
-  );
-  const target = record(
-    lowerer.shapes.intern(
-      [
-        { name: "content", type: STRING },
-        { name: "role", type: STRING },
-        { name: "timestamp", type: F64 },
-      ],
-      false,
-      undefined,
-      ["role", "content", "timestamp"],
-    ),
-  );
-  // The relation the whole lowering asks speculatively keeps its base
-  // answer: no plan, so no existing conversion changes.
-  expect(lowerer.widthLiftPlan(source, target)).toBeNull();
-  expect(lowerer.checkedWidthLift(source, target)).toEqual({ how: "checkedWiden" });
-  // The apply half crosses the value as a live capsule and checks it
-  // against the destination.
-  const value: IrType = source;
-  const applied = lowerer.applyWidthLift(
-    { how: "checkedWiden" },
-    { kind: "varRef", localId: "v.0", type: value, loc },
-    target,
-    loc,
-  );
-  expect(applied).toEqual({
-    kind: "dynCheck",
-    value: {
-      kind: "dynFrom",
-      value: { kind: "varRef", localId: "v.0", type: value, loc },
-      liveRef: true,
-      type: DYN,
-      loc,
-    },
-    type: target,
-    loc,
-  });
-});
-
-test("the checked widening declines a destination field the source declares differently", () => {
-  const lowerer = context();
-  const source = record(lowerer.shapes.intern([{ name: "role", type: STRING }]));
-  const target = record(
-    lowerer.shapes.intern([
-      { name: "content", type: STRING },
-      { name: "role", type: F64 },
-    ]),
-  );
-  expect(lowerer.widthLiftPlan(source, target)).toBeNull();
-  // A destination member the source lacks that is optional stays the
-  // field-copy plan's own absent completion.
-  const completed = lowerer.shapes.intern(
-    [
-      {
-        name: "content",
-        type: { kind: "union", unionId: lowerer.unions.intern([STRING, UNDEFINED_T]) },
-      },
-      { name: "role", type: STRING },
-    ],
-    false,
-    undefined,
-    ["role", "content"],
-  );
-  expect(lowerer.widthLiftPlan(source, record(completed))).toEqual({ how: "width" });
-});
-
-test("the checked widening stays out of the union plan", () => {
-  const lowerer = context();
-  const source = record(lowerer.shapes.intern([{ name: "role", type: STRING }]));
-  const wider = record(
-    lowerer.shapes.intern([
-      { name: "content", type: STRING },
-      { name: "role", type: STRING },
-    ]),
-  );
-  const exact: IrType = {
-    kind: "union",
-    unionId: lowerer.unions.intern([source, UNDEFINED_T]),
-  };
-  const mixed: IrType = {
-    kind: "union",
-    unionId: lowerer.unions.intern([wider, UNDEFINED_T]),
-  };
-  expect(lowerer.widthLiftPlan(source, exact)).toEqual({
-    how: "wrap",
-    tag: lowerer.armTag(exact.unionId, source),
-  });
-  // A destination union whose arms only fit through the checked widening
-  // keeps the base answer: the widening is asked for by name at the
-  // conversion site that refused, never as a speculative plan a union
-  // conversion would build the code of a compiling program around.
-  expect(lowerer.widthLiftPlan(source, mixed)).toBeNull();
-  expect(lowerer.checkedWidthLift(source, wider)).toEqual({ how: "checkedWiden" });
-});
-
-test("a lifted function is found by name through the index, never by scanning the list", () => {
-  // Lowerer.liftedFnNamed answers `liftedFns.find((fn) => fn.name === name)`
-  // from an index. A scan reads every lifted function of the program, tens of
-  // thousands in a large one, at each lookup.
-  const scan =
-    /\bliftedFns\s*\.\s*(?:some|find|findIndex|findLast|findLastIndex)\(\s*\(?\s*(\w+)\s*\)?\s*=>\s*\1\.name\s*===/g;
-  // A site that asks more than "is there a function of this name", with the
-  // reason the index does not answer it.
-  const otherQuestions = new Map([
-    // Whether any function of the name has captures, not only the first.
-    ["frontend/lowering/native-ffi.ts", 1],
-  ]);
-  const sourceRoot = fileURLToPath(new URL("../..", import.meta.url));
-  const found = new Map<string, number>();
-  const visit = (dir: string): void => {
-    for (const name of readdirSync(dir).sort()) {
-      const path = join(dir, name);
-      if (statSync(path).isDirectory()) visit(path);
-      else if (name.endsWith(".ts") && !name.endsWith(".test.ts")) {
-        const count = readFileSync(path, "utf8").match(scan)?.length ?? 0;
-        if (count > 0) found.set(relative(sourceRoot, path).split("\\").join("/"), count);
-      }
-    }
-  };
-  visit(sourceRoot);
-  expect([...found]).toEqual([...otherQuestions]);
-});
-
-test("the lifted-function index answers what a scan of the list answers", () => {
-  const lowerer = context();
-  const named = (name: string): IrFunction => ({
-    name,
-    params: [],
-    returnType: VOID,
-    locals: [],
-    body: [],
-    loc,
-  });
-  const scanned = (name: string) => lowerer.liftedFns.find((fn) => fn.name === name);
-  const before = lowerer.liftedFns.length;
-  expect(lowerer.liftedFnNamed("%helper.a")).toBeUndefined();
-  const first = named("%helper.a");
-  lowerer.liftedFns.push(first, named("%helper.b"), named("%helper.a"));
-  // The first function of a name, as `find` returns it, and a function pushed
-  // after an earlier lookup.
-  expect(lowerer.liftedFnNamed("%helper.a")).toBe(first);
-  expect(lowerer.liftedFnNamed("%helper.a")).toBe(scanned("%helper.a"));
-  expect(lowerer.liftedFnNamed("%helper.b")).toBe(scanned("%helper.b"));
-  expect(lowerer.liftedFnNamed("%helper.c")).toBeUndefined();
-  expect(lowerer.liftedFnNamed(undefined)).toBeUndefined();
-  const later = named("%helper.c");
-  lowerer.liftedFns.push(later);
-  expect(lowerer.liftedFnNamed("%helper.c")).toBe(later);
-  // record-links.ts removes helpers from the middle of the list
-  // (restoreStringConversions): the functions behind them move down, and one
-  // pushed afterwards lands where the index had already been.
-  lowerer.liftedFns.splice(before + 1, 1);
-  const afterRemoval = named("%helper.d");
-  lowerer.liftedFns.push(afterRemoval);
-  for (const name of ["%helper.a", "%helper.b", "%helper.c", "%helper.d"])
-    expect(lowerer.liftedFnNamed(name)).toBe(scanned(name));
-  expect(lowerer.liftedFnNamed("%helper.b")).toBeUndefined();
-  expect(lowerer.liftedFnNamed("%helper.d")).toBe(afterRemoval);
-  // Removing the first of two functions with one name leaves the second.
-  lowerer.liftedFns.splice(before, 1);
-  expect(lowerer.liftedFnNamed("%helper.a")).toBe(scanned("%helper.a"));
-  expect(lowerer.liftedFnNamed("%helper.a")).not.toBe(first);
-  lowerer.liftedFns.splice(before, 0, first);
-  expect(lowerer.liftedFnNamed("%helper.a")).toBe(first);
-  // The unit journal cuts the list back and tells the index.
-  const table = lowerer.journalTables().find((entry) => entry.name === "liftedFns")!;
-  table.truncate!(before + 1);
-  expect(lowerer.liftedFns).toEqual([...lowerer.liftedFns.slice(0, before), first]);
-  expect(lowerer.liftedFnNamed("%helper.a")).toBe(first);
-  expect(lowerer.liftedFnNamed("%helper.b")).toBeUndefined();
-  expect(lowerer.liftedFnNamed("%helper.c")).toBeUndefined();
+  expect(declarationsOf).toHaveBeenCalledTimes(2);
 });

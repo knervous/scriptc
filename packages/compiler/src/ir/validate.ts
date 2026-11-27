@@ -1,10 +1,13 @@
+// This file was modified from scriptc (Apache-2.0); see MODIFICATIONS.md.
 /* IR validation — runs on every compile as the backstop for frontend bugs.
  * A violation is an internal compiler error (the frontend should never
  * produce invalid IR), but it still carries the user's source location:
  * an ICE that points at source is a gift to whoever debugs it.
  */
+import { FORK_LIB_CALL_ARGS, FORK_LIB_CALL_DYN_RESULTS, FORK_LIB_CALL_RESULTS } from "./fork-lib-calls.js";
 import { validByteNumberToken } from "./byte-numbers.js";
 import { localScopeUses } from "./local-scopes.js";
+import { browserTarget } from "../frontend/browser-target.js";
 import type {
   IrClassDef,
   IrExpr,
@@ -29,11 +32,15 @@ import {
   canAdaptDynFuncTo,
   canDynCheckTo,
   canConvertToDyn,
+  canExitIslandToType,
+  canMarshalIntoIsland,
+  canMarshalTypedFuncIntoIsland,
   DYN,
   DYN_HANDLE_KINDS,
   F64,
   ffiClassType,
   ffiSourceParamTypes,
+  islandPromisePayloadTag,
   funcHiddenParamCount,
   isDirentShape,
   isDynTypedRefType,
@@ -51,6 +58,8 @@ import {
   isSupportedMapValue,
   isSupportedSetElem,
   isUnitType,
+  jsOpResultKind,
+  JSVAL,
   REF_TRUTHY_KINDS,
   RUNTIME_EMITTER_CLASS,
   RUNTIME_ERROR_CLASSES,
@@ -61,6 +70,7 @@ import {
   typeEquals,
   typeKey,
   maybePromiseUnionArmsOk,
+  unionContainerArmsOk,
   VOID,
 } from "./ir.js";
 import {
@@ -69,6 +79,7 @@ import {
   callSiteReturnType,
   classValueAbiEquals,
   classValueConstructor,
+  isOpaqueCrossingType,
 } from "./ir.js";
 import { unionWideningTags } from "./analysis.js";
 import { alwaysReturns } from "./control-flow.js";
@@ -118,7 +129,14 @@ interface ClassValidation {
   virtualCalls: Map<string, Map<string, VirtualCallInfo>>;
 }
 
+/** The module being validated targets the browser (engine-backed crossings). */
+let browserModule = false;
+/** validateModule of an object's IR (link/object.ts): a part of a program, not the whole. */
+let objectModule = false;
+
 export function validateModule(mod: IrModule): IrValidationError[] {
+  browserModule = mod.browser === true;
+  objectModule = mod.objectHierarchy !== undefined;
   const errors: IrValidationError[] = [];
   const functionsByName = new Map<string, IrFunction>();
   for (const fn of mod.functions) {
@@ -146,7 +164,7 @@ export function validateModule(mod: IrModule): IrValidationError[] {
     errors.push({ message: "bytesHeadersMutable must be true when present", loc: moduleLoc });
   if (mod.lifetimeRegions !== undefined && mod.lifetimeRegions !== true)
     errors.push({ message: "lifetimeRegions must be true when present", loc: moduleLoc });
-  if (mod.workers && mod.lib !== undefined)
+  if (mod.workers && (mod.lib !== undefined || mod.embedded !== undefined))
     errors.push({
       message: "worker execution requires a native static executable",
       loc: moduleLoc,
@@ -713,8 +731,9 @@ export function validateModule(mod: IrModule): IrValidationError[] {
       if (fields.has(f.name)) {
         errors.push({ message: `record ${rec.id}: duplicate field "${f.name}"`, loc: noLoc });
       } else fields.set(f.name, f.type);
-      // Bare unit and void types have no record-field storage; unit values
-      // use their union representation.
+      // Unit kinds (undefinedT/nullT) exist only as union arms — a BARE
+      // unit field is as malformed as a void one. dyn and jsval slots
+      // are valid; both are refcounted values held by the record shape.
       if (f.type.kind === "void" || isUnitType(f.type)) {
         errors.push({
           message: `record ${rec.id}: field "${f.name}" is ${f.type.kind}`,
@@ -862,6 +881,7 @@ export function validateModule(mod: IrModule): IrValidationError[] {
         arm.kind === "void" ||
         arm.kind === "union" ||
         arm.kind === "dyn" ||
+        arm.kind === "jsval" ||
         (arm.kind === "generator" && iterableArmsElem(u.arms) === null)
       ) {
         errors.push({ message: `union ${u.id}: arm ${i} is ${arm.kind}`, loc: noLoc });
@@ -955,11 +975,11 @@ export function validateModule(mod: IrModule): IrValidationError[] {
     }
   };
   for (const g of mod.globals ?? []) {
-    if (g.tdz && g.type.kind !== "record" && g.type.kind !== "func" && g.type.kind !== "dyn") {
-      errors.push({
-        message: `TDZ global "${g.name}" must have record, function, or checked-value storage`,
-        loc: noLoc,
-      });
+    // A union is a pointer too, and never the null pointer (the unit arms are
+    // interned instances): a function global widened to `fn | undefined` by a
+    // runtime-optional read (`const f = handlers[0]`) keeps its TDZ sentinel.
+    if (g.tdz && g.type.kind !== "record" && g.type.kind !== "func" && g.type.kind !== "dyn" && g.type.kind !== "union") {
+      errors.push({ message: `TDZ global "${g.name}" must have record, function, union, or checked-value storage`, loc: noLoc });
     }
     if (isUnitType(g.type)) {
       errors.push({ message: `global "${g.name}" has bare unit type ${g.type.kind}`, loc: noLoc });
@@ -1226,6 +1246,10 @@ function validateFunction(
     }
   };
 
+  /** Union arms a truthiness helper can answer: units (false), scalars and
+   * strings (per-value), ref kinds (always true), jsval (the engine
+   * answers). dyn/caught arms have no ToBoolean — the frontend fences them
+   * before emitting toBool/logical over the union. */
   const checkTruthyUnion = (unionId: string, loc: SrcLoc) => {
     const def = unions.get(unionId);
     if (!def) {
@@ -1245,7 +1269,12 @@ function validateFunction(
 
   function checkNullishOperands(e: IrExpr & { kind: "nullish" }): void {
     expectType(e.right, e.type, "nullish right operand");
-
+    // The ISLAND form: `a ?? b` over an engine value — left, right,
+    // and result are all handles (the emitters' jsval nullish arm).
+    if (e.left.type.kind === "jsval") {
+      if (e.type.kind !== "jsval") err("jsval nullish must answer jsval", e.loc);
+      return;
+    }
     // The CHECKED-DYNAMIC form: the runtime kind decides (the
     // emitters' scr_dyn_is_nullish arm) — left, right, and result
     // all live in the checked-dynamic tree.
@@ -1305,10 +1334,11 @@ function validateFunction(
           e.type.kind !== "f64" &&
           e.type.kind !== "string" &&
           e.type.kind !== "bool" &&
+          e.type.kind !== "jsval" &&
           e.type.kind !== "union" &&
           e.type.kind !== "dyn"
         ) {
-          err(`logical ${e.op} must be f64|string|bool|union|dyn, got ${e.type.kind}`, e.loc);
+          err(`logical ${e.op} must be f64|string|bool|jsval|union|dyn, got ${e.type.kind}`, e.loc);
         }
         if (e.type.kind === "union") checkTruthyUnion(e.type.unionId, e.loc);
         expectType(e.left, e.type, `logical ${e.op} left`);
@@ -1424,6 +1454,7 @@ function validateFunction(
       case "fieldAbsent":
         return checkRecordExpr(e);
       case "dynFrom":
+      case "dynFromJsval":
       case "dynCall":
       case "dynInvoke":
       case "dynObjLit":
@@ -1459,6 +1490,11 @@ function validateFunction(
       case "newPromise":
       case "promiseWithResolvers":
         return checkAsyncExpr(e);
+      case "jsMarshal":
+      case "jsOp":
+      case "jsExit":
+      case "jsBridgePromise":
+        return checkIslandExpr(e);
       default: {
         const _exhaustive: never = e;
         void _exhaustive;
@@ -1728,14 +1764,16 @@ function validateFunction(
       }
       case "dynDestrCheck": {
         checkExpr(e.value);
-        if (e.value.type.kind !== "dyn") err("dynDestrCheck value must be dyn", e.loc);
+        if (e.value.type.kind !== "dyn" && e.value.type.kind !== "jsval")
+          err("dynDestrCheck value must be dyn or jsval", e.loc);
         if (e.type.kind !== e.value.type.kind)
           err("dynDestrCheck must have its value's type", e.loc);
         break;
       }
       case "dynIterN": {
         checkExpr(e.value);
-        if (e.value.type.kind !== "dyn") err("dynIterN value must be dyn", e.loc);
+        if (e.value.type.kind !== "dyn" && e.value.type.kind !== "jsval")
+          err("dynIterN value must be dyn or jsval", e.loc);
         if (e.type.kind !== e.value.type.kind) err("dynIterN must have its value's type", e.loc);
         if (!Number.isInteger(e.count) || e.count < 0)
           err("dynIterN count must be a non-negative integer", e.loc);
@@ -1828,7 +1866,23 @@ function validateFunction(
         break;
       case "optChain": {
         checkExpr(e.receiver);
-
+        // An island-handle chain (`x?.y` on 'any'): the nullish test is a
+        // runtime ask of the engine value; the body is the plain island
+        // operation over the bound handle, and both body and result stay
+        // jsval (the unit path is the engine's undefined).
+        if (e.receiver.type.kind === "jsval") {
+          if (activeChains.has(e.id)) err(`optChain id "${e.id}" shadows an active chain`, e.loc);
+          activeChains.set(e.id, JSVAL);
+          checkExpr(e.body);
+          activeChains.delete(e.id);
+          if (e.body.type.kind !== "jsval") {
+            err(`jsval optChain with ${e.body.type.kind} body`, e.loc);
+          }
+          if (e.type.kind !== "jsval") {
+            err(`jsval optChain must be jsval, got ${e.type.kind}`, e.loc);
+          }
+          break;
+        }
         // A dyn (dyn) chain (`rawName?.match(re)` on a JSON.parse result):
         // the nullish test reads the node's kind tag; the body is the
         // validated dynamic dispatch, its result converted back into the
@@ -2023,7 +2077,7 @@ function validateFunction(
           if (want) expectType(a, want, `regexIntrinsic ${e.method} arg ${i}`);
         });
         if (
-          (e.method === "execGroups" || e.method === "execSpans" || e.method === "matchGroups") &&
+          (e.method === "execGroups" || e.method === "execSpans") &&
           e.args.slice(1).some((mask) => mask.kind !== "numLit")
         ) {
           err(`regexIntrinsic ${e.method} masks must be numeric literals`, e.loc);
@@ -2032,9 +2086,10 @@ function validateFunction(
           e.method === "match" ||
           e.method === "exec" ||
           e.method === "execGroups" ||
-          e.method === "execSpans" ||
-          e.method === "matchGroups"
+          e.method === "execSpans"
         ) {
+          // (This fork's matchGroups is its browser-target form, a dyn group
+          // record read from a match result: neither this union nor masks.)
           // The `string[] | null` union (program-dependent id) — checked
           // by arms, like the libCall case checks process.envGet.
           const def = e.type.kind === "union" ? unions.get(e.type.unionId) : undefined;
@@ -2545,6 +2600,8 @@ function validateFunction(
           elem.kind !== "string" &&
           elem.kind !== "bool" &&
           elem.kind !== "date" &&
+          // The browser target joins other elements through their page value.
+          !(browserModule && (elem.kind === "array" || elem.kind === "record" || elem.kind === "jsval" || elem.kind === "union")) &&
           !(
             elem.kind === "union" &&
             (unions
@@ -2567,10 +2624,7 @@ function validateFunction(
           // misjudge JS ===; the frontend fences these.
           err(`arrIntrinsic ${e.method} on union elements (frontend must reject)`, e.loc);
         }
-        if (
-          (e.method === "shift" || e.method === "pop") &&
-          !(elem.kind === "dyn" && e.type.kind === "dyn")
-        ) {
+        if ((e.method === "shift" || e.method === "pop") && !(elem.kind === "dyn" && e.type.kind === "dyn") && !(elem.kind === "jsval" && e.type.kind === "jsval")) {
           const rdef = e.type.kind === "union" ? unions.get(e.type.unionId) : undefined;
           if (
             !rdef ||
@@ -3278,11 +3332,10 @@ function validateFunction(
           err(`virtualCall ${e.className}.${e.method}: no declaration on the base chain`, e.loc);
           break;
         }
-        if (!info.hasOverride) {
-          err(
-            `virtualCall ${e.className}.${e.method}: no concrete override below the static class`,
-            e.loc,
-          );
+        // An object's module (IrModule.objectHierarchy) is part of a program: the overrides live in the other modules'
+        // objects, and the linked module is validated whole.
+        if (!info.hasOverride && !objectModule) {
+          err(`virtualCall ${e.className}.${e.method}: no concrete override below the static class`, e.loc);
         }
         const impl = info.implementation;
         if (!impl) {
@@ -3371,10 +3424,24 @@ function validateFunction(
         const want = recordValidation.get(shape.id)!.initializationFields;
         const seen = new Set<string>();
         for (const f of e.fields) {
-          if (f.overflow) checkExpr(f.value);
+          if (f.drop || f.overflow) checkExpr(f.value);
           else checkSlotValue(f.value);
           if (seen.has(f.name)) err(`recordLit initializes field "${f.name}" twice`, e.loc);
           seen.add(f.name);
+          if (f.drop) {
+            // A mapping-dropped field (the fork's PromiseSettledResult honest
+            // subset): evaluated, never stored — it must NOT name a
+            // declared field (that would silently drop a real store),
+            // and its value may be any type, void included.
+            if (f.overflow) err(`recordLit drop entry "${f.name}" flagged overflow too`, e.loc);
+            if (want.has(f.name)) {
+              err(
+                `recordLit drop entry "${f.name}" shadows a declared field of shape ${shape.id}`,
+                e.loc,
+              );
+            }
+            continue;
+          }
           if (f.overflow) {
             // Overflow entries exist only on index-signature shapes, name
             // no declared field, and carry the index-value type exactly
@@ -3395,7 +3462,7 @@ function validateFunction(
           if (!ft) err(`shape ${shape.id} has no field "${f.name}"`, e.loc);
           else expectType(f.value, ft, `recordLit field "${f.name}"`);
         }
-        if (e.fields.filter((f) => !f.overflow).length !== shape.fields.length) {
+        if (e.fields.filter((f) => !f.overflow && !f.drop).length !== shape.fields.length) {
           err(`recordLit does not initialize every field of shape ${shape.id}`, e.loc);
         }
         break;
@@ -3457,7 +3524,7 @@ function validateFunction(
         const shape = records.get(e.shapeId);
         const field = recordValidation.get(e.shapeId)?.fields.get(e.field);
         if (!shape) err(`recordGet on undeclared shape "${e.shapeId}"`, e.loc);
-        else if (!field) err(`shape ${e.shapeId} has no field "${e.field}"`, e.loc);
+        else if (!field) err(`shape ${e.shapeId} has no field "${e.field}" (fields: ${shape.fields.map((f) => f.name).join(", ")})`, e.loc);
         else {
           expectType(e.obj, { kind: "record", shapeId: e.shapeId }, "recordGet receiver");
           if (!typeEquals(e.type, field)) {
@@ -3565,6 +3632,7 @@ function validateFunction(
     e: IrExpr & {
       kind:
         | "dynFrom"
+        | "dynFromJsval"
         | "dynCall"
         | "dynInvoke"
         | "dynObjLit"
@@ -3599,17 +3667,22 @@ function validateFunction(
         // function type (the checked-dynamic tree's function kind — canConvertToDyn folds
         // all four in).
         const vt = e.value.type;
-        if (
-          !canConvertToDyn(
-            vt,
-            (id) => records.get(id),
-            (id) => unions.get(id),
-          )
-        ) {
+        if (!browserModule && !canConvertToDyn(vt, (id) => records.get(id), (id) => unions.get(id))) {
           err(`dynFrom of non-dyn-convertible type ${vt.kind}`, e.loc);
         }
         if (e.liveRef && !isLiveDynRefType(vt, (id) => unions.get(id))) {
           err(`live dynFrom of unsupported type ${vt.kind}`, e.loc);
+        }
+        break;
+      }
+      case "dynFromJsval": {
+        // The jsval→dyn crossing: exactly a jsval operand into a dyn
+        // result (the by-reference island wrap; scalars normalize at
+        // runtime).
+        checkExpr(e.value);
+        if (e.type.kind !== "dyn") err(`dynFromJsval must be dyn-typed, got ${e.type.kind}`, e.loc);
+        if (e.value.type.kind !== "jsval") {
+          err(`dynFromJsval operand must be jsval, got ${e.value.type.kind}`, e.loc);
         }
         break;
       }
@@ -3627,7 +3700,7 @@ function validateFunction(
         if (e.type.kind !== "dyn") err(`dynCall must be dyn-typed, got ${e.type.kind}`, e.loc);
         for (const a of e.args) {
           checkExpr(a);
-          if (a.type.kind !== "dyn" && !(a.type.kind === "jsval" && e.spreads === undefined))
+          if (a.type.kind !== "dyn" && !(a.type.kind === "jsword" && e.spreads === undefined))
             err(`dynCall argument of kind ${a.type.kind} (must be dyn)`, e.loc);
         }
         // The runtime-arity form: spread entries point into args (their
@@ -3655,7 +3728,7 @@ function validateFunction(
         if (e.type.kind !== "dyn") err(`dynInvoke must be dyn-typed, got ${e.type.kind}`, e.loc);
         for (const a of e.args) {
           checkExpr(a);
-          if (a.type.kind !== "dyn" && a.type.kind !== "jsval")
+          if (a.type.kind !== "dyn" && a.type.kind !== "jsword")
             err(`dynInvoke argument of kind ${a.type.kind} (must be dyn)`, e.loc);
         }
         break;
@@ -4306,7 +4379,9 @@ function validateFunction(
       // accepts number|string|boolean; a union of those satisfies it,
       // so the frontend rejects union args explicitly) — inspect
       // formatting is unimplemented, so the backend must never see one.
-      if (a.type.kind !== "f64" && a.type.kind !== "string" && a.type.kind !== "bool") {
+      // (Browser target: engine values print through the page's console.)
+      if (a.type.kind !== "f64" && a.type.kind !== "string" && a.type.kind !== "bool" &&
+          !(browserModule && (a.type.kind === "jsval" || a.type.kind === "dyn"))) {
         err(`${a.type.kind} argument to ${e.name}`, a.loc);
       }
     }
@@ -4314,6 +4389,30 @@ function validateFunction(
   }
 
   function checkLibCall(e: IrExpr & { kind: "libCall" }): void {
+    if (e.fn === "host.call") {
+      // (module strLit, name strLit, ...arguments): the arguments cross as number/boolean/string/page values.
+      e.args.forEach((a) => checkExpr(a));
+      if (e.args.length < 2 || e.args[0]!.kind !== "strLit" || e.args[1]!.kind !== "strLit") err("libCall host.call must start with the module and function name literals", e.loc);
+      return;
+    }
+    if (e.fn === "record.freeze") {
+      // (a typed record): the same record back.
+      e.args.forEach((a) => checkExpr(a));
+      if (e.args.length !== 1 || e.args[0]!.type.kind !== "record" || !typeEquals(e.type, e.args[0]!.type)) err("libCall record.freeze must answer its record argument's type", e.loc);
+      return;
+    }
+    if (e.fn === "record.inherit") {
+      e.args.forEach((a) => checkExpr(a));
+      if (e.args.length !== 2 || e.args[0]!.type.kind !== "record" || e.args[1]!.type.kind !== "record" || !typeEquals(e.type, e.args[0]!.type)) err("libCall record.inherit must answer its first record argument's type", e.loc);
+      return;
+    }
+    if (e.fn === "record.carry") {
+      // (record literal, ...record spread sources): the literal's own type.
+      e.args.forEach((a) => checkExpr(a));
+      if (e.args.length < 1 || e.args[0]!.type.kind !== "record" || !typeEquals(e.type, e.args[0]!.type)) err("libCall record.carry must be the record literal's type", e.loc);
+      if (e.args.slice(1).some((a) => a.type.kind !== "record")) err("libCall record.carry sources must be records", e.loc);
+      return;
+    }
     if (
       e.fn === "atomics.op" &&
       (e.args[0]?.type.kind !== "bytes" ||
@@ -4370,9 +4469,11 @@ function validateFunction(
       e.fn === "writable.writeEnc" ||
       e.fn === "writable.end" ||
       e.fn === "writable.endEcb" ||
-      e.fn === "readable.unpipe" ||
+      e.fn === "readable.unpipe" || e.fn === "atomics.notify" ||
+      e.fn === "date.newParts" || e.fn === "date.hostNum" || e.fn === "date.hostStr" ||
       e.fn === "rl.create" ||
-      e.fn === "rl.createSignal";
+      e.fn === "rl.createSignal" ||
+      e.fn === "dyn.promiseAll";
     // error.nodeThrow takes an optional fourth argument: the error's own
     // `url` property (a string).
     const optionalUrl = e.fn === "error.nodeThrow" && e.args.length === 4;
@@ -4382,18 +4483,21 @@ function validateFunction(
     // instance without an own message.
     const optionalTail =
       e.fn === "fs.unwatchFile" || e.fn === "error.new" || e.fn === "error.ctor" ? 1 : 0;
+    // This fork's frontend builds some calls with their shorter operand lists (fork-lib-calls.ts).
+    const forkArgs = FORK_LIB_CALL_ARGS.get(e.fn);
+    const argTypes = forkArgs !== undefined && e.args.length === forkArgs.length ? forkArgs : sig.argTypes;
     const arityOk = variadic
-      ? e.args.length >= sig.argTypes.length
-      : e.args.length === sig.argTypes.length ||
+      ? e.args.length >= argTypes.length
+      : e.args.length === argTypes.length ||
         optionalUrl ||
-        (optionalTail > 0 && e.args.length === sig.argTypes.length - optionalTail);
+        (optionalTail > 0 && e.args.length === argTypes.length - optionalTail);
     if (!arityOk) {
       err(`libCall ${e.fn}: ${e.args.length} args, expected ${sig.argTypes.length}`, e.loc);
     }
     if (optionalUrl) expectType(e.args[3]!, STRING, `libCall ${e.fn} arg 3`);
     e.args.forEach((a, i) => {
       checkExpr(a);
-      const want = sig.argTypes[i];
+      const want = argTypes[i];
       if (want) expectType(a, want, `libCall ${e.fn} arg ${i}`);
     });
     if (checkLibValueCall(e)) return;
@@ -4401,7 +4505,7 @@ function validateFunction(
     if (checkLibFileCall(e)) return;
     if (checkLibProcessCall(e)) return;
     if (checkLibSpecialCall(e)) return;
-    if (checkLibStreamCall(e, sig.argTypes.length, sig.result)) return;
+    if (checkLibStreamCall(e, argTypes.length, sig.result)) return;
     if (checkLibEmitterCall(e, sig.result)) return;
     if (
       e.fn === "error.stack" ||
@@ -4439,6 +4543,7 @@ function validateFunction(
         );
       }
     }
+    const forkResult = FORK_LIB_CALL_RESULTS.get(e.fn);
     // The server listeners() entries answer the event's listener array,
     // whose element signature the event (a literal at the call site)
     // selects; their own check below requires a func array.
@@ -4448,7 +4553,7 @@ function validateFunction(
       // The typed encodeInto answers the call site's own { read, written }
       // record shape.
       e.fn === "text.encodeIntoStr";
-    if (!variableResult && !typeEquals(e.type, sig.result)) {
+    if (!variableResult && !typeEquals(e.type, sig.result) && !(forkResult !== undefined && typeEquals(e.type, forkResult)) && !FORK_LIB_CALL_DYN_RESULTS.has(e.fn)) {
       // The stat calls answer the SAME snapshot under either member table:
       // their `bigint` option picks BigIntStats' reads over Stats'. The
       // checked-dynamic extraction answers the handle the slot's member
@@ -6067,6 +6172,14 @@ function validateFunction(
       const callback = e.args[e.args.length - 1]?.type;
       if (callback?.kind !== "func") err(`libCall ${e.fn} callback must be a function`, e.loc);
     }
+    if (e.fn === "island.castFail") {
+      // The deferred boundary failure's typed dummy: a promise (the
+      // only cast shape the frontend defers).
+      if (e.type.kind !== "promise") {
+        err(`libCall island.castFail must return a promise type, got ${e.type.kind}`, e.loc);
+      }
+      return true;
+    }
     // Always throws: the result type is never materialized.
     if (ALWAYS_THROW_LIB_FNS.has(e.fn)) return true;
     if (e.fn === "error.new" || e.fn === "error.newOptions") {
@@ -6557,7 +6670,9 @@ function validateFunction(
         if (e.args[0]?.type.kind !== src || !isStreamObject(e.type)) {
           err(`libCall ${e.fn} must take a ${src} source and return a stream class`, e.loc);
         }
-        if (e.fn === "readable.fromArr" && e.args[1]?.kind !== "numLit") {
+        // The fork's two-operand form (fork-lib-calls.ts) passes its string-chunk flag as a bool literal.
+        const forkFlag = e.args.length === 2 && e.args[1]?.kind === "boolLit";
+        if (e.fn === "readable.fromArr" && e.args[1]?.kind !== "numLit" && !forkFlag) {
           err(`libCall readable.fromArr flags must be a number literal`, e.loc);
         }
         return true;
@@ -6624,7 +6739,8 @@ function validateFunction(
         }
         return true;
       }
-      if (!typeEquals(e.type, result)) {
+      const forkStreamResult = FORK_LIB_CALL_RESULTS.get(e.fn);
+      if (!typeEquals(e.type, result) && !(forkStreamResult !== undefined && typeEquals(e.type, forkStreamResult))) {
         err(`libCall ${e.fn} must be ${result.kind}, got ${e.type.kind}`, e.loc);
       }
       return true;
@@ -6729,7 +6845,9 @@ function validateFunction(
         return true;
       }
       if (e.fn === "emitter.names") {
-        if (e.type.kind !== "dyn") err(`libCall emitter.names must return a dyn array`, e.loc);
+        // The fork's frontend types it string[] (the LLVM emitter converts upstream's dyn array).
+        const forkNames = e.type.kind === "array" && e.type.elem.kind === "string";
+        if (e.type.kind !== "dyn" && !forkNames) err(`libCall emitter.names must return a dyn array`, e.loc);
         return true;
       }
       if (
@@ -6861,19 +6979,7 @@ function validateFunction(
         // Runtime HANDLE targets unwrap the checked-dynamic tree's handle kind by tag (a
         // retained reference, no copy — DYN_HANDLE_KINDS).
         const handleOk = DYN_HANDLE_KINDS.has(e.type.kind);
-        if (
-          !canDynCheckTo(
-            e.type,
-            (id) => records.get(id),
-            (id) => unions.get(id),
-          ) &&
-          !undefArmedOk &&
-          !bytesOk &&
-          !errorOk &&
-          !classOk &&
-          !funcOk &&
-          !handleOk
-        ) {
+        if (!browserModule && !canDynCheckTo(e.type, (id) => records.get(id), (id) => unions.get(id)) && !undefArmedOk && !bytesOk && !errorOk && !classOk && !funcOk && !handleOk) {
           err(`dynCheck against non-JSON-representable type ${e.type.kind}`, e.loc);
         }
         if (e.partialView === true) {
@@ -7034,7 +7140,7 @@ function validateFunction(
         }
         if (e.mode === "next") {
           if (e.arg === null) {
-            if (genT.nextT.kind !== "undefinedT" && genT.nextT.kind !== "dyn") {
+            if (genT.nextT.kind !== "undefinedT" && genT.nextT.kind !== "dyn" && !e.prime) {
               err(`valueless next() on a ${typeKey(genT.nextT)} next-channel`, e.loc);
             }
           } else if (!typeEquals(e.arg.type, genT.nextT)) {
@@ -7044,11 +7150,9 @@ function validateFunction(
             );
           }
         } else if (e.mode === "return") {
-          if (e.arg !== null && !typeEquals(e.arg.type, genT.retT)) {
-            err(
-              `return argument ${typeKey(e.arg.type)} != return channel ${typeKey(genT.retT)}`,
-              e.loc,
-            );
+          // (a void return channel takes a dyn value: the untyped dispatch carries it into the dyn-valued result)
+          if (e.arg !== null && !typeEquals(e.arg.type, genT.retT) && !(genT.retT.kind === "void" && e.arg.type.kind === "dyn")) {
+            err(`return argument ${typeKey(e.arg.type)} != return channel ${typeKey(genT.retT)}`, e.loc);
           }
         } else {
           // throw: any exception-representable payload (the throw
@@ -7129,20 +7233,22 @@ function validateFunction(
         if (e.resolves === true && exec.params.length === 0) {
           err("newPromise resolves only through a resolve function", e.loc);
         }
-        if (exec.params.length === 2) {
+        if (exec.params.length === 2 && exec.params[1]!.kind !== "dyn") {
           // The reject closure's shapes: (reason: %Error) => void, and the
-          // checked-dynamic promise's (reason: dyn) => void.
+          // checked-dynamic promise's (reason: dyn) => void (this fork also
+          // admits a dyn reason over a typed promise).
           const rj = exec.params[1]!;
           const param = rj.kind === "func" && rj.params.length === 1 ? rj.params[0]! : null;
           const errorPin =
             param !== null && param.kind === "object" && param.className === "%Error";
-          const dynPin = param !== null && param.kind === "dyn" && inner.kind === "dyn";
+          const dynPin = param !== null && param.kind === "dyn";
           if (rj.kind !== "func" || rj.ret.kind !== "void" || (!errorPin && !dynPin)) {
             err("newPromise reject param must be (%Error) => void or (dyn) => void", e.loc);
           }
         }
         if (exec.params.length >= 1) {
           const rp = exec.params[0]!;
+          if (rp.kind === "dyn") break;
           if (rp.kind !== "func" || rp.ret.kind !== "void") {
             err("newPromise resolve must be a void-returning function", e.loc);
             break;
@@ -7204,6 +7310,156 @@ function validateFunction(
           (!rejectErrorPin && !(rejectDynPin && inner.kind === "dyn"))
         ) {
           err("promiseWithResolvers reject must be (%Error) => void or (dyn) => void", e.loc);
+        }
+        break;
+      }
+      default: {
+        const _exhaustive: never = e;
+        void _exhaustive;
+      }
+    }
+  }
+
+  function checkIslandExpr(
+    e: IrExpr & { kind: "jsMarshal" | "jsOp" | "jsExit" | "jsBridgePromise" },
+  ): void {
+    switch (e.kind) {
+      case "jsMarshal": {
+        checkExpr(e.value);
+        if (e.type.kind !== "jsval") err(`jsMarshal must be jsval, got ${e.type.kind}`, e.loc);
+        const src = e.value.type;
+        if (e.opaque) { if (!isOpaqueCrossingType(src)) err(`opaque jsMarshal of ${src.kind}`, e.loc); break; }
+        // The marshal direction admits qualifying closures (host-function
+        // wrapping) on top of the JSON-safe set; jsExit does not. Typed
+        // closures (per-param call-time conversion through the exit
+        // machinery) are the wider func shape.
+        // Typed arrays and URLs marshal IN (an engine typed-array copy /
+        // an engine URL built from the components) without ever joining
+        // the round-trip (JSON) set — the frontend's union lift narrows
+        // union arms before marshaling, so bare bytes/url operands are
+        // exactly what it produces.
+        if (
+          !browserModule &&
+          src.kind !== "bytes" &&
+          src.kind !== "url" &&
+          src.kind !== "dyn" && // dyn values deep-copy in (data kinds; the runtime throws on boxes)
+          // A STATIC promise crosses as a real engine thenable when its
+          // fulfillment is in the reverse bridge's payload domain
+          // (scr_jsval_from_promise — the async-callback return bridge).
+          !(src.kind === "promise" && islandPromisePayloadTag(src.inner) !== null) &&
+          !canMarshalIntoIsland(
+            src,
+            (id) => records.get(id),
+            (id) => unions.get(id),
+          ) &&
+          !canMarshalTypedFuncIntoIsland(
+            src,
+            (id) => records.get(id),
+            (id) => unions.get(id),
+          )
+        ) {
+          err(`jsMarshal of unmarshalable type ${src.kind}`, e.loc);
+        }
+        break;
+      }
+      case "jsOp": {
+        for (const a of e.args) checkExpr(a);
+        if (e.type.kind !== jsOpResultKind(e.op)) {
+          err(`jsOp ${e.op} must be ${jsOpResultKind(e.op)}, got ${e.type.kind}`, e.loc);
+        }
+        const named =
+          e.op === "getProp" || e.op === "setProp" || e.op === "callMethod" || e.op === "optCallMethod" || e.op === "globalGet" ||
+          e.op === "callSpread" || // the spread expression's source spelling (V8's nullish text spells it)
+          e.op === "callMethodSpread"; // the method name
+        if (named !== (e.name !== undefined)) {
+          err(`jsOp ${e.op} ${named ? "requires" : "forbids"} a name`, e.loc);
+        }
+        const arity: Record<string, number | null> = {
+          add: 2,
+          sub: 2,
+          mul: 2,
+          div: 2,
+          mod: 2,
+          pow: 2,
+          lt: 2,
+          le: 2,
+          gt: 2,
+          ge: 2,
+          eq: 2,
+          neq: 2,
+          instanceOf: 2,
+          neg: 1,
+          plus: 1,
+          truthy: 1,
+          not: 1,
+          typeof: 1,
+          toStr: 1,
+          getProp: 1,
+          setProp: 2,
+          getIdx: 2,
+          setIdx: 3,
+          globalGet: 0,
+          undefLit: 0,
+          nullLit: 0,
+          iterNew: 1,
+          defineGetter: 3,
+          objSpread: 2,
+          callSpread: 3, // callee + pre array + spread source
+          callMethodSpread: 3, // receiver + pre array + spread source
+          callMethod: null, optCallMethod: null, callFn: null, callFnThis: null, construct: null, // receiver/callee + any number of args
+          objLit: null, arrLit: null, tplStrings: null, // variable length (objLit: key/value pairs; tplStrings: n cooked + n raw)
+        };
+        const want = arity[e.op];
+        if (want !== null && want !== undefined && e.args.length !== want) {
+          err(`jsOp ${e.op} takes ${want} arg(s), got ${e.args.length}`, e.loc);
+        }
+        if (
+          want === null &&
+          e.op !== "objLit" &&
+          e.op !== "arrLit" &&
+          e.op !== "tplStrings" &&
+          e.args.length < 1
+        ) {
+          err(`jsOp ${e.op} needs a receiver/callee arg`, e.loc);
+        }
+        if (e.op === "callFnThis" && e.args.length < 2) {
+          err("jsOp callFnThis needs a callee and receiver", e.loc);
+        }
+        if (e.op === "objLit" && e.args.length % 2 !== 0) {
+          err("jsOp objLit takes key/value pairs", e.loc);
+        }
+        if (e.op === "tplStrings" && e.args.length % 2 !== 0) {
+          err("jsOp tplStrings takes n cooked + n raw strings", e.loc);
+        }
+        for (const a of e.args) {
+          if (a.type.kind !== "jsval")
+            err(`jsOp ${e.op} arg must be jsval, got ${a.type.kind}`, e.loc);
+        }
+        break;
+      }
+      case "jsExit": {
+        checkExpr(e.value);
+        expectType(e.value, JSVAL, "jsExit operand");
+        if (e.opaque) { if (!isOpaqueCrossingType(e.type)) err(`opaque jsExit to ${e.type.kind}`, e.loc); break; }
+        if (!browserModule && !canExitIslandToType(e.type, (id) => records.get(id), (id) => unions.get(id))) {
+          err(`jsExit to non-extractable type ${e.type.kind}`, e.loc);
+        }
+        break;
+      }
+      case "jsBridgePromise": {
+        checkExpr(e.value);
+        expectType(e.value, JSVAL, "jsBridgePromise operand");
+        // The settled engine value crosses as a HANDLE (or not at all) —
+        // plus the ONE converting payload: an `any[]`-declared
+        // fulfillment exits Array.isArray-gated by reference AT THE
+        // SETTLE (SCR_ISLP_JSVAL_ARR); every other typed use exits later.
+        if (
+          e.type.kind !== "promise" ||
+          (e.type.inner.kind !== "jsval" &&
+            e.type.inner.kind !== "void" &&
+            !(e.type.inner.kind === "array" && e.type.inner.elem.kind === "jsval"))
+        ) {
+          err("jsBridgePromise must be a promise of jsval, void, or jsval-element array", e.loc);
         }
         break;
       }
@@ -7587,7 +7843,9 @@ function validateFunction(
 
   // A local is named only inside the region that owns its value: the
   // backend releases a reference when that region ends (ir/local-scopes.ts).
-  for (const use of localScopeUses(fn)) {
+  // The WasmGC lowering keeps the fork's IR, whose locals are function-wide
+  // there; only native targets release a local's value with its region.
+  for (const use of browserTarget() ? [] : localScopeUses(fn)) {
     err(
       `local "${use.local.name}" is used after the ${use.ended === "block" ? "statement list" : use.ended} of its declaration ended (in a ${use.owner})`,
       use.loc,

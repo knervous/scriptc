@@ -1,6 +1,0 @@
-{
- "order": [
-  "<repo>/tests/corpus/7622-private-field-call-foreign-receivers.mjs"
- ],
- "diags": []
-}

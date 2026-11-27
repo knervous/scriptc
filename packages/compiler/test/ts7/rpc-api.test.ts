@@ -2,42 +2,14 @@ import { mkdtempSync, rmSync, writeFileSync } from "node:fs";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
 import { expect, test } from "vitest";
-import { API, type Snapshot, type Symbol as SdkSymbol } from "typescript/sync";
+import { API, type Snapshot } from "typescript/unstable/sync";
 import { Ts7Api, ts7Executable } from "../../src/frontend/ts7/rpc-api.js";
 import { Ts7RpcClient } from "../../src/frontend/ts7/rpc-client.js";
 import type { Ts7FileSystem } from "../../src/frontend/ts7/rpc-filesystem.js";
 import { spawnTs7Wire } from "../../src/frontend/ts7/rpc-process.js";
 import { AstNode } from "../../src/frontend/ts7/ast-node.js";
 import { SemanticChecker } from "../../src/frontend/ts7/semantic-checker.js";
-import {
-  SemanticNodeHandle,
-  SemanticSignature,
-  SemanticSymbol,
-  SemanticType,
-  symbolName,
-} from "../../src/frontend/ts7/semantic-model.js";
-import { ts7Diagnostic, type Ts7Diagnostic } from "../../src/frontend/ts7/diagnostic.js";
-import type { Ts7DiagnosticData } from "../../src/frontend/ts7/session-schema.generated.js";
-
-// The SDK's symbols have `name`; scriptc's give it with symbolName, which reads `escapedName`, as the
-// SDK's symbols also have it.
-function nameOf(symbol: SdkSymbol): string {
-  return symbolName(symbol as unknown as SemanticSymbol);
-}
-
-// scriptc's diagnostics have every member set; the SDK's leave absent ones out.
-function diagnostics(list: readonly unknown[]): Ts7Diagnostic[] {
-  return list.map((item) => ts7Diagnostic(item as Ts7DiagnosticData));
-}
-
-// scriptc's symbols keep their declarations' node handles in
-// `declarationHandles`, and the SDK's in `declarations`.
-function declarationHandlesOf(symbol: SdkSymbol): SdkSymbol["declarations"] {
-  return (
-    (symbol as unknown as { declarationHandles?: SdkSymbol["declarations"] }).declarationHandles ??
-    symbol.declarations
-  );
-}
+import { SemanticNodeHandle, SemanticSignature, SemanticSymbol, SemanticType } from "../../src/frontend/ts7/semantic-model.js";
 
 function tsgoPath(path: string): string {
   return process.platform === "win32" ? path.replaceAll("\\", "/") : path;
@@ -60,16 +32,17 @@ function programFacts(snapshot: Snapshot, config: string, path: string) {
   const type = checker.getTypeAtPosition(path, position)!;
   const symbol = checker.getSymbolAtPosition(path, position)!;
   return {
+    roots: project.rootFiles,
     files: project.program.getSourceFileNames(),
     options: project.program.getCompilerOptions(),
     text: file.text,
     type: checker.typeToString(type),
-    symbol: nameOf(symbol),
-    declaration: declarationHandlesOf(symbol)[0]!.resolve()!.getText(file),
-    syntactic: diagnostics(project.program.getSyntacticDiagnostics(path)),
-    semantic: diagnostics(project.program.getSemanticDiagnostics(path)),
-    globals: diagnostics(project.program.getGlobalDiagnostics()),
-    config: diagnostics(project.program.getConfigFileParsingDiagnostics()),
+    symbol: symbol.name,
+    declaration: symbol.declarations[0]!.resolve()!.getText(file),
+    syntactic: project.program.getSyntacticDiagnostics(path),
+    semantic: project.program.getSemanticDiagnostics(path),
+    globals: project.program.getGlobalDiagnostics(),
+    config: project.program.getConfigFileParsingDiagnostics(),
     defaultLibrary: project.program.isSourceFileDefaultLibrary(file),
     externalLibrary: project.program.isSourceFileFromExternalLibrary(file),
   };
@@ -79,33 +52,13 @@ test("production RPC bridge preserves pinned SDK parser/checker behavior", () =>
   const dir = mkdtempSync(join(tempRoot, "scriptc-ts7-rpc-parity-"));
   const config = tsgoPath(join(dir, "tsconfig.json"));
   const path = tsgoPath(join(dir, "main.ts"));
-  writeFileSync(
-    config,
-    JSON.stringify({ compilerOptions: { strict: true, noEmit: true, types: [] }, files: [path] }),
-  );
+  writeFileSync(config, JSON.stringify({ compilerOptions: { strict: true, noEmit: true, types: [] }, files: [path] }));
   writeFileSync(path, 'export const answer = 42;\nexport const invalid: number = "wrong";\n');
-  // Compared with the pinned SDK, which runs tsgo, so the bridge runs tsgo too.
-  const checker = process.env["SCRIPTC_CHECKER"];
-  process.env["SCRIPTC_CHECKER"] = "tsgo";
-  let nativeClient: Ts7Api;
-  try {
-    nativeClient = new Ts7Api({ cwd: dir, fs: fallback });
-  } finally {
-    if (checker === undefined) delete process.env["SCRIPTC_CHECKER"];
-    else process.env["SCRIPTC_CHECKER"] = checker;
-  }
+  const nativeClient = new Ts7Api({ cwd: dir, fs: fallback });
   const sdk = new API({ cwd: dir });
   try {
-    // The session answers with the server's reply (the parsed command line
-    // plus the raw config, errors and compileOnSave); the SDK reports the
-    // parsed command line alone.
-    const nativeConfig = nativeClient.parseConfigFile(config);
-    const sdkConfig = sdk.parseConfigFile(config);
-    expect({ options: nativeConfig.options, fileNames: nativeConfig.fileNames }).toEqual({
-      options: sdkConfig.options,
-      fileNames: sdkConfig.fileNames,
-    });
-    const expected = sdk.createSnapshot({ openProjects: [config] });
+    expect(nativeClient.parseConfigFile(config)).toEqual(sdk.parseConfigFile(config));
+    const expected = sdk.updateSnapshot({ openProjects: [config] });
     const actual = nativeClient.updateSnapshot({ openProjects: [config] });
     const facts = programFacts(actual as unknown as Snapshot, config, path);
     expect(facts).toEqual(programFacts(expected, config, path));
@@ -113,9 +66,6 @@ test("production RPC bridge preserves pinned SDK parser/checker behavior", () =>
     expect(facts.symbol).toBe("answer");
     expect(facts.semantic.map((diagnostic) => diagnostic.code)).toEqual([2322]);
     const project = actual.getProject(config)!;
-    // The SDK's configured project reports no root list; the client carries
-    // the parsed command line's files.
-    expect(project.rootFiles).toEqual([path]);
     const source = project.program.getSourceFile(path)!;
     expect(source).toBeInstanceOf(AstNode);
     expect(project.program.getSourceFile(path)).toBe(source);
@@ -125,32 +75,23 @@ test("production RPC bridge preserves pinned SDK parser/checker behavior", () =>
     expect(project.checker.getTypeAtPosition(path, source.text.indexOf("answer"))).toBe(first);
     const symbol = project.checker.getSymbolAtPosition(path, source.text.indexOf("answer"));
     expect(symbol).toBeInstanceOf(SemanticSymbol);
-    expect(symbol!.declarationHandles[0]).toBeInstanceOf(SemanticNodeHandle);
+    expect(symbol!.declarations[0]).toBeInstanceOf(SemanticNodeHandle);
     expect(project.checker.getSymbolAtPosition(path, source.text.indexOf("answer"))).toBe(symbol);
-    expect(symbol!.declarationHandles[0]!.resolve()).toBe(symbol!.declarationHandles[0]!.resolve());
-    const declaration = symbol!.declarationHandles[0]!.resolve()!;
+    expect(symbol!.declarations[0]!.resolve()).toBe(symbol!.declarations[0]!.resolve());
+    const declaration = symbol!.declarations[0]!.resolve()!;
     expect(declaration).toBeInstanceOf(AstNode);
-    const variable = source.statements
-      .nodes[0]! as import("../../src/frontend/ts7/ast-types.js").VariableStatement;
-    expect(variable.declarationList.declarations.nodes[0]).toBe(declaration);
-    expect(
-      project.checker.getSymbolAtLocation(variable.declarationList.declarations.nodes[0]!.name),
-    ).toBe(symbol);
-    expect(
-      project.checker.getTypeAtLocation(variable.declarationList.declarations.nodes[0]!.name),
-    ).toBe(first);
+    const variable = source.statements[0]! as import("../../src/frontend/ts7/ast-types.js").VariableStatement;
+    expect(variable.declarationList.declarations[0]).toBe(declaration);
+    expect(project.checker.getSymbolAtLocation(variable.declarationList.declarations[0]!.name)).toBe(symbol);
+    expect(project.checker.getTypeAtLocation(variable.declarationList.declarations[0]!.name)).toBe(first);
     const expectedSource = expected.getProject(config)!.program.getSourceFile(path)!;
-    expect(source.statements.nodes.map((node) => [node.kind, node.pos, node.end])).toEqual(
+    expect(source.statements.map((node) => [node.kind, node.pos, node.end])).toEqual(
       expectedSource.statements.map((node) => [node.kind, node.pos, node.end]),
     );
-    // A list carries its own position, as tsc-ts's NodeList does, and its
-    // nodes are a plain array that retains element identity.
-    expect([source.statements.pos, source.statements.end]).toEqual([
-      expectedSource.statements.pos,
-      expectedSource.statements.end,
-    ]);
-    expect(Array.isArray(source.statements.nodes)).toBe(true);
-    expect(Object.hasOwn(source.statements.nodes, "pos")).toBe(false);
+    // Native arrays retain element identity; SDK-only properties no longer
+    // need a JavaScript Object.assign adapter on production source lists.
+    expect(Array.isArray(source.statements)).toBe(true);
+    expect(Object.hasOwn(source.statements, "pos")).toBe(false);
     expect(Object.hasOwn(source.statements, "transformFlags")).toBe(false);
     expect(source.referencedFiles).toBe(source.referencedFiles);
     expect(source.imports).toBe(source.imports);
@@ -191,11 +132,7 @@ test("snapshots share unchanged source files and release independently", () => {
     const updated = project.program.getSourceFile(path)!;
     expect(updated.text).toBe('export const answer = "updated";\n');
     expect(updated).not.toBe(thirdFile);
-    expect(
-      project.checker.typeToString(
-        project.checker.getTypeAtPosition(path, updated.text.indexOf("answer"))!,
-      ),
-    ).toBe('"updated"');
+    expect(project.checker.typeToString(project.checker.getTypeAtPosition(path, updated.text.indexOf("answer"))!)).toBe('"updated"');
     expect(firstFile!.text).toBe("export const answer = 42;\n");
     api.close();
     expect(fourth.isDisposed()).toBe(true);
@@ -213,23 +150,11 @@ test("native semantic registries preserve project scope and snapshot lifetimes",
   const firstConfig = tsgoPath(join(dir, "first.json"));
   const secondConfig = tsgoPath(join(dir, "second.json"));
   const path = tsgoPath(join(dir, "shared.ts"));
-  for (const config of [firstConfig, secondConfig])
-    writeFileSync(
-      config,
-      JSON.stringify({
-        compilerOptions: { strict: true, target: "esnext", types: [] },
-        files: [path],
-      }),
-    );
-  const source =
-    "export function identity<T>(value: T): T { return value; }\nexport const answer = 42;\n";
+  for (const config of [firstConfig, secondConfig]) writeFileSync(config, JSON.stringify({ compilerOptions: { strict: true, target: "esnext", types: [] }, files: [path] }));
+  const source = "export function identity<T>(value: T): T { return value; }\nexport const answer = 42;\n";
   writeFileSync(path, source);
   const api = new Ts7Api({ cwd: dir, fs: fallback });
   const sdk = new API({ cwd: dir });
-  // scriptc's node lists keep their nodes in `nodes`; the SDK's lists are arrays.
-  type SdkNode = import("typescript/ast").Node;
-  const nodesOf = (list: unknown): readonly SdkNode[] =>
-    Array.isArray(list) ? list : (list as { nodes: readonly SdkNode[] }).nodes;
   function facts(snapshot: Snapshot) {
     const a = snapshot.getProject(firstConfig)!;
     const b = snapshot.getProject(secondConfig)!;
@@ -240,37 +165,23 @@ test("native semantic registries preserve project scope and snapshot lifetimes",
     const typeB = b.checker.getTypeAtPosition(path, answer)!;
     const fileA = a.program.getSourceFile(path)!;
     const fileB = b.program.getSourceFile(path)!;
-    const signatureA = a.checker.getSignatureFromDeclaration(nodesOf(fileA.statements)[0]!)!;
-    const signatureB = b.checker.getSignatureFromDeclaration(nodesOf(fileB.statements)[0]!)!;
+    const signatureA = a.checker.getSignatureFromDeclaration(fileA.statements[0]!)!;
+    const signatureB = b.checker.getSignatureFromDeclaration(fileB.statements[0]!)!;
     return {
       shape: {
-        sharedSymbol: symbolA === symbolB,
-        sharedType: typeA === typeB,
-        sharedSignature: signatureA === signatureB,
-        sameDeclaration:
-          declarationHandlesOf(symbolA)[0]!.resolve() ===
-          declarationHandlesOf(symbolB)[0]!.resolve(),
-        explicitDeclaration:
-          declarationHandlesOf(symbolB)[0]!.resolve(b) ===
-          nodesOf(
-            (nodesOf(fileB.statements)[1] as import("typescript/ast").VariableStatement)
-              .declarationList.declarations,
-          )[0],
+        sharedSymbol: symbolA === symbolB, sharedType: typeA === typeB, sharedSignature: signatureA === signatureB,
+        sameDeclaration: symbolA.declarations[0]!.resolve() === symbolB.declarations[0]!.resolve(),
+        explicitDeclaration: symbolB.declarations[0]!.resolve(b) === (fileB.statements[1] as import("typescript/unstable/ast").VariableStatement).declarationList.declarations[0],
         texts: [a.checker.typeToString(typeA), b.checker.typeToString(typeB)],
-        parameters: signatureA.getParameters().map(nameOf),
+        parameters: signatureA.getParameters().map((symbol) => symbol.name),
       },
-      symbolA,
-      typeA,
-      signatureA,
-      fileA,
+      symbolA, typeA, signatureA, fileA,
     };
   }
   try {
     const first = api.updateSnapshot({ openProjects: [firstConfig, secondConfig] });
     const actual = facts(first as unknown as Snapshot);
-    expect(actual.shape).toEqual(
-      facts(sdk.createSnapshot({ openProjects: [firstConfig, secondConfig] })).shape,
-    );
+    expect(actual.shape).toEqual(facts(sdk.updateSnapshot({ openProjects: [firstConfig, secondConfig] })).shape);
     expect(actual.signatureA).toBeInstanceOf(SemanticSignature);
     expect(actual.typeA).toBeInstanceOf(SemanticType);
     const second = api.updateSnapshot({ openProjects: [] });
@@ -281,8 +192,8 @@ test("native semantic registries preserve project scope and snapshot lifetimes",
     expect(next.signatureA).not.toBe(actual.signatureA);
     first.dispose();
     expect(() => actual.typeA.getSymbol()).toThrow("disposed");
-    expect(() => declarationHandlesOf(actual.symbolA)[0]!.resolve()).toThrow("disposed");
-    expect(nameOf(next.signatureA.getParameters()[0]!)).toBe("value");
+    expect(() => actual.symbolA.declarations[0]!.resolve()).toThrow("disposed");
+    expect(next.signatureA.getParameters()[0]!.name).toBe("value");
     expect(second.getProject(firstConfig)!.checker.typeToString(next.typeA)).toBe("42");
     second.dispose();
     expect(() => next.signatureA.getParameters()).toThrow("disposed");
@@ -308,22 +219,13 @@ test("virtual filesystem callbacks retain empty, hidden, and fallback files", ()
     ...fallback,
     readFile(path) {
       reads.add(path);
-      if (path === config)
-        return JSON.stringify({
-          compilerOptions: { types: [] },
-          files: [empty, hidden, real, virtual],
-        });
+      if (path === config) return JSON.stringify({ compilerOptions: { types: [] }, files: [empty, hidden, real, virtual] });
       if (path === empty) return "";
       if (path === hidden) return null;
       if (path === virtual) return 'export const answer = "virtual";';
       return undefined;
     },
-    fileExists: (path) =>
-      path === hidden
-        ? false
-        : path === empty || path === virtual || path === config
-          ? true
-          : undefined,
+    fileExists: (path) => path === hidden ? false : path === empty || path === virtual || path === config ? true : undefined,
   };
   const api = new Ts7Api({ cwd: dir, fs });
   try {
@@ -385,12 +287,7 @@ test("real server refusals leave the production process channel reusable", () =>
 
 test("failed process startup has no uncaught error or leaked exit hook", async () => {
   const before = process.listenerCount("exit");
-  expect(() => spawnTs7Wire(join(tempRoot, "scriptc-ts7-does-not-exist", "tsgo"), [])).toThrow(
-    // A missing toolchain payload is reported by the toolchain-mode repair
-    // when the compiler that carries it runs there, and by the FIFO launch
-    // otherwise (Windows has no execute bit, so the repair is skipped).
-    /toolchain executable .* is missing; reinstall scriptc|Unable to start TypeScript server/,
-  );
+  expect(() => spawnTs7Wire(join(tempRoot, "scriptc-ts7-does-not-exist", "tsgo"), [])).toThrow("Unable to start TypeScript server");
   await new Promise<void>((resolve) => setImmediate(resolve));
   expect(process.listenerCount("exit")).toBe(before);
 });
