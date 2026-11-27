@@ -6033,6 +6033,12 @@
    ],
    "diags": []
   },
+  "<repo>/tests/corpus/2799-destructure-past-array-end.ts": {
+   "order": [
+    "<repo>/tests/corpus/2799-destructure-past-array-end.ts"
+   ],
+   "diags": []
+  },
   "<repo>/tests/corpus/2800-array-expression-consumers.ts": {
    "order": [
     "<repo>/tests/corpus/2800-array-expression-consumers.ts"
@@ -7837,6 +7843,54 @@
    ],
    "diags": []
   },
+  "<repo>/tests/corpus/3138-array-large-storage.ts": {
+   "order": [
+    "<repo>/tests/corpus/3138-array-large-storage.ts"
+   ],
+   "diags": []
+  },
+  "<repo>/tests/corpus/3139-regex-native-deep-alternatives.ts": {
+   "order": [
+    "<repo>/tests/corpus/3139-regex-native-deep-alternatives.ts"
+   ],
+   "diags": []
+  },
+  "<repo>/tests/corpus/3140-array-dense-access.ts": {
+   "order": [
+    "<repo>/tests/corpus/3140-array-dense-access.ts"
+   ],
+   "diags": []
+  },
+  "<repo>/tests/corpus/3141-map-string-key-hash.ts": {
+   "order": [
+    "<repo>/tests/corpus/3141-map-string-key-hash.ts"
+   ],
+   "diags": []
+  },
+  "<repo>/tests/corpus/3150-integer-remainder.ts": {
+   "order": [
+    "<repo>/tests/corpus/3150-integer-remainder.ts"
+   ],
+   "diags": []
+  },
+  "<repo>/tests/corpus/3151-array-push-writes.ts": {
+   "order": [
+    "<repo>/tests/corpus/3151-array-push-writes.ts"
+   ],
+   "diags": []
+  },
+  "<repo>/tests/corpus/3170-number-conversion-fast-paths.ts": {
+   "order": [
+    "<repo>/tests/corpus/3170-number-conversion-fast-paths.ts"
+   ],
+   "diags": []
+  },
+  "<repo>/tests/corpus/3171-method-census-data-writes.ts": {
+   "order": [
+    "<repo>/tests/corpus/3171-method-census-data-writes.ts"
+   ],
+   "diags": []
+  },
   "<repo>/tests/corpus/400-fib.ts": {
    "order": [
     "<repo>/tests/corpus/400-fib.ts"
@@ -7873,9 +7927,64 @@
    ],
    "diags": []
   },
+  "<repo>/tests/corpus/4032-inline-rc-fast-paths.ts": {
+   "order": [
+    "<repo>/tests/corpus/4032-inline-rc-fast-paths.ts"
+   ],
+   "diags": []
+  },
   "<repo>/tests/corpus/404-rc-stress.ts": {
    "order": [
     "<repo>/tests/corpus/404-rc-stress.ts"
+   ],
+   "diags": []
+  },
+  "<repo>/tests/corpus/4040-adapted-function-identity.ts": {
+   "order": [
+    "<repo>/tests/corpus/4040-adapted-function-identity.ts"
+   ],
+   "diags": []
+  },
+  "<repo>/tests/corpus/4041-adapted-function-properties.ts": {
+   "order": [
+    "<repo>/tests/corpus/4041-adapted-function-properties.ts"
+   ],
+   "diags": []
+  },
+  "<repo>/tests/corpus/4042-object-is-union-subclass.ts": {
+   "order": [
+    "<repo>/tests/corpus/4042-object-is-union-subclass.ts"
+   ],
+   "diags": []
+  },
+  "<repo>/tests/corpus/4043-nonnull-missing-element.ts": {
+   "order": [
+    "<repo>/tests/corpus/4043-nonnull-missing-element.ts"
+   ],
+   "diags": []
+  },
+  "<repo>/tests/corpus/4044-adapted-callback-modules/main.ts": {
+   "order": [
+    "<repo>/tests/corpus/4044-adapted-callback-modules/registry.ts",
+    "<repo>/tests/corpus/4044-adapted-callback-modules/main.ts"
+   ],
+   "diags": []
+  },
+  "<repo>/tests/corpus/4045-optional-element-projections.ts": {
+   "order": [
+    "<repo>/tests/corpus/4045-optional-element-projections.ts"
+   ],
+   "diags": []
+  },
+  "<repo>/tests/corpus/4046-captured-parameter-values.ts": {
+   "order": [
+    "<repo>/tests/corpus/4046-captured-parameter-values.ts"
+   ],
+   "diags": []
+  },
+  "<repo>/tests/corpus/4047-captured-parameter-rebinding.ts": {
+   "order": [
+    "<repo>/tests/corpus/4047-captured-parameter-rebinding.ts"
    ],
    "diags": []
   },
@@ -7891,6 +8000,165 @@
    ],
    "diags": []
   },
+  "<repo>/tests/corpus/4060-cycle-shared-instance/main.ts": {
+   "order": [
+    "<repo>/tests/corpus/4060-cycle-shared-instance/report.ts",
+    "<repo>/tests/corpus/4060-cycle-shared-instance/inventory.ts",
+    "<repo>/tests/corpus/4060-cycle-shared-instance/main.ts"
+   ],
+   "diags": [
+    {
+     "code": "SC1016",
+     "message": "circular imports (<repo>/tests/corpus/4060-cycle-shared-instance/inventory.ts → <repo>/tests/corpus/4060-cycle-shared-instance/report.ts → <repo>/tests/corpus/4060-cycle-shared-instance/inventory.ts; top-level code at <repo>/tests/corpus/4060-cycle-shared-instance/inventory.ts:15 can run user code during the cycle's init window — only declaration-only module bodies are admitted) are not supported yet",
+     "loc": {
+      "file": "<repo>/tests/corpus/4060-cycle-shared-instance/inventory.ts",
+      "start": 0,
+      "end": 0
+     },
+     "milestone": "later",
+     "hint": "cycles of ES modules with declaration-only top levels whose cycle-crossing bindings are only used inside function bodies compile as-is; move the named top-level read or call into a function body (or break the named edge) so nothing runs during the cycle's init window"
+    }
+   ]
+  },
+  "<repo>/tests/corpus/4060-stack-union-reads.ts": {
+   "order": [
+    "<repo>/tests/corpus/4060-stack-union-reads.ts"
+   ],
+   "diags": []
+  },
+  "<repo>/tests/corpus/4061-cycle-evaluation-order/main.ts": {
+   "order": [
+    "<repo>/tests/corpus/4061-cycle-evaluation-order/south.ts",
+    "<repo>/tests/corpus/4061-cycle-evaluation-order/east.ts",
+    "<repo>/tests/corpus/4061-cycle-evaluation-order/north.ts",
+    "<repo>/tests/corpus/4061-cycle-evaluation-order/main.ts"
+   ],
+   "diags": [
+    {
+     "code": "SC1016",
+     "message": "circular imports (<repo>/tests/corpus/4061-cycle-evaluation-order/north.ts → <repo>/tests/corpus/4061-cycle-evaluation-order/east.ts → <repo>/tests/corpus/4061-cycle-evaluation-order/south.ts → <repo>/tests/corpus/4061-cycle-evaluation-order/north.ts; top-level code at <repo>/tests/corpus/4061-cycle-evaluation-order/east.ts:6 can run user code during the cycle's init window — only declaration-only module bodies are admitted) are not supported yet",
+     "loc": {
+      "file": "<repo>/tests/corpus/4061-cycle-evaluation-order/north.ts",
+      "start": 0,
+      "end": 0
+     },
+     "milestone": "later",
+     "hint": "cycles of ES modules with declaration-only top levels whose cycle-crossing bindings are only used inside function bodies compile as-is; move the named top-level read or call into a function body (or break the named edge) so nothing runs during the cycle's init window"
+    }
+   ]
+  },
+  "<repo>/tests/corpus/4061-nullable-ref-fields.ts": {
+   "order": [
+    "<repo>/tests/corpus/4061-nullable-ref-fields.ts"
+   ],
+   "diags": []
+  },
+  "<repo>/tests/corpus/4062-cycle-tdz-read/main.ts": {
+   "order": [
+    "<repo>/tests/corpus/4062-cycle-tdz-read/probe.ts",
+    "<repo>/tests/corpus/4062-cycle-tdz-read/limits.ts",
+    "<repo>/tests/corpus/4062-cycle-tdz-read/main.ts"
+   ],
+   "diags": [
+    {
+     "code": "SC1016",
+     "message": "circular imports (<repo>/tests/corpus/4062-cycle-tdz-read/limits.ts → <repo>/tests/corpus/4062-cycle-tdz-read/probe.ts → <repo>/tests/corpus/4062-cycle-tdz-read/limits.ts; top-level code at <repo>/tests/corpus/4062-cycle-tdz-read/limits.ts:3 can run user code during the cycle's init window — only declaration-only module bodies are admitted) are not supported yet",
+     "loc": {
+      "file": "<repo>/tests/corpus/4062-cycle-tdz-read/limits.ts",
+      "start": 0,
+      "end": 0
+     },
+     "milestone": "later",
+     "hint": "cycles of ES modules with declaration-only top levels whose cycle-crossing bindings are only used inside function bodies compile as-is; move the named top-level read or call into a function body (or break the named edge) so nothing runs during the cycle's init window"
+    }
+   ]
+  },
+  "<repo>/tests/corpus/4063-cycle-hoisted-calls/main.ts": {
+   "order": [
+    "<repo>/tests/corpus/4063-cycle-hoisted-calls/odd.ts",
+    "<repo>/tests/corpus/4063-cycle-hoisted-calls/even.ts",
+    "<repo>/tests/corpus/4063-cycle-hoisted-calls/main.ts"
+   ],
+   "diags": [
+    {
+     "code": "SC1016",
+     "message": "circular imports (<repo>/tests/corpus/4063-cycle-hoisted-calls/even.ts → <repo>/tests/corpus/4063-cycle-hoisted-calls/odd.ts → <repo>/tests/corpus/4063-cycle-hoisted-calls/even.ts; top-level code at <repo>/tests/corpus/4063-cycle-hoisted-calls/even.ts:9 can run user code during the cycle's init window — only declaration-only module bodies are admitted) are not supported yet",
+     "loc": {
+      "file": "<repo>/tests/corpus/4063-cycle-hoisted-calls/even.ts",
+      "start": 0,
+      "end": 0
+     },
+     "milestone": "later",
+     "hint": "cycles of ES modules with declaration-only top levels whose cycle-crossing bindings are only used inside function bodies compile as-is; move the named top-level read or call into a function body (or break the named edge) so nothing runs during the cycle's init window"
+    }
+   ]
+  },
+  "<repo>/tests/corpus/4064-cycle-classes-after-init/main.ts": {
+   "order": [
+    "<repo>/tests/corpus/4064-cycle-classes-after-init/item.ts",
+    "<repo>/tests/corpus/4064-cycle-classes-after-init/shelf.ts",
+    "<repo>/tests/corpus/4064-cycle-classes-after-init/main.ts"
+   ],
+   "diags": [
+    {
+     "code": "SC1016",
+     "message": "circular imports (<repo>/tests/corpus/4064-cycle-classes-after-init/shelf.ts → <repo>/tests/corpus/4064-cycle-classes-after-init/item.ts → <repo>/tests/corpus/4064-cycle-classes-after-init/shelf.ts; top-level code at <repo>/tests/corpus/4064-cycle-classes-after-init/shelf.ts:21 can run user code during the cycle's init window — only declaration-only module bodies are admitted) are not supported yet",
+     "loc": {
+      "file": "<repo>/tests/corpus/4064-cycle-classes-after-init/shelf.ts",
+      "start": 0,
+      "end": 0
+     },
+     "milestone": "later",
+     "hint": "cycles of ES modules with declaration-only top levels whose cycle-crossing bindings are only used inside function bodies compile as-is; move the named top-level read or call into a function body (or break the named edge) so nothing runs during the cycle's init window"
+    }
+   ]
+  },
+  "<repo>/tests/corpus/4065-cycle-init-throws/main.ts": {
+   "order": [
+    "<repo>/tests/corpus/4065-cycle-init-throws/rules.ts",
+    "<repo>/tests/corpus/4065-cycle-init-throws/ledger.ts",
+    "<repo>/tests/corpus/4065-cycle-init-throws/main.ts"
+   ],
+   "diags": [
+    {
+     "code": "SC1016",
+     "message": "circular imports (<repo>/tests/corpus/4065-cycle-init-throws/ledger.ts → <repo>/tests/corpus/4065-cycle-init-throws/rules.ts → <repo>/tests/corpus/4065-cycle-init-throws/ledger.ts; top-level code at <repo>/tests/corpus/4065-cycle-init-throws/ledger.ts:4 can run user code during the cycle's init window — only declaration-only module bodies are admitted) are not supported yet",
+     "loc": {
+      "file": "<repo>/tests/corpus/4065-cycle-init-throws/ledger.ts",
+      "start": 0,
+      "end": 0
+     },
+     "milestone": "later",
+     "hint": "cycles of ES modules with declaration-only top levels whose cycle-crossing bindings are only used inside function bodies compile as-is; move the named top-level read or call into a function body (or break the named edge) so nothing runs during the cycle's init window"
+    }
+   ]
+  },
+  "<repo>/tests/corpus/4066-cycle-top-level-tdz/main.ts": {
+   "order": [
+    "<repo>/tests/corpus/4066-cycle-top-level-tdz/margin.ts",
+    "<repo>/tests/corpus/4066-cycle-top-level-tdz/frame.ts",
+    "<repo>/tests/corpus/4066-cycle-top-level-tdz/main.ts"
+   ],
+   "diags": [
+    {
+     "code": "SC1016",
+     "message": "circular imports (<repo>/tests/corpus/4066-cycle-top-level-tdz/frame.ts → <repo>/tests/corpus/4066-cycle-top-level-tdz/margin.ts → <repo>/tests/corpus/4066-cycle-top-level-tdz/frame.ts; the cycle-crossing binding 'width' is read at <repo>/tests/corpus/4066-cycle-top-level-tdz/margin.ts:4, outside any function body — a read during the init window observes the partially-initialized module (Node's TDZ ReferenceError / stale var), which is not modeled) are not supported yet",
+     "loc": {
+      "file": "<repo>/tests/corpus/4066-cycle-top-level-tdz/frame.ts",
+      "start": 0,
+      "end": 0
+     },
+     "milestone": "later",
+     "hint": "cycles of ES modules with declaration-only top levels whose cycle-crossing bindings are only used inside function bodies compile as-is; move the named top-level read or call into a function body (or break the named edge) so nothing runs during the cycle's init window"
+    }
+   ]
+  },
+  "<repo>/tests/corpus/4067-dynamic-import-cycle-tdz/main.ts": {
+   "order": [
+    "<repo>/tests/corpus/4067-dynamic-import-cycle-tdz/main.ts"
+   ],
+   "diags": []
+  },
   "<repo>/tests/corpus/407-params-rest.ts": {
    "order": [
     "<repo>/tests/corpus/407-params-rest.ts"
@@ -7903,9 +8171,88 @@
    ],
    "diags": []
   },
+  "<repo>/tests/corpus/4080-optional-read-presence-tests.ts": {
+   "order": [
+    "<repo>/tests/corpus/4080-optional-read-presence-tests.ts"
+   ],
+   "diags": []
+  },
+  "<repo>/tests/corpus/4080-string-index-bounds.ts": {
+   "order": [
+    "<repo>/tests/corpus/4080-string-index-bounds.ts"
+   ],
+   "diags": []
+  },
+  "<repo>/tests/corpus/4081-hoisted-function-tdz.ts": {
+   "order": [
+    "<repo>/tests/corpus/4081-hoisted-function-tdz.ts"
+   ],
+   "diags": []
+  },
+  "<repo>/tests/corpus/4081-string-index-unproven.ts": {
+   "order": [
+    "<repo>/tests/corpus/4081-string-index-unproven.ts"
+   ],
+   "diags": []
+  },
+  "<repo>/tests/corpus/4082-hoisted-function-tdz-uncaught.ts": {
+   "order": [
+    "<repo>/tests/corpus/4082-hoisted-function-tdz-uncaught.ts"
+   ],
+   "diags": []
+  },
+  "<repo>/tests/corpus/4083-dynamic-import-failure/main.ts": {
+   "order": [
+    "<repo>/tests/corpus/4083-dynamic-import-failure/errors.ts",
+    "<repo>/tests/corpus/4083-dynamic-import-failure/main.ts"
+   ],
+   "diags": []
+  },
+  "<repo>/tests/corpus/4084-record-optional-field-copies.ts": {
+   "order": [
+    "<repo>/tests/corpus/4084-record-optional-field-copies.ts"
+   ],
+   "diags": []
+  },
+  "<repo>/tests/corpus/4085-generator-loop-close.ts": {
+   "order": [
+    "<repo>/tests/corpus/4085-generator-loop-close.ts"
+   ],
+   "diags": []
+  },
+  "<repo>/tests/corpus/4086-optional-capture-defaults.ts": {
+   "order": [
+    "<repo>/tests/corpus/4086-optional-capture-defaults.ts"
+   ],
+   "diags": []
+  },
+  "<repo>/tests/corpus/4088-class-static-tdz.ts": {
+   "order": [
+    "<repo>/tests/corpus/4088-class-static-tdz.ts"
+   ],
+   "diags": []
+  },
+  "<repo>/tests/corpus/4089-class-wrapper-tdz.js": {
+   "order": [
+    "<repo>/tests/corpus/4089-class-wrapper-tdz.js"
+   ],
+   "diags": []
+  },
   "<repo>/tests/corpus/409-params-async-generics.ts": {
    "order": [
     "<repo>/tests/corpus/409-params-async-generics.ts"
+   ],
+   "diags": []
+  },
+  "<repo>/tests/corpus/4090-computed-key-tdz.js": {
+   "order": [
+    "<repo>/tests/corpus/4090-computed-key-tdz.js"
+   ],
+   "diags": []
+  },
+  "<repo>/tests/corpus/4091-class-evaluation-deferred.ts": {
+   "order": [
+    "<repo>/tests/corpus/4091-class-evaluation-deferred.ts"
    ],
    "diags": []
   },
@@ -7915,11 +8262,906 @@
    ],
    "diags": []
   },
+  "<repo>/tests/corpus/4140-array-callback-split-visit.ts": {
+   "order": [
+    "<repo>/tests/corpus/4140-array-callback-split-visit.ts"
+   ],
+   "diags": []
+  },
+  "<repo>/tests/corpus/4141-array-callback-ambient-receiver/main.ts": {
+   "order": [
+    "<repo>/tests/corpus/4141-array-callback-ambient-receiver/peek.mjs",
+    "<repo>/tests/corpus/4141-array-callback-ambient-receiver/mapper.ts",
+    "<repo>/tests/corpus/4141-array-callback-ambient-receiver/holder.mjs",
+    "<repo>/tests/corpus/4141-array-callback-ambient-receiver/main.ts"
+   ],
+   "diags": []
+  },
+  "<repo>/tests/corpus/4142-array-callback-factories.ts": {
+   "order": [
+    "<repo>/tests/corpus/4142-array-callback-factories.ts"
+   ],
+   "diags": []
+  },
+  "<repo>/tests/corpus/4143-union-refinement-intersection-arms.ts": {
+   "order": [
+    "<repo>/tests/corpus/4143-union-refinement-intersection-arms.ts"
+   ],
+   "diags": []
+  },
   "<repo>/tests/corpus/420-dead-strip-modules/main.ts": {
    "order": [
     "<repo>/tests/corpus/420-dead-strip-modules/side.ts",
     "<repo>/tests/corpus/420-dead-strip-modules/lib.ts",
     "<repo>/tests/corpus/420-dead-strip-modules/main.ts"
+   ],
+   "diags": []
+  },
+  "<repo>/tests/corpus/4290-acyclic-immutable-trees.ts": {
+   "order": [
+    "<repo>/tests/corpus/4290-acyclic-immutable-trees.ts"
+   ],
+   "diags": []
+  },
+  "<repo>/tests/corpus/4291-acyclic-constructor-escapes.ts": {
+   "order": [
+    "<repo>/tests/corpus/4291-acyclic-constructor-escapes.ts"
+   ],
+   "diags": []
+  },
+  "<repo>/tests/corpus/4292-acyclic-readonly-bypass.ts": {
+   "order": [
+    "<repo>/tests/corpus/4292-acyclic-readonly-bypass.ts"
+   ],
+   "diags": []
+  },
+  "<repo>/tests/corpus/4293-acyclic-dynamic-writes.ts": {
+   "order": [
+    "<repo>/tests/corpus/4293-acyclic-dynamic-writes.ts"
+   ],
+   "diags": []
+  },
+  "<repo>/tests/corpus/4294-console-line-sizes.ts": {
+   "order": [
+    "<repo>/tests/corpus/4294-console-line-sizes.ts"
+   ],
+   "diags": []
+  },
+  "<repo>/tests/corpus/4295-console-template-parts.ts": {
+   "order": [
+    "<repo>/tests/corpus/4295-console-template-parts.ts"
+   ],
+   "diags": []
+  },
+  "<repo>/tests/corpus/4296-console-glued-long-parts.ts": {
+   "order": [
+    "<repo>/tests/corpus/4296-console-glued-long-parts.ts"
+   ],
+   "diags": []
+  },
+  "<repo>/tests/corpus/4410-inline-object-allocation.ts": {
+   "order": [
+    "<repo>/tests/corpus/4410-inline-object-allocation.ts"
+   ],
+   "diags": []
+  },
+  "<repo>/tests/corpus/4411-nullable-ref-values.ts": {
+   "order": [
+    "<repo>/tests/corpus/4411-nullable-ref-values.ts"
+   ],
+   "diags": []
+  },
+  "<repo>/tests/corpus/4412-nullable-record-values.ts": {
+   "order": [
+    "<repo>/tests/corpus/4412-nullable-record-values.ts"
+   ],
+   "diags": []
+  },
+  "<repo>/tests/corpus/4413-cycle-old-late-death.ts": {
+   "order": [
+    "<repo>/tests/corpus/4413-cycle-old-late-death.ts"
+   ],
+   "diags": []
+  },
+  "<repo>/tests/corpus/4413-nullable-null-and-undefined.ts": {
+   "order": [
+    "<repo>/tests/corpus/4413-nullable-null-and-undefined.ts"
+   ],
+   "diags": []
+  },
+  "<repo>/tests/corpus/4414-cycle-old-weak-keys.ts": {
+   "order": [
+    "<repo>/tests/corpus/4414-cycle-old-weak-keys.ts"
+   ],
+   "diags": []
+  },
+  "<repo>/tests/corpus/4414-nullable-string-values.ts": {
+   "order": [
+    "<repo>/tests/corpus/4414-nullable-string-values.ts"
+   ],
+   "diags": []
+  },
+  "<repo>/tests/corpus/4415-identity-borrowed-operands.ts": {
+   "order": [
+    "<repo>/tests/corpus/4415-identity-borrowed-operands.ts"
+   ],
+   "diags": []
+  },
+  "<repo>/tests/corpus/4415-nullable-container-values.ts": {
+   "order": [
+    "<repo>/tests/corpus/4415-nullable-container-values.ts"
+   ],
+   "diags": []
+  },
+  "<repo>/tests/corpus/4415-timers-while-io-wakes.ts": {
+   "order": [
+    "<repo>/tests/corpus/4415-timers-while-io-wakes.ts"
+   ],
+   "diags": []
+  },
+  "<repo>/tests/corpus/4421-typedarray-from-array-like.ts": {
+   "order": [
+    "<repo>/tests/corpus/4421-typedarray-from-array-like.ts"
+   ],
+   "diags": []
+  },
+  "<repo>/tests/corpus/4422-typedarray-from-dynamic-source.js": {
+   "order": [
+    "<repo>/tests/corpus/4422-typedarray-from-dynamic-source.js"
+   ],
+   "diags": []
+  },
+  "<repo>/tests/corpus/4423-captured-number-precision.ts": {
+   "order": [
+    "<repo>/tests/corpus/4423-captured-number-precision.ts"
+   ],
+   "diags": []
+  },
+  "<repo>/tests/corpus/4424-array-sort-comparator-records.ts": {
+   "order": [
+    "<repo>/tests/corpus/4424-array-sort-comparator-records.ts"
+   ],
+   "diags": []
+  },
+  "<repo>/tests/corpus/4425-array-sort-strings-classes.ts": {
+   "order": [
+    "<repo>/tests/corpus/4425-array-sort-strings-classes.ts"
+   ],
+   "diags": []
+  },
+  "<repo>/tests/corpus/4426-fn-adapter-record-field-identity.ts": {
+   "order": [
+    "<repo>/tests/corpus/4426-fn-adapter-record-field-identity.ts"
+   ],
+   "diags": []
+  },
+  "<repo>/tests/corpus/4431-exception-pending-contexts.ts": {
+   "order": [
+    "<repo>/tests/corpus/4431-exception-pending-contexts.ts"
+   ],
+   "diags": []
+  },
+  "<repo>/tests/corpus/4432-checked-downcast-failures.ts": {
+   "order": [
+    "<repo>/tests/corpus/4432-checked-downcast-failures.ts"
+   ],
+   "diags": []
+  },
+  "<repo>/tests/corpus/4451-int32-field-storage.ts": {
+   "order": [
+    "<repo>/tests/corpus/4451-int32-field-storage.ts"
+   ],
+   "diags": []
+  },
+  "<repo>/tests/corpus/4452-int32-field-dynamic-writes.ts": {
+   "order": [
+    "<repo>/tests/corpus/4452-int32-field-dynamic-writes.ts"
+   ],
+   "diags": []
+  },
+  "<repo>/tests/corpus/4453-int32-closed-locals.ts": {
+   "order": [
+    "<repo>/tests/corpus/4453-int32-closed-locals.ts"
+   ],
+   "diags": []
+  },
+  "<repo>/tests/corpus/4471-unassigned-field-reads.ts": {
+   "order": [
+    "<repo>/tests/corpus/4471-unassigned-field-reads.ts"
+   ],
+   "diags": []
+  },
+  "<repo>/tests/corpus/4476-string-ascii-header-fact.ts": {
+   "order": [
+    "<repo>/tests/corpus/4476-string-ascii-header-fact.ts"
+   ],
+   "diags": []
+  },
+  "<repo>/tests/corpus/4477-buffer-write-ascii-runs.ts": {
+   "order": [
+    "<repo>/tests/corpus/4477-buffer-write-ascii-runs.ts"
+   ],
+   "diags": []
+  },
+  "<repo>/tests/corpus/4478-string-large-index-reads.ts": {
+   "order": [
+    "<repo>/tests/corpus/4478-string-large-index-reads.ts"
+   ],
+   "diags": []
+  },
+  "<repo>/tests/corpus/4481-array-optional-push.ts": {
+   "order": [
+    "<repo>/tests/corpus/4481-array-optional-push.ts"
+   ],
+   "diags": []
+  },
+  "<repo>/tests/corpus/4482-instanceof-static-class-optional.ts": {
+   "order": [
+    "<repo>/tests/corpus/4482-instanceof-static-class-optional.ts"
+   ],
+   "diags": []
+  },
+  "<repo>/tests/corpus/4483-array-splice-statement.ts": {
+   "order": [
+    "<repo>/tests/corpus/4483-array-splice-statement.ts"
+   ],
+   "diags": []
+  },
+  "<repo>/tests/corpus/4484-array-length-reset.ts": {
+   "order": [
+    "<repo>/tests/corpus/4484-array-length-reset.ts"
+   ],
+   "diags": []
+  },
+  "<repo>/tests/corpus/4485-array-splice-optional-item.ts": {
+   "order": [
+    "<repo>/tests/corpus/4485-array-splice-optional-item.ts"
+   ],
+   "diags": []
+  },
+  "<repo>/tests/corpus/4486-array-field-element-borrows.ts": {
+   "order": [
+    "<repo>/tests/corpus/4486-array-field-element-borrows.ts"
+   ],
+   "diags": []
+  },
+  "<repo>/tests/corpus/4487-array-literal-optional-values.ts": {
+   "order": [
+    "<repo>/tests/corpus/4487-array-literal-optional-values.ts"
+   ],
+   "diags": []
+  },
+  "<repo>/tests/corpus/4520-optional-guard-narrowing.ts": {
+   "order": [
+    "<repo>/tests/corpus/4520-optional-guard-narrowing.ts"
+   ],
+   "diags": []
+  },
+  "<repo>/tests/corpus/4521-array-callback-element-presence.ts": {
+   "order": [
+    "<repo>/tests/corpus/4521-array-callback-element-presence.ts"
+   ],
+   "diags": []
+  },
+  "<repo>/tests/corpus/4522-captured-parameter-lifetimes.ts": {
+   "order": [
+    "<repo>/tests/corpus/4522-captured-parameter-lifetimes.ts"
+   ],
+   "diags": []
+  },
+  "<repo>/tests/corpus/4523-array-pop-removal.ts": {
+   "order": [
+    "<repo>/tests/corpus/4523-array-pop-removal.ts"
+   ],
+   "diags": []
+  },
+  "<repo>/tests/corpus/4524-array-callback-supertype-params.ts": {
+   "order": [
+    "<repo>/tests/corpus/4524-array-callback-supertype-params.ts"
+   ],
+   "diags": []
+  },
+  "<repo>/tests/corpus/4541-nullable-wrap-borrows.ts": {
+   "order": [
+    "<repo>/tests/corpus/4541-nullable-wrap-borrows.ts"
+   ],
+   "diags": []
+  },
+  "<repo>/tests/corpus/4542-preserving-call-borrows.ts": {
+   "order": [
+    "<repo>/tests/corpus/4542-preserving-call-borrows.ts"
+   ],
+   "diags": []
+  },
+  "<repo>/tests/corpus/4543-walk-borrowed-locals.ts": {
+   "order": [
+    "<repo>/tests/corpus/4543-walk-borrowed-locals.ts"
+   ],
+   "diags": []
+  },
+  "<repo>/tests/corpus/4544-checked-cast-aliases.ts": {
+   "order": [
+    "<repo>/tests/corpus/4544-checked-cast-aliases.ts"
+   ],
+   "diags": []
+  },
+  "<repo>/tests/corpus/4545-borrowed-returns.ts": {
+   "order": [
+    "<repo>/tests/corpus/4545-borrowed-returns.ts"
+   ],
+   "diags": []
+  },
+  "<repo>/tests/corpus/4546-rebound-borrowed-params.ts": {
+   "order": [
+    "<repo>/tests/corpus/4546-rebound-borrowed-params.ts"
+   ],
+   "diags": []
+  },
+  "<repo>/tests/corpus/4560-field-store-borrowed-receivers.ts": {
+   "order": [
+    "<repo>/tests/corpus/4560-field-store-borrowed-receivers.ts"
+   ],
+   "diags": []
+  },
+  "<repo>/tests/corpus/4561-virtual-borrowed-parameters.ts": {
+   "order": [
+    "<repo>/tests/corpus/4561-virtual-borrowed-parameters.ts"
+   ],
+   "diags": []
+  },
+  "<repo>/tests/corpus/4562-string-self-concat-move.ts": {
+   "order": [
+    "<repo>/tests/corpus/4562-string-self-concat-move.ts"
+   ],
+   "diags": []
+  },
+  "<repo>/tests/corpus/4563-array-read-projection-receivers.ts": {
+   "order": [
+    "<repo>/tests/corpus/4563-array-read-projection-receivers.ts"
+   ],
+   "diags": []
+  },
+  "<repo>/tests/corpus/4564-literal-choice-strings.ts": {
+   "order": [
+    "<repo>/tests/corpus/4564-literal-choice-strings.ts"
+   ],
+   "diags": []
+  },
+  "<repo>/tests/corpus/4568-for-of-hole-elements.ts": {
+   "order": [
+    "<repo>/tests/corpus/4568-for-of-hole-elements.ts"
+   ],
+   "diags": []
+  },
+  "<repo>/tests/corpus/4569-shorthand-missing-elements.ts": {
+   "order": [
+    "<repo>/tests/corpus/4569-shorthand-missing-elements.ts"
+   ],
+   "diags": []
+  },
+  "<repo>/tests/corpus/4570-map-lookup-default-record.ts": {
+   "order": [
+    "<repo>/tests/corpus/4570-map-lookup-default-record.ts"
+   ],
+   "diags": []
+  },
+  "<repo>/tests/corpus/4591-weak-keys-union-records.ts": {
+   "order": [
+    "<repo>/tests/corpus/4591-weak-keys-union-records.ts"
+   ],
+   "diags": []
+  },
+  "<repo>/tests/corpus/4592-cycle-const-from-import/main.ts": {
+   "order": [
+    "<repo>/tests/corpus/4592-cycle-const-from-import/report.ts",
+    "<repo>/tests/corpus/4592-cycle-const-from-import/stock.ts",
+    "<repo>/tests/corpus/4592-cycle-const-from-import/markup.ts",
+    "<repo>/tests/corpus/4592-cycle-const-from-import/pricing.ts",
+    "<repo>/tests/corpus/4592-cycle-const-from-import/main.ts"
+   ],
+   "diags": [
+    {
+     "code": "SC1016",
+     "message": "circular imports (<repo>/tests/corpus/4592-cycle-const-from-import/pricing.ts → <repo>/tests/corpus/4592-cycle-const-from-import/markup.ts → <repo>/tests/corpus/4592-cycle-const-from-import/stock.ts → <repo>/tests/corpus/4592-cycle-const-from-import/report.ts → <repo>/tests/corpus/4592-cycle-const-from-import/pricing.ts; top-level code at <repo>/tests/corpus/4592-cycle-const-from-import/stock.ts:4 can run user code during the cycle's init window — only declaration-only module bodies are admitted) are not supported yet",
+     "loc": {
+      "file": "<repo>/tests/corpus/4592-cycle-const-from-import/pricing.ts",
+      "start": 0,
+      "end": 0
+     },
+     "milestone": "later",
+     "hint": "cycles of ES modules with declaration-only top levels whose cycle-crossing bindings are only used inside function bodies compile as-is; move the named top-level read or call into a function body (or break the named edge) so nothing runs during the cycle's init window"
+    }
+   ]
+  },
+  "<repo>/tests/corpus/4593-weak-keys-empty-objects.ts": {
+   "order": [
+    "<repo>/tests/corpus/4593-weak-keys-empty-objects.ts"
+   ],
+   "diags": []
+  },
+  "<repo>/tests/corpus/4594-union-class-field-mixed-types.ts": {
+   "order": [
+    "<repo>/tests/corpus/4594-union-class-field-mixed-types.ts"
+   ],
+   "diags": []
+  },
+  "<repo>/tests/corpus/4595-union-class-field-optional-receiver.ts": {
+   "order": [
+    "<repo>/tests/corpus/4595-union-class-field-optional-receiver.ts"
+   ],
+   "diags": []
+  },
+  "<repo>/tests/corpus/4596-error-subclass-int-fields.ts": {
+   "order": [
+    "<repo>/tests/corpus/4596-error-subclass-int-fields.ts"
+   ],
+   "diags": []
+  },
+  "<repo>/tests/corpus/4596-tdz-nullable-forward-capture.ts": {
+   "order": [
+    "<repo>/tests/corpus/4596-tdz-nullable-forward-capture.ts"
+   ],
+   "diags": []
+  },
+  "<repo>/tests/corpus/4597-callback-field-method-name.ts": {
+   "order": [
+    "<repo>/tests/corpus/4597-callback-field-method-name.ts"
+   ],
+   "diags": []
+  },
+  "<repo>/tests/corpus/4598-live-array-ref-element-access.ts": {
+   "order": [
+    "<repo>/tests/corpus/4598-live-array-ref-element-access.ts"
+   ],
+   "diags": []
+  },
+  "<repo>/tests/corpus/4598-map-set-clear-reuse.ts": {
+   "order": [
+    "<repo>/tests/corpus/4598-map-set-clear-reuse.ts"
+   ],
+   "diags": []
+  },
+  "<repo>/tests/corpus/4598-os-available-parallelism.ts": {
+   "order": [
+    "<repo>/tests/corpus/4598-os-available-parallelism.ts"
+   ],
+   "diags": [
+    {
+     "code": "SC0001",
+     "message": "Module '\"node:os\"' has no exported member 'availableParallelism'.",
+     "loc": {
+      "file": "<repo>/tests/corpus/4598-os-available-parallelism.ts",
+      "start": 284,
+      "end": 304
+     }
+    },
+    {
+     "code": "SC0001",
+     "message": "Property 'availableParallelism' does not exist on type 'typeof import(\"node:os\")'.",
+     "loc": {
+      "file": "<repo>/tests/corpus/4598-os-available-parallelism.ts",
+      "start": 337,
+      "end": 357
+     }
+    }
+   ]
+  },
+  "<repo>/tests/corpus/4598-publish-constructor-stores.ts": {
+   "order": [
+    "<repo>/tests/corpus/4598-publish-constructor-stores.ts"
+   ],
+   "diags": [
+    {
+     "code": "SC0001",
+     "message": "Cannot find module '@scriptc/threads' or its corresponding type declarations.",
+     "loc": {
+      "file": "<repo>/tests/corpus/4598-publish-constructor-stores.ts",
+      "start": 24,
+      "end": 42
+     }
+    },
+    {
+     "code": "SC1010",
+     "message": "the '@scriptc/threads' package (nothing installed resolves it) is not supported yet",
+     "loc": {
+      "file": "<repo>/tests/corpus/4598-publish-constructor-stores.ts",
+      "start": 0,
+      "end": 43
+     },
+     "milestone": "M4",
+     "hint": "relative imports (./file, ../dir/file), package.json-mediated project imports (#alias via the imports field, self-name references via exports), installed npm packages (their code runs under --dynamic), and the built-in fs, fs/promises, path, os, url, crypto, zlib, child_process, net, http, tls, https, http2, dgram, dns, util, util/types, string_decoder, querystring, readline, events, stream, stream/promises, stream/consumers, buffer, assert, assert/strict, worker_threads, cluster, tty, async_hooks, timers, timers/promises, diagnostics_channel, perf_hooks, module, and console modules (bare or node:-prefixed) and node:test (node:-prefixed only, like in Node) are supported"
+    }
+   ]
+  },
+  "<repo>/tests/corpus/4599-construction-only-field-borrows.ts": {
+   "order": [
+    "<repo>/tests/corpus/4599-construction-only-field-borrows.ts"
+   ],
+   "diags": []
+  },
+  "<repo>/tests/corpus/4600-construction-only-fields-dynamic-writes.ts": {
+   "order": [
+    "<repo>/tests/corpus/4600-construction-only-fields-dynamic-writes.ts"
+   ],
+   "diags": []
+  },
+  "<repo>/tests/corpus/4601-cycle-holders.ts": {
+   "order": [
+    "<repo>/tests/corpus/4601-cycle-holders.ts"
+   ],
+   "diags": []
+  },
+  "<repo>/tests/corpus/4602-constructor-escape-order.ts": {
+   "order": [
+    "<repo>/tests/corpus/4602-constructor-escape-order.ts"
+   ],
+   "diags": []
+  },
+  "<repo>/tests/corpus/4610-array-ext-dyn-refresh.ts": {
+   "order": [
+    "<repo>/tests/corpus/4610-array-ext-dyn-refresh.ts"
+   ],
+   "diags": []
+  },
+  "<repo>/tests/corpus/4620-optional-chain-borrowed-receivers.ts": {
+   "order": [
+    "<repo>/tests/corpus/4620-optional-chain-borrowed-receivers.ts"
+   ],
+   "diags": []
+  },
+  "<repo>/tests/corpus/4621-edge-preserving-callees/main.ts": {
+   "order": [
+    "<repo>/tests/corpus/4621-edge-preserving-callees/compare.ts",
+    "<repo>/tests/corpus/4621-edge-preserving-callees/items.ts",
+    "<repo>/tests/corpus/4621-edge-preserving-callees/main.ts"
+   ],
+   "diags": [
+    {
+     "code": "SC1016",
+     "message": "circular imports (<repo>/tests/corpus/4621-edge-preserving-callees/items.ts → <repo>/tests/corpus/4621-edge-preserving-callees/compare.ts → <repo>/tests/corpus/4621-edge-preserving-callees/items.ts; top-level code at <repo>/tests/corpus/4621-edge-preserving-callees/items.ts:30 can run user code during the cycle's init window — only declaration-only module bodies are admitted) are not supported yet",
+     "loc": {
+      "file": "<repo>/tests/corpus/4621-edge-preserving-callees/items.ts",
+      "start": 0,
+      "end": 0
+     },
+     "milestone": "later",
+     "hint": "cycles of ES modules with declaration-only top levels whose cycle-crossing bindings are only used inside function bodies compile as-is; move the named top-level read or call into a function body (or break the named edge) so nothing runs during the cycle's init window"
+    }
+   ]
+  },
+  "<repo>/tests/corpus/4630-contract-int32.ts": {
+   "order": [
+    "<repo>/tests/corpus/4630-contract-int32.ts"
+   ],
+   "diags": [
+    {
+     "code": "SC0001",
+     "message": "Cannot find module '@scriptc/types' or its corresponding type declarations.",
+     "loc": {
+      "file": "<repo>/tests/corpus/4630-contract-int32.ts",
+      "start": 282,
+      "end": 298
+     }
+    }
+   ]
+  },
+  "<repo>/tests/corpus/4630-reference-write-call-arguments.ts": {
+   "order": [
+    "<repo>/tests/corpus/4630-reference-write-call-arguments.ts"
+   ],
+   "diags": []
+  },
+  "<repo>/tests/corpus/4631-contract-nothrow.ts": {
+   "order": [
+    "<repo>/tests/corpus/4631-contract-nothrow.ts"
+   ],
+   "diags": [
+    {
+     "code": "SC0001",
+     "message": "Cannot find module '@scriptc/types' or its corresponding type declarations.",
+     "loc": {
+      "file": "<repo>/tests/corpus/4631-contract-nothrow.ts",
+      "start": 181,
+      "end": 197
+     }
+    }
+   ]
+  },
+  "<repo>/tests/corpus/4631-reference-write-aliases.ts": {
+   "order": [
+    "<repo>/tests/corpus/4631-reference-write-aliases.ts"
+   ],
+   "diags": []
+  },
+  "<repo>/tests/corpus/4632-contract-immutable.ts": {
+   "order": [
+    "<repo>/tests/corpus/4632-contract-immutable.ts"
+   ],
+   "diags": [
+    {
+     "code": "SC0001",
+     "message": "Cannot find module '@scriptc/types' or its corresponding type declarations.",
+     "loc": {
+      "file": "<repo>/tests/corpus/4632-contract-immutable.ts",
+      "start": 289,
+      "end": 305
+     }
+    }
+   ]
+  },
+  "<repo>/tests/corpus/4632-reference-write-loops-and-walks.ts": {
+   "order": [
+    "<repo>/tests/corpus/4632-reference-write-loops-and-walks.ts"
+   ],
+   "diags": []
+  },
+  "<repo>/tests/corpus/4633-contract-program-lifetime.ts": {
+   "order": [
+    "<repo>/tests/corpus/4633-contract-program-lifetime.ts"
+   ],
+   "diags": [
+    {
+     "code": "SC0001",
+     "message": "Cannot find module '@scriptc/types' or its corresponding type declarations.",
+     "loc": {
+      "file": "<repo>/tests/corpus/4633-contract-program-lifetime.ts",
+      "start": 415,
+      "end": 431
+     }
+    }
+   ]
+  },
+  "<repo>/tests/corpus/4633-reference-write-callbacks-returns.ts": {
+   "order": [
+    "<repo>/tests/corpus/4633-reference-write-callbacks-returns.ts"
+   ],
+   "diags": []
+  },
+  "<repo>/tests/corpus/4634-contract-program-lifetime-publish.ts": {
+   "order": [
+    "<repo>/tests/corpus/4634-contract-program-lifetime-publish.ts"
+   ],
+   "diags": [
+    {
+     "code": "SC0001",
+     "message": "Cannot find module '@scriptc/threads' or its corresponding type declarations.",
+     "loc": {
+      "file": "<repo>/tests/corpus/4634-contract-program-lifetime-publish.ts",
+      "start": 108,
+      "end": 126
+     }
+    },
+    {
+     "code": "SC0001",
+     "message": "Cannot find module '@scriptc/types' or its corresponding type declarations.",
+     "loc": {
+      "file": "<repo>/tests/corpus/4634-contract-program-lifetime-publish.ts",
+      "start": 165,
+      "end": 181
+     }
+    },
+    {
+     "code": "SC0001",
+     "message": "Parameter 'c' implicitly has an 'any' type.",
+     "loc": {
+      "file": "<repo>/tests/corpus/4634-contract-program-lifetime-publish.ts",
+      "start": 8111,
+      "end": 8112
+     }
+    },
+    {
+     "code": "SC0001",
+     "message": "Argument of type '(code: number) => void' is not assignable to parameter of type '(...args: unknown[]) => void'.\n  Types of parameters 'code' and 'args' are incompatible.\n    Type 'unknown' is not assignable to type 'number'.",
+     "loc": {
+      "file": "<repo>/tests/corpus/4634-contract-program-lifetime-publish.ts",
+      "start": 9344,
+      "end": 9363
+     }
+    },
+    {
+     "code": "SC0001",
+     "message": "Property 'postMessage' does not exist on type '{}'.",
+     "loc": {
+      "file": "<repo>/tests/corpus/4634-contract-program-lifetime-publish.ts",
+      "start": 9820,
+      "end": 9831
+     }
+    },
+    {
+     "code": "SC1010",
+     "message": "the '@scriptc/threads' package (nothing installed resolves it) is not supported yet",
+     "loc": {
+      "file": "<repo>/tests/corpus/4634-contract-program-lifetime-publish.ts",
+      "start": 84,
+      "end": 127
+     },
+     "milestone": "M4",
+     "hint": "relative imports (./file, ../dir/file), package.json-mediated project imports (#alias via the imports field, self-name references via exports), installed npm packages (their code runs under --dynamic), and the built-in fs, fs/promises, path, os, url, crypto, zlib, child_process, net, http, tls, https, http2, dgram, dns, util, util/types, string_decoder, querystring, readline, events, stream, stream/promises, stream/consumers, buffer, assert, assert/strict, worker_threads, cluster, tty, async_hooks, timers, timers/promises, diagnostics_channel, perf_hooks, module, and console modules (bare or node:-prefixed) and node:test (node:-prefixed only, like in Node) are supported"
+    }
+   ]
+  },
+  "<repo>/tests/corpus/4634-optional-element-borrowed-returns.ts": {
+   "order": [
+    "<repo>/tests/corpus/4634-optional-element-borrowed-returns.ts"
+   ],
+   "diags": []
+  },
+  "<repo>/tests/corpus/4640-bitwise-identity-ranges.ts": {
+   "order": [
+    "<repo>/tests/corpus/4640-bitwise-identity-ranges.ts"
+   ],
+   "diags": []
+  },
+  "<repo>/tests/corpus/4641-nothrow-try-catch.ts": {
+   "order": [
+    "<repo>/tests/corpus/4641-nothrow-try-catch.ts"
+   ],
+   "diags": [
+    {
+     "code": "SC0001",
+     "message": "Cannot find module '@scriptc/types' or its corresponding type declarations.",
+     "loc": {
+      "file": "<repo>/tests/corpus/4641-nothrow-try-catch.ts",
+      "start": 241,
+      "end": 257
+     }
+    }
+   ]
+  },
+  "<repo>/tests/corpus/4642-acyclic-contract.ts": {
+   "order": [
+    "<repo>/tests/corpus/4642-acyclic-contract.ts"
+   ],
+   "diags": [
+    {
+     "code": "SC0001",
+     "message": "Cannot find module '@scriptc/types' or its corresponding type declarations.",
+     "loc": {
+      "file": "<repo>/tests/corpus/4642-acyclic-contract.ts",
+      "start": 257,
+      "end": 273
+     }
+    },
+    {
+     "code": "SC0001",
+     "message": "Cannot find module '@scriptc/types' or its corresponding type declarations.",
+     "loc": {
+      "file": "<repo>/tests/corpus/4642-acyclic-contract.ts",
+      "start": 300,
+      "end": 316
+     }
+    }
+   ]
+  },
+  "<repo>/tests/corpus/4650-stale-property-narrowing.ts": {
+   "order": [
+    "<repo>/tests/corpus/4650-stale-property-narrowing.ts"
+   ],
+   "diags": []
+  },
+  "<repo>/tests/corpus/4651-map-string-get-entry.ts": {
+   "order": [
+    "<repo>/tests/corpus/4651-map-string-get-entry.ts"
+   ],
+   "diags": []
+  },
+  "<repo>/tests/corpus/4652-stale-closure-binding-narrowing.ts": {
+   "order": [
+    "<repo>/tests/corpus/4652-stale-closure-binding-narrowing.ts"
+   ],
+   "diags": []
+  },
+  "<repo>/tests/corpus/4660-typed-rest-spread-forwarding.ts": {
+   "order": [
+    "<repo>/tests/corpus/4660-typed-rest-spread-forwarding.ts"
+   ],
+   "diags": []
+  },
+  "<repo>/tests/corpus/4671-scoped-array-read-borrows.ts": {
+   "order": [
+    "<repo>/tests/corpus/4671-scoped-array-read-borrows.ts"
+   ],
+   "diags": []
+  },
+  "<repo>/tests/corpus/4690-cycle-bypass-long-lived.ts": {
+   "order": [
+    "<repo>/tests/corpus/4690-cycle-bypass-long-lived.ts"
+   ],
+   "diags": []
+  },
+  "<repo>/tests/corpus/4691-publish-constructor-self-alias.ts": {
+   "order": [
+    "<repo>/tests/corpus/4691-publish-constructor-self-alias.ts"
+   ],
+   "diags": [
+    {
+     "code": "SC0001",
+     "message": "Cannot find module '@scriptc/threads' or its corresponding type declarations.",
+     "loc": {
+      "file": "<repo>/tests/corpus/4691-publish-constructor-self-alias.ts",
+      "start": 96,
+      "end": 114
+     }
+    },
+    {
+     "code": "SC0001",
+     "message": "Argument of type '(code: number) => void' is not assignable to parameter of type '(...args: unknown[]) => void'.\n  Types of parameters 'code' and 'args' are incompatible.\n    Type 'unknown' is not assignable to type 'number'.",
+     "loc": {
+      "file": "<repo>/tests/corpus/4691-publish-constructor-self-alias.ts",
+      "start": 1706,
+      "end": 1725
+     }
+    },
+    {
+     "code": "SC1010",
+     "message": "the '@scriptc/threads' package (nothing installed resolves it) is not supported yet",
+     "loc": {
+      "file": "<repo>/tests/corpus/4691-publish-constructor-self-alias.ts",
+      "start": 72,
+      "end": 115
+     },
+     "milestone": "M4",
+     "hint": "relative imports (./file, ../dir/file), package.json-mediated project imports (#alias via the imports field, self-name references via exports), installed npm packages (their code runs under --dynamic), and the built-in fs, fs/promises, path, os, url, crypto, zlib, child_process, net, http, tls, https, http2, dgram, dns, util, util/types, string_decoder, querystring, readline, events, stream, stream/promises, stream/consumers, buffer, assert, assert/strict, worker_threads, cluster, tty, async_hooks, timers, timers/promises, diagnostics_channel, perf_hooks, module, and console modules (bare or node:-prefixed) and node:test (node:-prefixed only, like in Node) are supported"
+    }
+   ]
+  },
+  "<repo>/tests/corpus/4692-borrowed-result-mutating-callees.ts": {
+   "order": [
+    "<repo>/tests/corpus/4692-borrowed-result-mutating-callees.ts"
+   ],
+   "diags": []
+  },
+  "<repo>/tests/corpus/4720-cold-throw-paths.ts": {
+   "order": [
+    "<repo>/tests/corpus/4720-cold-throw-paths.ts"
+   ],
+   "diags": []
+  },
+  "<repo>/tests/corpus/4721-integer-induction-numbers.ts": {
+   "order": [
+    "<repo>/tests/corpus/4721-integer-induction-numbers.ts"
+   ],
+   "diags": []
+  },
+  "<repo>/tests/corpus/4722-union-element-unknown-identity.ts": {
+   "order": [
+    "<repo>/tests/corpus/4722-union-element-unknown-identity.ts"
+   ],
+   "diags": []
+  },
+  "<repo>/tests/corpus/4723-uninitialized-let-function.ts": {
+   "order": [
+    "<repo>/tests/corpus/4723-uninitialized-let-function.ts"
+   ],
+   "diags": []
+  },
+  "<repo>/tests/corpus/4724-index-record-shape-arm-to-unknown.ts": {
+   "order": [
+    "<repo>/tests/corpus/4724-index-record-shape-arm-to-unknown.ts"
+   ],
+   "diags": []
+  },
+  "<repo>/tests/corpus/4725-allocator-classes-and-runs.ts": {
+   "order": [
+    "<repo>/tests/corpus/4725-allocator-classes-and-runs.ts"
+   ],
+   "diags": []
+  },
+  "<repo>/tests/corpus/4726-fix-1127-abstract-property-implementations.ts": {
+   "order": [
+    "<repo>/tests/corpus/4726-fix-1127-abstract-property-implementations.ts"
+   ],
+   "diags": []
+  },
+  "<repo>/tests/corpus/4727-fix-1127-catch-message-concat-after-await.ts": {
+   "order": [
+    "<repo>/tests/corpus/4727-fix-1127-catch-message-concat-after-await.ts"
+   ],
+   "diags": []
+  },
+  "<repo>/tests/corpus/4728-fix-1127-number-of-dynamic-values.ts": {
+   "order": [
+    "<repo>/tests/corpus/4728-fix-1127-number-of-dynamic-values.ts"
    ],
    "diags": []
   },
@@ -8802,6 +10044,12 @@
    ],
    "diags": []
   },
+  "<repo>/tests/corpus/abstract-property-dispatch.ts": {
+   "order": [
+    "<repo>/tests/corpus/abstract-property-dispatch.ts"
+   ],
+   "diags": []
+  },
   "<repo>/tests/corpus/arguments-arrow-capture.mjs": {
    "order": [
     "<repo>/tests/corpus/arguments-arrow-capture.mjs"
@@ -8813,6 +10061,30 @@
     "<repo>/tests/corpus/arguments-reexport/core.js",
     "<repo>/tests/corpus/arguments-reexport/barrel.js",
     "<repo>/tests/corpus/arguments-reexport/main.ts"
+   ],
+   "diags": []
+  },
+  "<repo>/tests/corpus/array-argument-lifetimes-exits.ts": {
+   "order": [
+    "<repo>/tests/corpus/array-argument-lifetimes-exits.ts"
+   ],
+   "diags": []
+  },
+  "<repo>/tests/corpus/array-argument-lifetimes-mutation.ts": {
+   "order": [
+    "<repo>/tests/corpus/array-argument-lifetimes-mutation.ts"
+   ],
+   "diags": []
+  },
+  "<repo>/tests/corpus/array-argument-lifetimes-strings.ts": {
+   "order": [
+    "<repo>/tests/corpus/array-argument-lifetimes-strings.ts"
+   ],
+   "diags": []
+  },
+  "<repo>/tests/corpus/array-argument-lifetimes-values.ts": {
+   "order": [
+    "<repo>/tests/corpus/array-argument-lifetimes-values.ts"
    ],
    "diags": []
   },
@@ -8840,6 +10112,12 @@
    ],
    "diags": []
   },
+  "<repo>/tests/corpus/array-concat-widening.ts": {
+   "order": [
+    "<repo>/tests/corpus/array-concat-widening.ts"
+   ],
+   "diags": []
+  },
   "<repo>/tests/corpus/array-fill-unit-values.ts": {
    "order": [
     "<repo>/tests/corpus/array-fill-unit-values.ts"
@@ -8864,9 +10142,27 @@
    ],
    "diags": []
   },
+  "<repo>/tests/corpus/array-numeric-own-keys.ts": {
+   "order": [
+    "<repo>/tests/corpus/array-numeric-own-keys.ts"
+   ],
+   "diags": []
+  },
   "<repo>/tests/corpus/array-optional-number-write-index.ts": {
    "order": [
     "<repo>/tests/corpus/array-optional-number-write-index.ts"
+   ],
+   "diags": []
+  },
+  "<repo>/tests/corpus/array-primitive-ordering.ts": {
+   "order": [
+    "<repo>/tests/corpus/array-primitive-ordering.ts"
+   ],
+   "diags": []
+  },
+  "<repo>/tests/corpus/array-read-helper-effects.ts": {
+   "order": [
+    "<repo>/tests/corpus/array-read-helper-effects.ts"
    ],
    "diags": []
   },
@@ -8876,9 +10172,27 @@
    ],
    "diags": []
   },
+  "<repo>/tests/corpus/array-sort-runs.ts": {
+   "order": [
+    "<repo>/tests/corpus/array-sort-runs.ts"
+   ],
+   "diags": []
+  },
+  "<repo>/tests/corpus/array-sort-runtime-comparator.ts": {
+   "order": [
+    "<repo>/tests/corpus/array-sort-runtime-comparator.ts"
+   ],
+   "diags": []
+  },
   "<repo>/tests/corpus/array-sort-unknown-comparator.ts": {
    "order": [
     "<repo>/tests/corpus/array-sort-unknown-comparator.ts"
+   ],
+   "diags": []
+  },
+  "<repo>/tests/corpus/array-storage-transitions.ts": {
+   "order": [
+    "<repo>/tests/corpus/array-storage-transitions.ts"
    ],
    "diags": []
   },
@@ -8897,6 +10211,12 @@
   "<repo>/tests/corpus/async-local-typed-results.ts": {
    "order": [
     "<repo>/tests/corpus/async-local-typed-results.ts"
+   ],
+   "diags": []
+  },
+  "<repo>/tests/corpus/atomics-integer-operations.ts": {
+   "order": [
+    "<repo>/tests/corpus/atomics-integer-operations.ts"
    ],
    "diags": []
   },
@@ -8924,6 +10244,12 @@
    ],
    "diags": []
   },
+  "<repo>/tests/corpus/buffer-codec-boundaries.ts": {
+   "order": [
+    "<repo>/tests/corpus/buffer-codec-boundaries.ts"
+   ],
+   "diags": []
+  },
   "<repo>/tests/corpus/buffer-primitive-predicate.ts": {
    "order": [
     "<repo>/tests/corpus/buffer-primitive-predicate.ts"
@@ -8933,6 +10259,60 @@
   "<repo>/tests/corpus/builtin-prototype-method-values.mjs": {
    "order": [
     "<repo>/tests/corpus/builtin-prototype-method-values.mjs"
+   ],
+   "diags": []
+  },
+  "<repo>/tests/corpus/byte-loop-bounds.ts": {
+   "order": [
+    "<repo>/tests/corpus/byte-loop-bounds.ts"
+   ],
+   "diags": []
+  },
+  "<repo>/tests/corpus/byte-number-pipeline.ts": {
+   "order": [
+    "<repo>/tests/corpus/byte-number-pipeline.ts"
+   ],
+   "diags": []
+  },
+  "<repo>/tests/corpus/byte-record-windows.ts": {
+   "order": [
+    "<repo>/tests/corpus/byte-record-windows.ts"
+   ],
+   "diags": []
+  },
+  "<repo>/tests/corpus/call-lifetimes-argument-order.ts": {
+   "order": [
+    "<repo>/tests/corpus/call-lifetimes-argument-order.ts"
+   ],
+   "diags": []
+  },
+  "<repo>/tests/corpus/call-lifetimes-control-flow.ts": {
+   "order": [
+    "<repo>/tests/corpus/call-lifetimes-control-flow.ts"
+   ],
+   "diags": []
+  },
+  "<repo>/tests/corpus/call-lifetimes-owned-boundaries.ts": {
+   "order": [
+    "<repo>/tests/corpus/call-lifetimes-owned-boundaries.ts"
+   ],
+   "diags": []
+  },
+  "<repo>/tests/corpus/call-lifetimes-projections.ts": {
+   "order": [
+    "<repo>/tests/corpus/call-lifetimes-projections.ts"
+   ],
+   "diags": []
+  },
+  "<repo>/tests/corpus/call-lifetimes-union-values.ts": {
+   "order": [
+    "<repo>/tests/corpus/call-lifetimes-union-values.ts"
+   ],
+   "diags": []
+  },
+  "<repo>/tests/corpus/call-lifetimes-virtual-optionals.ts": {
+   "order": [
+    "<repo>/tests/corpus/call-lifetimes-virtual-optionals.ts"
    ],
    "diags": []
   },
@@ -8962,9 +10342,33 @@
    ],
    "diags": []
   },
+  "<repo>/tests/corpus/captured-class-refinement.ts": {
+   "order": [
+    "<repo>/tests/corpus/captured-class-refinement.ts"
+   ],
+   "diags": []
+  },
   "<repo>/tests/corpus/catch-capture.ts": {
    "order": [
     "<repo>/tests/corpus/catch-capture.ts"
+   ],
+   "diags": []
+  },
+  "<repo>/tests/corpus/caught-class-identity.ts": {
+   "order": [
+    "<repo>/tests/corpus/caught-class-identity.ts"
+   ],
+   "diags": []
+  },
+  "<repo>/tests/corpus/caught-standalone-class.ts": {
+   "order": [
+    "<repo>/tests/corpus/caught-standalone-class.ts"
+   ],
+   "diags": []
+  },
+  "<repo>/tests/corpus/caught-system-error-fields.ts": {
+   "order": [
+    "<repo>/tests/corpus/caught-system-error-fields.ts"
    ],
    "diags": []
   },
@@ -9042,6 +10446,12 @@
    ],
    "diags": []
   },
+  "<repo>/tests/corpus/checked-dispatch-input-lifetimes.js": {
+   "order": [
+    "<repo>/tests/corpus/checked-dispatch-input-lifetimes.js"
+   ],
+   "diags": []
+  },
   "<repo>/tests/corpus/checked-increment/main.js": {
    "order": [
     "<repo>/tests/corpus/checked-increment/main.js"
@@ -9051,6 +10461,12 @@
   "<repo>/tests/corpus/checked-inherited-fields.ts": {
    "order": [
     "<repo>/tests/corpus/checked-inherited-fields.ts"
+   ],
+   "diags": []
+  },
+  "<repo>/tests/corpus/checked-iterator-consumption.js": {
+   "order": [
+    "<repo>/tests/corpus/checked-iterator-consumption.js"
    ],
    "diags": []
   },
@@ -9103,9 +10519,21 @@
    ],
    "diags": []
   },
+  "<repo>/tests/corpus/checked-storage-transitions.js": {
+   "order": [
+    "<repo>/tests/corpus/checked-storage-transitions.js"
+   ],
+   "diags": []
+  },
   "<repo>/tests/corpus/checked-symbol-array.ts": {
    "order": [
     "<repo>/tests/corpus/checked-symbol-array.ts"
+   ],
+   "diags": []
+  },
+  "<repo>/tests/corpus/checked-value-input-lifetimes.ts": {
+   "order": [
+    "<repo>/tests/corpus/checked-value-input-lifetimes.ts"
    ],
    "diags": []
   },
@@ -9139,6 +10567,12 @@
    ],
    "diags": []
   },
+  "<repo>/tests/corpus/class-callback-storage.ts": {
+   "order": [
+    "<repo>/tests/corpus/class-callback-storage.ts"
+   ],
+   "diags": []
+  },
   "<repo>/tests/corpus/class-checked-composites.ts": {
    "order": [
     "<repo>/tests/corpus/class-checked-composites.ts"
@@ -9151,6 +10585,12 @@
    ],
    "diags": []
   },
+  "<repo>/tests/corpus/class-collection-insertion.ts": {
+   "order": [
+    "<repo>/tests/corpus/class-collection-insertion.ts"
+   ],
+   "diags": []
+  },
   "<repo>/tests/corpus/class-computed-presence.ts": {
    "order": [
     "<repo>/tests/corpus/class-computed-presence.ts"
@@ -9160,6 +10600,12 @@
   "<repo>/tests/corpus/class-computed-symbols.js": {
    "order": [
     "<repo>/tests/corpus/class-computed-symbols.js"
+   ],
+   "diags": []
+  },
+  "<repo>/tests/corpus/class-covariant-returns.ts": {
+   "order": [
+    "<repo>/tests/corpus/class-covariant-returns.ts"
    ],
    "diags": []
   },
@@ -9218,6 +10664,12 @@
    ],
    "diags": []
   },
+  "<repo>/tests/corpus/class-interface-protocols.ts": {
+   "order": [
+    "<repo>/tests/corpus/class-interface-protocols.ts"
+   ],
+   "diags": []
+  },
   "<repo>/tests/corpus/class-interface-refinements.ts": {
    "order": [
     "<repo>/tests/corpus/class-interface-refinements.ts"
@@ -9233,6 +10685,18 @@
   "<repo>/tests/corpus/class-local-function-base.mjs": {
    "order": [
     "<repo>/tests/corpus/class-local-function-base.mjs"
+   ],
+   "diags": []
+  },
+  "<repo>/tests/corpus/class-method-spreads.ts": {
+   "order": [
+    "<repo>/tests/corpus/class-method-spreads.ts"
+   ],
+   "diags": []
+  },
+  "<repo>/tests/corpus/class-narrowed-views.ts": {
+   "order": [
+    "<repo>/tests/corpus/class-narrowed-views.ts"
    ],
    "diags": []
   },
@@ -9266,6 +10730,12 @@
    ],
    "diags": []
   },
+  "<repo>/tests/corpus/class-subclass-assertions.ts": {
+   "order": [
+    "<repo>/tests/corpus/class-subclass-assertions.ts"
+   ],
+   "diags": []
+  },
   "<repo>/tests/corpus/class-super-surplus-spread.mjs": {
    "order": [
     "<repo>/tests/corpus/class-super-surplus-spread.mjs"
@@ -9293,6 +10763,12 @@
   "<repo>/tests/corpus/closure-nullable-union-return.ts": {
    "order": [
     "<repo>/tests/corpus/closure-nullable-union-return.ts"
+   ],
+   "diags": []
+  },
+  "<repo>/tests/corpus/closure-union-locals.ts": {
+   "order": [
+    "<repo>/tests/corpus/closure-union-locals.ts"
    ],
    "diags": []
   },
@@ -9326,6 +10802,49 @@
    ],
    "diags": []
   },
+  "<repo>/tests/corpus/collection-data-unions.ts": {
+   "order": [
+    "<repo>/tests/corpus/collection-data-unions.ts"
+   ],
+   "diags": []
+  },
+  "<repo>/tests/corpus/collection-ingestion-mappers.ts": {
+   "order": [
+    "<repo>/tests/corpus/collection-ingestion-mappers.ts"
+   ],
+   "diags": []
+  },
+  "<repo>/tests/corpus/collection-ingestion-protocol/main.ts": {
+   "order": [
+    "<repo>/tests/corpus/collection-ingestion-protocol/source.js",
+    "<repo>/tests/corpus/collection-ingestion-protocol/main.ts"
+   ],
+   "diags": []
+  },
+  "<repo>/tests/corpus/collection-ingestion-references.ts": {
+   "order": [
+    "<repo>/tests/corpus/collection-ingestion-references.ts"
+   ],
+   "diags": []
+  },
+  "<repo>/tests/corpus/collection-ingestion.ts": {
+   "order": [
+    "<repo>/tests/corpus/collection-ingestion.ts"
+   ],
+   "diags": []
+  },
+  "<repo>/tests/corpus/collection-storage-copies.ts": {
+   "order": [
+    "<repo>/tests/corpus/collection-storage-copies.ts"
+   ],
+   "diags": []
+  },
+  "<repo>/tests/corpus/collection-value-keys.ts": {
+   "order": [
+    "<repo>/tests/corpus/collection-value-keys.ts"
+   ],
+   "diags": []
+  },
   "<repo>/tests/corpus/compound-field-receivers.ts": {
    "order": [
     "<repo>/tests/corpus/compound-field-receivers.ts"
@@ -9356,6 +10875,46 @@
    ],
    "diags": []
   },
+  "<repo>/tests/corpus/const-enum-module-cycle/main.ts": {
+   "order": [
+    "<repo>/tests/corpus/const-enum-module-cycle/flags.ts",
+    "<repo>/tests/corpus/const-enum-module-cycle/rules.ts",
+    "<repo>/tests/corpus/const-enum-module-cycle/limits.ts",
+    "<repo>/tests/corpus/const-enum-module-cycle/main.ts"
+   ],
+   "diags": [
+    {
+     "code": "SC1016",
+     "message": "circular imports (<repo>/tests/corpus/const-enum-module-cycle/limits.ts → <repo>/tests/corpus/const-enum-module-cycle/rules.ts → <repo>/tests/corpus/const-enum-module-cycle/limits.ts; top-level code at <repo>/tests/corpus/const-enum-module-cycle/limits.ts:3 can run user code during the cycle's init window — only declaration-only module bodies are admitted) are not supported yet",
+     "loc": {
+      "file": "<repo>/tests/corpus/const-enum-module-cycle/limits.ts",
+      "start": 0,
+      "end": 0
+     },
+     "milestone": "later",
+     "hint": "cycles of ES modules with declaration-only top levels whose cycle-crossing bindings are only used inside function bodies compile as-is; move the named top-level read or call into a function body (or break the named edge) so nothing runs during the cycle's init window"
+    }
+   ]
+  },
+  "<repo>/tests/corpus/constant-callback-dispatch.ts": {
+   "order": [
+    "<repo>/tests/corpus/constant-callback-dispatch.ts"
+   ],
+   "diags": []
+  },
+  "<repo>/tests/corpus/constant-module-globals/main.ts": {
+   "order": [
+    "<repo>/tests/corpus/constant-module-globals/consts.ts",
+    "<repo>/tests/corpus/constant-module-globals/main.ts"
+   ],
+   "diags": []
+  },
+  "<repo>/tests/corpus/constant-number-remainders.ts": {
+   "order": [
+    "<repo>/tests/corpus/constant-number-remainders.ts"
+   ],
+   "diags": []
+  },
   "<repo>/tests/corpus/contextual-array-union-write.ts": {
    "order": [
     "<repo>/tests/corpus/contextual-array-union-write.ts"
@@ -9368,9 +10927,33 @@
    ],
    "diags": []
   },
+  "<repo>/tests/corpus/counted-loop-numbers.ts": {
+   "order": [
+    "<repo>/tests/corpus/counted-loop-numbers.ts"
+   ],
+   "diags": []
+  },
+  "<repo>/tests/corpus/counted-loop-storage.ts": {
+   "order": [
+    "<repo>/tests/corpus/counted-loop-storage.ts"
+   ],
+   "diags": []
+  },
   "<repo>/tests/corpus/crypto-hash-optional-input.ts": {
    "order": [
     "<repo>/tests/corpus/crypto-hash-optional-input.ts"
+   ],
+   "diags": []
+  },
+  "<repo>/tests/corpus/cycle-generations-long-lived.ts": {
+   "order": [
+    "<repo>/tests/corpus/cycle-generations-long-lived.ts"
+   ],
+   "diags": []
+  },
+  "<repo>/tests/corpus/cycle-growth-yield.ts": {
+   "order": [
+    "<repo>/tests/corpus/cycle-growth-yield.ts"
    ],
    "diags": []
   },
@@ -9386,15 +10969,33 @@
    ],
    "diags": []
   },
+  "<repo>/tests/corpus/deep-reference-teardown.ts": {
+   "order": [
+    "<repo>/tests/corpus/deep-reference-teardown.ts"
+   ],
+   "diags": []
+  },
   "<repo>/tests/corpus/default-undefined-parameters.ts": {
    "order": [
     "<repo>/tests/corpus/default-undefined-parameters.ts"
    ],
    "diags": []
   },
+  "<repo>/tests/corpus/deferred-field-updates.ts": {
+   "order": [
+    "<repo>/tests/corpus/deferred-field-updates.ts"
+   ],
+   "diags": []
+  },
   "<repo>/tests/corpus/deferred-registry-many.ts": {
    "order": [
     "<repo>/tests/corpus/deferred-registry-many.ts"
+   ],
+   "diags": []
+  },
+  "<repo>/tests/corpus/derived-numeric-updates.ts": {
+   "order": [
+    "<repo>/tests/corpus/derived-numeric-updates.ts"
    ],
    "diags": []
   },
@@ -9464,15 +11065,51 @@
    ],
    "diags": []
   },
+  "<repo>/tests/corpus/error-subclass-message-accessor-keyed.js": {
+   "order": [
+    "<repo>/tests/corpus/error-subclass-message-accessor-keyed.js"
+   ],
+   "diags": []
+  },
   "<repo>/tests/corpus/error-tostring-overrides.ts": {
    "order": [
     "<repo>/tests/corpus/error-tostring-overrides.ts"
    ],
    "diags": []
   },
+  "<repo>/tests/corpus/error-values-inspect.ts": {
+   "order": [
+    "<repo>/tests/corpus/error-values-inspect.ts"
+   ],
+   "diags": []
+  },
+  "<repo>/tests/corpus/exact-index-round-trip.ts": {
+   "order": [
+    "<repo>/tests/corpus/exact-index-round-trip.ts"
+   ],
+   "diags": []
+  },
   "<repo>/tests/corpus/expression-runtime-values.ts": {
    "order": [
     "<repo>/tests/corpus/expression-runtime-values.ts"
+   ],
+   "diags": []
+  },
+  "<repo>/tests/corpus/fiber-switch-stress.ts": {
+   "order": [
+    "<repo>/tests/corpus/fiber-switch-stress.ts"
+   ],
+   "diags": []
+  },
+  "<repo>/tests/corpus/fiberless-async-ordering.ts": {
+   "order": [
+    "<repo>/tests/corpus/fiberless-async-ordering.ts"
+   ],
+   "diags": []
+  },
+  "<repo>/tests/corpus/fiberless-async-unhandled.ts": {
+   "order": [
+    "<repo>/tests/corpus/fiberless-async-unhandled.ts"
    ],
    "diags": []
   },
@@ -9488,9 +11125,21 @@
    ],
    "diags": []
   },
+  "<repo>/tests/corpus/file-read-storage.ts": {
+   "order": [
+    "<repo>/tests/corpus/file-read-storage.ts"
+   ],
+   "diags": []
+  },
   "<repo>/tests/corpus/file-url-percent-decoding.ts": {
    "order": [
     "<repo>/tests/corpus/file-url-percent-decoding.ts"
+   ],
+   "diags": []
+  },
+  "<repo>/tests/corpus/final-field-borrows.ts": {
+   "order": [
+    "<repo>/tests/corpus/final-field-borrows.ts"
    ],
    "diags": []
   },
@@ -9512,6 +11161,18 @@
    ],
    "diags": []
   },
+  "<repo>/tests/corpus/for-of-subclass-elements.ts": {
+   "order": [
+    "<repo>/tests/corpus/for-of-subclass-elements.ts"
+   ],
+   "diags": []
+  },
+  "<repo>/tests/corpus/forward-generic-signatures.ts": {
+   "order": [
+    "<repo>/tests/corpus/forward-generic-signatures.ts"
+   ],
+   "diags": []
+  },
   "<repo>/tests/corpus/fresh-array-union-layout.js": {
    "order": [
     "<repo>/tests/corpus/fresh-array-union-layout.js"
@@ -9529,6 +11190,49 @@
     "<repo>/tests/corpus/fs-native-realpath.ts"
    ],
    "diags": []
+  },
+  "<repo>/tests/corpus/fs-read-encodings.ts": {
+   "order": [
+    "<repo>/tests/corpus/fs-read-encodings.ts"
+   ],
+   "diags": [
+    {
+     "code": "SC0001",
+     "message": "No overload matches this call.\n  The last overload gave the following error.\n    Type 'BufferEncoding' is not assignable to type '\"utf-8\" | \"utf8\"'.\n      Type '\"ascii\"' is not assignable to type '\"utf-8\" | \"utf8\"'.",
+     "loc": {
+      "file": "<repo>/tests/corpus/fs-read-encodings.ts",
+      "start": 599,
+      "end": 607
+     }
+    },
+    {
+     "code": "SC0001",
+     "message": "No overload matches this call.\n  The last overload gave the following error.\n    Argument of type 'number' is not assignable to parameter of type 'string'.",
+     "loc": {
+      "file": "<repo>/tests/corpus/fs-read-encodings.ts",
+      "start": 713,
+      "end": 715
+     }
+    },
+    {
+     "code": "SC0001",
+     "message": "No overload matches this call.\n  The last overload gave the following error.\n    Argument of type 'number' is not assignable to parameter of type 'string'.",
+     "loc": {
+      "file": "<repo>/tests/corpus/fs-read-encodings.ts",
+      "start": 869,
+      "end": 878
+     }
+    },
+    {
+     "code": "SC0001",
+     "message": "No overload matches this call.\n  The last overload gave the following error.\n    Type '\"\"' is not assignable to type '\"utf-8\" | \"utf8\"'.",
+     "loc": {
+      "file": "<repo>/tests/corpus/fs-read-encodings.ts",
+      "start": 1135,
+      "end": 1143
+     }
+    }
+   ]
   },
   "<repo>/tests/corpus/fs-remove-readonly.ts": {
    "order": [
@@ -9636,6 +11340,12 @@
    ],
    "diags": []
   },
+  "<repo>/tests/corpus/generic-base-specializations.ts": {
+   "order": [
+    "<repo>/tests/corpus/generic-base-specializations.ts"
+   ],
+   "diags": []
+  },
   "<repo>/tests/corpus/generic-binding-ownership.ts": {
    "order": [
     "<repo>/tests/corpus/generic-binding-ownership.ts"
@@ -9646,6 +11356,25 @@
    "order": [
     "<repo>/tests/corpus/generic-class-js-functions/functions.js",
     "<repo>/tests/corpus/generic-class-js-functions/main.ts"
+   ],
+   "diags": []
+  },
+  "<repo>/tests/corpus/generic-class-recovery.ts": {
+   "order": [
+    "<repo>/tests/corpus/generic-class-recovery.ts"
+   ],
+   "diags": []
+  },
+  "<repo>/tests/corpus/generic-namespace-factories/main.ts": {
+   "order": [
+    "<repo>/tests/corpus/generic-namespace-factories/pair.ts",
+    "<repo>/tests/corpus/generic-namespace-factories/main.ts"
+   ],
+   "diags": []
+  },
+  "<repo>/tests/corpus/generic-nullable-collections.ts": {
+   "order": [
+    "<repo>/tests/corpus/generic-nullable-collections.ts"
    ],
    "diags": []
   },
@@ -9705,6 +11434,30 @@
    ],
    "diags": []
   },
+  "<repo>/tests/corpus/heap-input-aliases.ts": {
+   "order": [
+    "<repo>/tests/corpus/heap-input-aliases.ts"
+   ],
+   "diags": []
+  },
+  "<repo>/tests/corpus/heap-input-collections.ts": {
+   "order": [
+    "<repo>/tests/corpus/heap-input-collections.ts"
+   ],
+   "diags": []
+  },
+  "<repo>/tests/corpus/in-array-runtime-index.ts": {
+   "order": [
+    "<repo>/tests/corpus/in-array-runtime-index.ts"
+   ],
+   "diags": []
+  },
+  "<repo>/tests/corpus/inc-dec-non-null-operand.ts": {
+   "order": [
+    "<repo>/tests/corpus/inc-dec-non-null-operand.ts"
+   ],
+   "diags": []
+  },
   "<repo>/tests/corpus/indexed-assignment-values.js": {
    "order": [
     "<repo>/tests/corpus/indexed-assignment-values.js"
@@ -9714,6 +11467,12 @@
   "<repo>/tests/corpus/indexed-assignment-values.ts": {
    "order": [
     "<repo>/tests/corpus/indexed-assignment-values.ts"
+   ],
+   "diags": []
+  },
+  "<repo>/tests/corpus/indexed-element-field-reads.ts": {
+   "order": [
+    "<repo>/tests/corpus/indexed-element-field-reads.ts"
    ],
    "diags": []
   },
@@ -9789,9 +11548,53 @@
    ],
    "diags": []
   },
+  "<repo>/tests/corpus/input-lifetime-intervals.ts": {
+   "order": [
+    "<repo>/tests/corpus/input-lifetime-intervals.ts"
+   ],
+   "diags": []
+  },
+  "<repo>/tests/corpus/input-lifetimes-modules/main.ts": {
+   "order": [
+    "<repo>/tests/corpus/input-lifetimes-modules/model.ts",
+    "<repo>/tests/corpus/input-lifetimes-modules/helpers.ts",
+    "<repo>/tests/corpus/input-lifetimes-modules/main.ts"
+   ],
+   "diags": []
+  },
   "<repo>/tests/corpus/instanceof-class-record-union.ts": {
    "order": [
     "<repo>/tests/corpus/instanceof-class-record-union.ts"
+   ],
+   "diags": []
+  },
+  "<repo>/tests/corpus/integer-flow-arithmetic.ts": {
+   "order": [
+    "<repo>/tests/corpus/integer-flow-arithmetic.ts"
+   ],
+   "diags": []
+  },
+  "<repo>/tests/corpus/integer-loop-forms.ts": {
+   "order": [
+    "<repo>/tests/corpus/integer-loop-forms.ts"
+   ],
+   "diags": []
+  },
+  "<repo>/tests/corpus/integer-view-control.ts": {
+   "order": [
+    "<repo>/tests/corpus/integer-view-control.ts"
+   ],
+   "diags": []
+  },
+  "<repo>/tests/corpus/integer-view-numbers.ts": {
+   "order": [
+    "<repo>/tests/corpus/integer-view-numbers.ts"
+   ],
+   "diags": []
+  },
+  "<repo>/tests/corpus/integer-view-storage.ts": {
+   "order": [
+    "<repo>/tests/corpus/integer-view-storage.ts"
    ],
    "diags": []
   },
@@ -9805,6 +11608,12 @@
   "<repo>/tests/corpus/intl-grapheme.ts": {
    "order": [
     "<repo>/tests/corpus/intl-grapheme.ts"
+   ],
+   "diags": []
+  },
+  "<repo>/tests/corpus/iterator-typed-returns.ts": {
+   "order": [
+    "<repo>/tests/corpus/iterator-typed-returns.ts"
    ],
    "diags": []
   },
@@ -10167,6 +11976,12 @@
    ],
    "diags": []
   },
+  "<repo>/tests/corpus/js-open-binding-writes.js": {
+   "order": [
+    "<repo>/tests/corpus/js-open-binding-writes.js"
+   ],
+   "diags": []
+  },
   "<repo>/tests/corpus/js-optional-class-fields.js": {
    "order": [
     "<repo>/tests/corpus/js-optional-class-fields.js"
@@ -10281,6 +12096,12 @@
    ],
    "diags": []
   },
+  "<repo>/tests/corpus/json-output-bulk.ts": {
+   "order": [
+    "<repo>/tests/corpus/json-output-bulk.ts"
+   ],
+   "diags": []
+  },
   "<repo>/tests/corpus/json-runtime-options.mjs": {
    "order": [
     "<repo>/tests/corpus/json-runtime-options.mjs"
@@ -10290,6 +12111,18 @@
   "<repo>/tests/corpus/json-stringify-value.js": {
    "order": [
     "<repo>/tests/corpus/json-stringify-value.js"
+   ],
+   "diags": []
+  },
+  "<repo>/tests/corpus/json-typed-parse-direct.ts": {
+   "order": [
+    "<repo>/tests/corpus/json-typed-parse-direct.ts"
+   ],
+   "diags": []
+  },
+  "<repo>/tests/corpus/literal-switch-dispatch.ts": {
+   "order": [
+    "<repo>/tests/corpus/literal-switch-dispatch.ts"
    ],
    "diags": []
   },
@@ -10366,6 +12199,18 @@
    ],
    "diags": []
   },
+  "<repo>/tests/corpus/local-union-storage.ts": {
+   "order": [
+    "<repo>/tests/corpus/local-union-storage.ts"
+   ],
+   "diags": []
+  },
+  "<repo>/tests/corpus/locale-compare-root-order.ts": {
+   "order": [
+    "<repo>/tests/corpus/locale-compare-root-order.ts"
+   ],
+   "diags": []
+  },
   "<repo>/tests/corpus/logical-assignment-dynamic.js": {
    "order": [
     "<repo>/tests/corpus/logical-assignment-dynamic.js"
@@ -10384,6 +12229,12 @@
    ],
    "diags": []
   },
+  "<repo>/tests/corpus/loop-reference-lifetimes.ts": {
+   "order": [
+    "<repo>/tests/corpus/loop-reference-lifetimes.ts"
+   ],
+   "diags": []
+  },
   "<repo>/tests/corpus/map-checked-boundary/main.ts": {
    "order": [
     "<repo>/tests/corpus/map-checked-boundary/consumer.js",
@@ -10394,6 +12245,18 @@
   "<repo>/tests/corpus/map-checked-seed.js": {
    "order": [
     "<repo>/tests/corpus/map-checked-seed.js"
+   ],
+   "diags": []
+  },
+  "<repo>/tests/corpus/map-long-string-keys.ts": {
+   "order": [
+    "<repo>/tests/corpus/map-long-string-keys.ts"
+   ],
+   "diags": []
+  },
+  "<repo>/tests/corpus/map-number-keys-dense.ts": {
+   "order": [
+    "<repo>/tests/corpus/map-number-keys-dense.ts"
    ],
    "diags": []
   },
@@ -10415,9 +12278,39 @@
    ],
    "diags": []
   },
+  "<repo>/tests/corpus/map-typed-array-values.ts": {
+   "order": [
+    "<repo>/tests/corpus/map-typed-array-values.ts"
+   ],
+   "diags": []
+  },
   "<repo>/tests/corpus/math-function-values.js": {
    "order": [
     "<repo>/tests/corpus/math-function-values.js"
+   ],
+   "diags": []
+  },
+  "<repo>/tests/corpus/missing-read-lambda-results.ts": {
+   "order": [
+    "<repo>/tests/corpus/missing-read-lambda-results.ts"
+   ],
+   "diags": []
+  },
+  "<repo>/tests/corpus/missing-read-narrowed-storage.ts": {
+   "order": [
+    "<repo>/tests/corpus/missing-read-narrowed-storage.ts"
+   ],
+   "diags": []
+  },
+  "<repo>/tests/corpus/missing-read-number-conversions.ts": {
+   "order": [
+    "<repo>/tests/corpus/missing-read-number-conversions.ts"
+   ],
+   "diags": []
+  },
+  "<repo>/tests/corpus/module-byte-loops.ts": {
+   "order": [
+    "<repo>/tests/corpus/module-byte-loops.ts"
    ],
    "diags": []
   },
@@ -10530,6 +12423,12 @@
    ],
    "diags": []
   },
+  "<repo>/tests/corpus/native-callback-dispatch.ts": {
+   "order": [
+    "<repo>/tests/corpus/native-callback-dispatch.ts"
+   ],
+   "diags": []
+  },
   "<repo>/tests/corpus/native-class-array-boundaries.ts": {
    "order": [
     "<repo>/tests/corpus/native-class-array-boundaries.ts"
@@ -10620,6 +12519,1671 @@
    ],
    "diags": []
   },
+  "<repo>/tests/corpus/native-worker-arena-reuse.ts": {
+   "order": [
+    "<repo>/tests/corpus/native-worker-arena-reuse.ts"
+   ],
+   "diags": [
+    {
+     "code": "SC0001",
+     "message": "Property 'once' does not exist on type 'Worker'.",
+     "loc": {
+      "file": "<repo>/tests/corpus/native-worker-arena-reuse.ts",
+      "start": 763,
+      "end": 767
+     }
+    },
+    {
+     "code": "SC0001",
+     "message": "Property 'once' does not exist on type 'Worker'.",
+     "loc": {
+      "file": "<repo>/tests/corpus/native-worker-arena-reuse.ts",
+      "start": 876,
+      "end": 880
+     }
+    },
+    {
+     "code": "SC0001",
+     "message": "Property 'once' does not exist on type 'Worker'.",
+     "loc": {
+      "file": "<repo>/tests/corpus/native-worker-arena-reuse.ts",
+      "start": 918,
+      "end": 922
+     }
+    },
+    {
+     "code": "SC0001",
+     "message": "Property 'postMessage' does not exist on type '{}'.",
+     "loc": {
+      "file": "<repo>/tests/corpus/native-worker-arena-reuse.ts",
+      "start": 2096,
+      "end": 2107
+     }
+    }
+   ]
+  },
+  "<repo>/tests/corpus/native-worker-bounded-errors.ts": {
+   "order": [
+    "<repo>/tests/corpus/native-worker-bounded-errors.ts"
+   ],
+   "diags": [
+    {
+     "code": "SC0001",
+     "message": "Argument of type '(lines: string[]) => void' is not assignable to parameter of type '(...args: unknown[]) => void'.\n  Types of parameters 'lines' and 'args' are incompatible.\n    Type 'unknown' is not assignable to type 'string[]'.",
+     "loc": {
+      "file": "<repo>/tests/corpus/native-worker-bounded-errors.ts",
+      "start": 1528,
+      "end": 1599
+     }
+    },
+    {
+     "code": "SC0001",
+     "message": "Argument of type '(error: Error) => void' is not assignable to parameter of type '(...args: unknown[]) => void'.\n  Types of parameters 'error' and 'args' are incompatible.\n    Type 'unknown' is not assignable to type 'Error'.",
+     "loc": {
+      "file": "<repo>/tests/corpus/native-worker-bounded-errors.ts",
+      "start": 1627,
+      "end": 1735
+     }
+    },
+    {
+     "code": "SC0001",
+     "message": "Argument of type '(code: number) => void' is not assignable to parameter of type '(...args: unknown[]) => void'.\n  Types of parameters 'code' and 'args' are incompatible.\n    Type 'unknown' is not assignable to type 'number'.",
+     "loc": {
+      "file": "<repo>/tests/corpus/native-worker-bounded-errors.ts",
+      "start": 1770,
+      "end": 1789
+     }
+    },
+    {
+     "code": "SC0001",
+     "message": "Property 'postMessage' does not exist on type '{}'.",
+     "loc": {
+      "file": "<repo>/tests/corpus/native-worker-bounded-errors.ts",
+      "start": 1924,
+      "end": 1935
+     }
+    }
+   ]
+  },
+  "<repo>/tests/corpus/native-worker-buffer-consumers.ts": {
+   "order": [
+    "<repo>/tests/corpus/native-worker-buffer-consumers.ts"
+   ],
+   "diags": [
+    {
+     "code": "SC0001",
+     "message": "No overload matches this call.\n  The last overload gave the following error.\n    Argument of type 'SharedArrayBuffer' is not assignable to parameter of type 'readonly number[] | Uint8Array<ArrayBufferLike>'.\n      Type 'SharedArrayBuffer' is missing the following properties from type 'Uint8Array<ArrayBufferLike>': BYTES_PER_ELEMENT, buffer, byteOffset, copyWithin, and 29 more.",
+     "loc": {
+      "file": "<repo>/tests/corpus/native-worker-buffer-consumers.ts",
+      "start": 364,
+      "end": 371
+     }
+    },
+    {
+     "code": "SC0001",
+     "message": "Property 'once' does not exist on type 'Worker'.",
+     "loc": {
+      "file": "<repo>/tests/corpus/native-worker-buffer-consumers.ts",
+      "start": 628,
+      "end": 632
+     }
+    },
+    {
+     "code": "SC0001",
+     "message": "Property 'once' does not exist on type 'Worker'.",
+     "loc": {
+      "file": "<repo>/tests/corpus/native-worker-buffer-consumers.ts",
+      "start": 1307,
+      "end": 1311
+     }
+    },
+    {
+     "code": "SC0001",
+     "message": "Property 'postMessage' does not exist on type '{}'.",
+     "loc": {
+      "file": "<repo>/tests/corpus/native-worker-buffer-consumers.ts",
+      "start": 1455,
+      "end": 1466
+     }
+    }
+   ]
+  },
+  "<repo>/tests/corpus/native-worker-cancel-hot.ts": {
+   "order": [
+    "<repo>/tests/corpus/native-worker-cancel-hot.ts"
+   ],
+   "diags": [
+    {
+     "code": "SC0001",
+     "message": "Property 'postMessage' does not exist on type '{}'.",
+     "loc": {
+      "file": "<repo>/tests/corpus/native-worker-cancel-hot.ts",
+      "start": 681,
+      "end": 692
+     }
+    },
+    {
+     "code": "SC0001",
+     "message": "Property 'once' does not exist on type 'Worker'.",
+     "loc": {
+      "file": "<repo>/tests/corpus/native-worker-cancel-hot.ts",
+      "start": 920,
+      "end": 924
+     }
+    },
+    {
+     "code": "SC0001",
+     "message": "Property 'once' does not exist on type 'Worker'.",
+     "loc": {
+      "file": "<repo>/tests/corpus/native-worker-cancel-hot.ts",
+      "start": 1061,
+      "end": 1065
+     }
+    }
+   ]
+  },
+  "<repo>/tests/corpus/native-worker-class-fields.ts": {
+   "order": [
+    "<repo>/tests/corpus/native-worker-class-fields.ts"
+   ],
+   "diags": [
+    {
+     "code": "SC0001",
+     "message": "Argument of type '(text: string) => void' is not assignable to parameter of type '(...args: unknown[]) => void'.\n  Types of parameters 'text' and 'args' are incompatible.\n    Type 'unknown' is not assignable to type 'string'.",
+     "loc": {
+      "file": "<repo>/tests/corpus/native-worker-class-fields.ts",
+      "start": 555,
+      "end": 574
+     }
+    },
+    {
+     "code": "SC0001",
+     "message": "Argument of type '(code: number) => void' is not assignable to parameter of type '(...args: unknown[]) => void'.\n  Types of parameters 'code' and 'args' are incompatible.\n    Type 'unknown' is not assignable to type 'number'.",
+     "loc": {
+      "file": "<repo>/tests/corpus/native-worker-class-fields.ts",
+      "start": 699,
+      "end": 730
+     }
+    },
+    {
+     "code": "SC0001",
+     "message": "Property 'on' does not exist on type '{}'.",
+     "loc": {
+      "file": "<repo>/tests/corpus/native-worker-class-fields.ts",
+      "start": 1664,
+      "end": 1666
+     }
+    },
+    {
+     "code": "SC0001",
+     "message": "Property 'postMessage' does not exist on type '{}'.",
+     "loc": {
+      "file": "<repo>/tests/corpus/native-worker-class-fields.ts",
+      "start": 1703,
+      "end": 1714
+     }
+    }
+   ]
+  },
+  "<repo>/tests/corpus/native-worker-clone-errors.ts": {
+   "order": [
+    "<repo>/tests/corpus/native-worker-clone-errors.ts"
+   ],
+   "diags": [
+    {
+     "code": "SC0001",
+     "message": "Expected 1 arguments, but got 2.",
+     "loc": {
+      "file": "<repo>/tests/corpus/native-worker-clone-errors.ts",
+      "start": 361,
+      "end": 369
+     }
+    },
+    {
+     "code": "SC0001",
+     "message": "Argument of type '(code: number) => void' is not assignable to parameter of type '(...args: unknown[]) => void'.\n  Types of parameters 'code' and 'args' are incompatible.\n    Type 'unknown' is not assignable to type 'number'.",
+     "loc": {
+      "file": "<repo>/tests/corpus/native-worker-clone-errors.ts",
+      "start": 465,
+      "end": 508
+     }
+    },
+    {
+     "code": "SC0001",
+     "message": "Property 'once' does not exist on type '{}'.",
+     "loc": {
+      "file": "<repo>/tests/corpus/native-worker-clone-errors.ts",
+      "start": 534,
+      "end": 538
+     }
+    },
+    {
+     "code": "SC0001",
+     "message": "Property 'postMessage' does not exist on type '{}'.",
+     "loc": {
+      "file": "<repo>/tests/corpus/native-worker-clone-errors.ts",
+      "start": 582,
+      "end": 593
+     }
+    }
+   ]
+  },
+  "<repo>/tests/corpus/native-worker-commonjs.cjs": {
+   "order": [
+    "<repo>/tests/corpus/native-worker-commonjs.cjs"
+   ],
+   "diags": []
+  },
+  "<repo>/tests/corpus/native-worker-delayed-messages.ts": {
+   "order": [
+    "<repo>/tests/corpus/native-worker-delayed-messages.ts"
+   ],
+   "diags": [
+    {
+     "code": "SC0001",
+     "message": "Argument of type '(code: number) => void' is not assignable to parameter of type '(...args: unknown[]) => void'.\n  Types of parameters 'code' and 'args' are incompatible.\n    Type 'unknown' is not assignable to type 'number'.",
+     "loc": {
+      "file": "<repo>/tests/corpus/native-worker-delayed-messages.ts",
+      "start": 248,
+      "end": 291
+     }
+    },
+    {
+     "code": "SC0001",
+     "message": "Property 'on' does not exist on type '{}'.",
+     "loc": {
+      "file": "<repo>/tests/corpus/native-worker-delayed-messages.ts",
+      "start": 423,
+      "end": 425
+     }
+    },
+    {
+     "code": "SC0001",
+     "message": "Property 'postMessage' does not exist on type '{}'.",
+     "loc": {
+      "file": "<repo>/tests/corpus/native-worker-delayed-messages.ts",
+      "start": 548,
+      "end": 559
+     }
+    },
+    {
+     "code": "SC0001",
+     "message": "Property 'close' does not exist on type '{}'.",
+     "loc": {
+      "file": "<repo>/tests/corpus/native-worker-delayed-messages.ts",
+      "start": 589,
+      "end": 594
+     }
+    }
+   ]
+  },
+  "<repo>/tests/corpus/native-worker-environment.ts": {
+   "order": [
+    "<repo>/tests/corpus/native-worker-environment.ts"
+   ],
+   "diags": [
+    {
+     "code": "SC0001",
+     "message": "Argument of type '(code: number) => void' is not assignable to parameter of type '(...args: unknown[]) => void'.\n  Types of parameters 'code' and 'args' are incompatible.\n    Type 'unknown' is not assignable to type 'number'.",
+     "loc": {
+      "file": "<repo>/tests/corpus/native-worker-environment.ts",
+      "start": 371,
+      "end": 451
+     }
+    },
+    {
+     "code": "SC0001",
+     "message": "Property 'postMessage' does not exist on type '{}'.",
+     "loc": {
+      "file": "<repo>/tests/corpus/native-worker-environment.ts",
+      "start": 773,
+      "end": 784
+     }
+    },
+    {
+     "code": "SC0001",
+     "message": "Property 'postMessage' does not exist on type '{}'.",
+     "loc": {
+      "file": "<repo>/tests/corpus/native-worker-environment.ts",
+      "start": 1226,
+      "end": 1237
+     }
+    }
+   ]
+  },
+  "<repo>/tests/corpus/native-worker-error.ts": {
+   "order": [
+    "<repo>/tests/corpus/native-worker-error.ts"
+   ],
+   "diags": [
+    {
+     "code": "SC0001",
+     "message": "Argument of type '(error: Error) => void' is not assignable to parameter of type '(...args: unknown[]) => void'.\n  Types of parameters 'error' and 'args' are incompatible.\n    Type 'unknown' is not assignable to type 'Error'.",
+     "loc": {
+      "file": "<repo>/tests/corpus/native-worker-error.ts",
+      "start": 156,
+      "end": 240
+     }
+    },
+    {
+     "code": "SC0001",
+     "message": "Argument of type '(code: number) => void' is not assignable to parameter of type '(...args: unknown[]) => void'.\n  Types of parameters 'code' and 'args' are incompatible.\n    Type 'unknown' is not assignable to type 'number'.",
+     "loc": {
+      "file": "<repo>/tests/corpus/native-worker-error.ts",
+      "start": 263,
+      "end": 306
+     }
+    }
+   ]
+  },
+  "<repo>/tests/corpus/native-worker-exception-state.ts": {
+   "order": [
+    "<repo>/tests/corpus/native-worker-exception-state.ts"
+   ],
+   "diags": [
+    {
+     "code": "SC0001",
+     "message": "Argument of type '(lines: string[]) => void' is not assignable to parameter of type '(...args: unknown[]) => void'.\n  Types of parameters 'lines' and 'args' are incompatible.\n    Type 'unknown' is not assignable to type 'string[]'.",
+     "loc": {
+      "file": "<repo>/tests/corpus/native-worker-exception-state.ts",
+      "start": 7053,
+      "end": 7075
+     }
+    },
+    {
+     "code": "SC0001",
+     "message": "Property 'once' does not exist on type 'Worker'.",
+     "loc": {
+      "file": "<repo>/tests/corpus/native-worker-exception-state.ts",
+      "start": 7156,
+      "end": 7160
+     }
+    },
+    {
+     "code": "SC0001",
+     "message": "Property 'postMessage' does not exist on type '{}'.",
+     "loc": {
+      "file": "<repo>/tests/corpus/native-worker-exception-state.ts",
+      "start": 7283,
+      "end": 7294
+     }
+    }
+   ]
+  },
+  "<repo>/tests/corpus/native-worker-exit-listeners.ts": {
+   "order": [
+    "<repo>/tests/corpus/native-worker-exit-listeners.ts"
+   ],
+   "diags": [
+    {
+     "code": "SC0001",
+     "message": "Argument of type '(value: number) => void' is not assignable to parameter of type '(...args: unknown[]) => void'.\n  Types of parameters 'value' and 'args' are incompatible.\n    Type 'unknown' is not assignable to type 'number'.",
+     "loc": {
+      "file": "<repo>/tests/corpus/native-worker-exit-listeners.ts",
+      "start": 468,
+      "end": 519
+     }
+    },
+    {
+     "code": "SC0001",
+     "message": "Argument of type '(error: Error) => void' is not assignable to parameter of type '(...args: unknown[]) => void'.\n  Types of parameters 'error' and 'args' are incompatible.\n    Type 'unknown' is not assignable to type 'Error'.",
+     "loc": {
+      "file": "<repo>/tests/corpus/native-worker-exit-listeners.ts",
+      "start": 547,
+      "end": 593
+     }
+    },
+    {
+     "code": "SC0001",
+     "message": "Argument of type '(code: number) => void' is not assignable to parameter of type '(...args: unknown[]) => void'.\n  Types of parameters 'code' and 'args' are incompatible.\n    Type 'unknown' is not assignable to type 'number'.",
+     "loc": {
+      "file": "<repo>/tests/corpus/native-worker-exit-listeners.ts",
+      "start": 620,
+      "end": 639
+     }
+    },
+    {
+     "code": "SC0001",
+     "message": "Property 'postMessage' does not exist on type '{}'.",
+     "loc": {
+      "file": "<repo>/tests/corpus/native-worker-exit-listeners.ts",
+      "start": 837,
+      "end": 848
+     }
+    }
+   ]
+  },
+  "<repo>/tests/corpus/native-worker-io.ts": {
+   "order": [
+    "<repo>/tests/corpus/native-worker-io.ts"
+   ],
+   "diags": [
+    {
+     "code": "SC0001",
+     "message": "Property 'once' does not exist on type 'Worker'.",
+     "loc": {
+      "file": "<repo>/tests/corpus/native-worker-io.ts",
+      "start": 557,
+      "end": 561
+     }
+    },
+    {
+     "code": "SC0001",
+     "message": "Property 'once' does not exist on type 'Worker'.",
+     "loc": {
+      "file": "<repo>/tests/corpus/native-worker-io.ts",
+      "start": 628,
+      "end": 632
+     }
+    },
+    {
+     "code": "SC0001",
+     "message": "Property 'once' does not exist on type 'Worker'.",
+     "loc": {
+      "file": "<repo>/tests/corpus/native-worker-io.ts",
+      "start": 664,
+      "end": 668
+     }
+    },
+    {
+     "code": "SC0001",
+     "message": "Property 'postMessage' does not exist on type '{}'.",
+     "loc": {
+      "file": "<repo>/tests/corpus/native-worker-io.ts",
+      "start": 1779,
+      "end": 1790
+     }
+    }
+   ]
+  },
+  "<repo>/tests/corpus/native-worker-loop-cancellation.ts": {
+   "order": [
+    "<repo>/tests/corpus/native-worker-loop-cancellation.ts"
+   ],
+   "diags": [
+    {
+     "code": "SC0001",
+     "message": "Property 'once' does not exist on type 'Worker'.",
+     "loc": {
+      "file": "<repo>/tests/corpus/native-worker-loop-cancellation.ts",
+      "start": 288,
+      "end": 292
+     }
+    },
+    {
+     "code": "SC0001",
+     "message": "Property 'once' does not exist on type 'Worker'.",
+     "loc": {
+      "file": "<repo>/tests/corpus/native-worker-loop-cancellation.ts",
+      "start": 349,
+      "end": 353
+     }
+    },
+    {
+     "code": "SC0001",
+     "message": "Property 'postMessage' does not exist on type '{}'.",
+     "loc": {
+      "file": "<repo>/tests/corpus/native-worker-loop-cancellation.ts",
+      "start": 457,
+      "end": 468
+     }
+    }
+   ]
+  },
+  "<repo>/tests/corpus/native-worker-message-graphs.ts": {
+   "order": [
+    "<repo>/tests/corpus/native-worker-message-graphs.ts"
+   ],
+   "diags": [
+    {
+     "code": "SC0001",
+     "message": "Argument of type '(code: number) => void' is not assignable to parameter of type '(...args: unknown[]) => void'.\n  Types of parameters 'code' and 'args' are incompatible.\n    Type 'unknown' is not assignable to type 'number'.",
+     "loc": {
+      "file": "<repo>/tests/corpus/native-worker-message-graphs.ts",
+      "start": 781,
+      "end": 846
+     }
+    },
+    {
+     "code": "SC0001",
+     "message": "'root' is of type 'unknown'.",
+     "loc": {
+      "file": "<repo>/tests/corpus/native-worker-message-graphs.ts",
+      "start": 887,
+      "end": 891
+     }
+    },
+    {
+     "code": "SC0001",
+     "message": "Property 'postMessage' does not exist on type '{}'.",
+     "loc": {
+      "file": "<repo>/tests/corpus/native-worker-message-graphs.ts",
+      "start": 921,
+      "end": 932
+     }
+    },
+    {
+     "code": "SC0001",
+     "message": "'root' is of type 'unknown'.",
+     "loc": {
+      "file": "<repo>/tests/corpus/native-worker-message-graphs.ts",
+      "start": 945,
+      "end": 949
+     }
+    },
+    {
+     "code": "SC0001",
+     "message": "'root' is of type 'unknown'.",
+     "loc": {
+      "file": "<repo>/tests/corpus/native-worker-message-graphs.ts",
+      "start": 976,
+      "end": 980
+     }
+    },
+    {
+     "code": "SC0001",
+     "message": "'root' is of type 'unknown'.",
+     "loc": {
+      "file": "<repo>/tests/corpus/native-worker-message-graphs.ts",
+      "start": 991,
+      "end": 995
+     }
+    },
+    {
+     "code": "SC0001",
+     "message": "'root' is of type 'unknown'.",
+     "loc": {
+      "file": "<repo>/tests/corpus/native-worker-message-graphs.ts",
+      "start": 1006,
+      "end": 1010
+     }
+    },
+    {
+     "code": "SC0001",
+     "message": "'root' is of type 'unknown'.",
+     "loc": {
+      "file": "<repo>/tests/corpus/native-worker-message-graphs.ts",
+      "start": 1025,
+      "end": 1029
+     }
+    },
+    {
+     "code": "SC0001",
+     "message": "'root' is of type 'unknown'.",
+     "loc": {
+      "file": "<repo>/tests/corpus/native-worker-message-graphs.ts",
+      "start": 1054,
+      "end": 1058
+     }
+    },
+    {
+     "code": "SC0001",
+     "message": "'root' is of type 'unknown'.",
+     "loc": {
+      "file": "<repo>/tests/corpus/native-worker-message-graphs.ts",
+      "start": 1072,
+      "end": 1076
+     }
+    },
+    {
+     "code": "SC0001",
+     "message": "'root' is of type 'unknown'.",
+     "loc": {
+      "file": "<repo>/tests/corpus/native-worker-message-graphs.ts",
+      "start": 1090,
+      "end": 1094
+     }
+    },
+    {
+     "code": "SC0001",
+     "message": "'root' is of type 'unknown'.",
+     "loc": {
+      "file": "<repo>/tests/corpus/native-worker-message-graphs.ts",
+      "start": 1128,
+      "end": 1132
+     }
+    },
+    {
+     "code": "SC0001",
+     "message": "'root' is of type 'unknown'.",
+     "loc": {
+      "file": "<repo>/tests/corpus/native-worker-message-graphs.ts",
+      "start": 1165,
+      "end": 1169
+     }
+    },
+    {
+     "code": "SC0001",
+     "message": "'root' is of type 'unknown'.",
+     "loc": {
+      "file": "<repo>/tests/corpus/native-worker-message-graphs.ts",
+      "start": 1176,
+      "end": 1180
+     }
+    },
+    {
+     "code": "SC0001",
+     "message": "'root' is of type 'unknown'.",
+     "loc": {
+      "file": "<repo>/tests/corpus/native-worker-message-graphs.ts",
+      "start": 1215,
+      "end": 1219
+     }
+    },
+    {
+     "code": "SC0001",
+     "message": "'root' is of type 'unknown'.",
+     "loc": {
+      "file": "<repo>/tests/corpus/native-worker-message-graphs.ts",
+      "start": 1246,
+      "end": 1250
+     }
+    },
+    {
+     "code": "SC0001",
+     "message": "'root' is of type 'unknown'.",
+     "loc": {
+      "file": "<repo>/tests/corpus/native-worker-message-graphs.ts",
+      "start": 1273,
+      "end": 1277
+     }
+    },
+    {
+     "code": "SC0001",
+     "message": "'root' is of type 'unknown'.",
+     "loc": {
+      "file": "<repo>/tests/corpus/native-worker-message-graphs.ts",
+      "start": 1288,
+      "end": 1292
+     }
+    },
+    {
+     "code": "SC0001",
+     "message": "'root' is of type 'unknown'.",
+     "loc": {
+      "file": "<repo>/tests/corpus/native-worker-message-graphs.ts",
+      "start": 1300,
+      "end": 1304
+     }
+    },
+    {
+     "code": "SC0001",
+     "message": "'root' is of type 'unknown'.",
+     "loc": {
+      "file": "<repo>/tests/corpus/native-worker-message-graphs.ts",
+      "start": 1322,
+      "end": 1326
+     }
+    },
+    {
+     "code": "SC0001",
+     "message": "'root' is of type 'unknown'.",
+     "loc": {
+      "file": "<repo>/tests/corpus/native-worker-message-graphs.ts",
+      "start": 1335,
+      "end": 1339
+     }
+    },
+    {
+     "code": "SC0001",
+     "message": "'root' is of type 'unknown'.",
+     "loc": {
+      "file": "<repo>/tests/corpus/native-worker-message-graphs.ts",
+      "start": 1371,
+      "end": 1375
+     }
+    },
+    {
+     "code": "SC0001",
+     "message": "'root' is of type 'unknown'.",
+     "loc": {
+      "file": "<repo>/tests/corpus/native-worker-message-graphs.ts",
+      "start": 1404,
+      "end": 1408
+     }
+    },
+    {
+     "code": "SC0001",
+     "message": "'root' is of type 'unknown'.",
+     "loc": {
+      "file": "<repo>/tests/corpus/native-worker-message-graphs.ts",
+      "start": 1424,
+      "end": 1428
+     }
+    },
+    {
+     "code": "SC0001",
+     "message": "'root' is of type 'unknown'.",
+     "loc": {
+      "file": "<repo>/tests/corpus/native-worker-message-graphs.ts",
+      "start": 1445,
+      "end": 1449
+     }
+    }
+   ]
+  },
+  "<repo>/tests/corpus/native-worker-messages.ts": {
+   "order": [
+    "<repo>/tests/corpus/native-worker-messages.ts"
+   ],
+   "diags": [
+    {
+     "code": "SC0001",
+     "message": "Argument of type '(code: number) => void' is not assignable to parameter of type '(...args: unknown[]) => void'.\n  Types of parameters 'code' and 'args' are incompatible.\n    Type 'unknown' is not assignable to type 'number'.",
+     "loc": {
+      "file": "<repo>/tests/corpus/native-worker-messages.ts",
+      "start": 364,
+      "end": 423
+     }
+    },
+    {
+     "code": "SC0001",
+     "message": "Property 'once' does not exist on type '{}'.",
+     "loc": {
+      "file": "<repo>/tests/corpus/native-worker-messages.ts",
+      "start": 542,
+      "end": 546
+     }
+    },
+    {
+     "code": "SC0001",
+     "message": "Property 'postMessage' does not exist on type '{}'.",
+     "loc": {
+      "file": "<repo>/tests/corpus/native-worker-messages.ts",
+      "start": 589,
+      "end": 600
+     }
+    }
+   ]
+  },
+  "<repo>/tests/corpus/native-worker-poll-exceptions.ts": {
+   "order": [
+    "<repo>/tests/corpus/native-worker-poll-exceptions.ts"
+   ],
+   "diags": [
+    {
+     "code": "SC0001",
+     "message": "Argument of type '(lines: string[]) => void' is not assignable to parameter of type '(...args: unknown[]) => void'.\n  Types of parameters 'lines' and 'args' are incompatible.\n    Type 'unknown' is not assignable to type 'string[]'.",
+     "loc": {
+      "file": "<repo>/tests/corpus/native-worker-poll-exceptions.ts",
+      "start": 2123,
+      "end": 2186
+     }
+    },
+    {
+     "code": "SC0001",
+     "message": "Argument of type '(code: number) => void' is not assignable to parameter of type '(...args: unknown[]) => void'.\n  Types of parameters 'code' and 'args' are incompatible.\n    Type 'unknown' is not assignable to type 'number'.",
+     "loc": {
+      "file": "<repo>/tests/corpus/native-worker-poll-exceptions.ts",
+      "start": 2209,
+      "end": 2252
+     }
+    },
+    {
+     "code": "SC0001",
+     "message": "Property 'postMessage' does not exist on type '{}'.",
+     "loc": {
+      "file": "<repo>/tests/corpus/native-worker-poll-exceptions.ts",
+      "start": 2278,
+      "end": 2289
+     }
+    }
+   ]
+  },
+  "<repo>/tests/corpus/native-worker-port-lifetime.ts": {
+   "order": [
+    "<repo>/tests/corpus/native-worker-port-lifetime.ts"
+   ],
+   "diags": [
+    {
+     "code": "SC0001",
+     "message": "Argument of type '(code: number) => void' is not assignable to parameter of type '(...args: unknown[]) => void'.\n  Types of parameters 'code' and 'args' are incompatible.\n    Type 'unknown' is not assignable to type 'number'.",
+     "loc": {
+      "file": "<repo>/tests/corpus/native-worker-port-lifetime.ts",
+      "start": 266,
+      "end": 316
+     }
+    },
+    {
+     "code": "SC0001",
+     "message": "Property 'start' does not exist on type '{}'.",
+     "loc": {
+      "file": "<repo>/tests/corpus/native-worker-port-lifetime.ts",
+      "start": 459,
+      "end": 464
+     }
+    },
+    {
+     "code": "SC0001",
+     "message": "Property 'hasRef' does not exist on type '{}'.",
+     "loc": {
+      "file": "<repo>/tests/corpus/native-worker-port-lifetime.ts",
+      "start": 502,
+      "end": 508
+     }
+    },
+    {
+     "code": "SC0001",
+     "message": "Property 'ref' does not exist on type '{}'.",
+     "loc": {
+      "file": "<repo>/tests/corpus/native-worker-port-lifetime.ts",
+      "start": 545,
+      "end": 548
+     }
+    },
+    {
+     "code": "SC0001",
+     "message": "Property 'on' does not exist on type '{}'.",
+     "loc": {
+      "file": "<repo>/tests/corpus/native-worker-port-lifetime.ts",
+      "start": 559,
+      "end": 561
+     }
+    },
+    {
+     "code": "SC0001",
+     "message": "Property 'off' does not exist on type '{}'.",
+     "loc": {
+      "file": "<repo>/tests/corpus/native-worker-port-lifetime.ts",
+      "start": 585,
+      "end": 588
+     }
+    },
+    {
+     "code": "SC0001",
+     "message": "Property 'hasRef' does not exist on type '{}'.",
+     "loc": {
+      "file": "<repo>/tests/corpus/native-worker-port-lifetime.ts",
+      "start": 624,
+      "end": 630
+     }
+    },
+    {
+     "code": "SC0001",
+     "message": "Property 'on' does not exist on type '{}'.",
+     "loc": {
+      "file": "<repo>/tests/corpus/native-worker-port-lifetime.ts",
+      "start": 642,
+      "end": 644
+     }
+    },
+    {
+     "code": "SC0001",
+     "message": "Property 'unref' does not exist on type '{}'.",
+     "loc": {
+      "file": "<repo>/tests/corpus/native-worker-port-lifetime.ts",
+      "start": 670,
+      "end": 675
+     }
+    },
+    {
+     "code": "SC0001",
+     "message": "Property 'on' does not exist on type '{}'.",
+     "loc": {
+      "file": "<repo>/tests/corpus/native-worker-port-lifetime.ts",
+      "start": 686,
+      "end": 688
+     }
+    },
+    {
+     "code": "SC0001",
+     "message": "Property 'hasRef' does not exist on type '{}'.",
+     "loc": {
+      "file": "<repo>/tests/corpus/native-worker-port-lifetime.ts",
+      "start": 726,
+      "end": 732
+     }
+    },
+    {
+     "code": "SC0001",
+     "message": "Property 'removeAllListeners' does not exist on type '{}'.",
+     "loc": {
+      "file": "<repo>/tests/corpus/native-worker-port-lifetime.ts",
+      "start": 744,
+      "end": 762
+     }
+    },
+    {
+     "code": "SC0001",
+     "message": "Property 'ref' does not exist on type '{}'.",
+     "loc": {
+      "file": "<repo>/tests/corpus/native-worker-port-lifetime.ts",
+      "start": 782,
+      "end": 785
+     }
+    },
+    {
+     "code": "SC0001",
+     "message": "Property 'removeAllListeners' does not exist on type '{}'.",
+     "loc": {
+      "file": "<repo>/tests/corpus/native-worker-port-lifetime.ts",
+      "start": 796,
+      "end": 814
+     }
+    },
+    {
+     "code": "SC0001",
+     "message": "Property 'hasRef' does not exist on type '{}'.",
+     "loc": {
+      "file": "<repo>/tests/corpus/native-worker-port-lifetime.ts",
+      "start": 846,
+      "end": 852
+     }
+    },
+    {
+     "code": "SC0001",
+     "message": "Property 'unref' does not exist on type '{}'.",
+     "loc": {
+      "file": "<repo>/tests/corpus/native-worker-port-lifetime.ts",
+      "start": 864,
+      "end": 869
+     }
+    },
+    {
+     "code": "SC0001",
+     "message": "Property 'once' does not exist on type '{}'.",
+     "loc": {
+      "file": "<repo>/tests/corpus/native-worker-port-lifetime.ts",
+      "start": 880,
+      "end": 884
+     }
+    },
+    {
+     "code": "SC0001",
+     "message": "Property 'hasRef' does not exist on type '{}'.",
+     "loc": {
+      "file": "<repo>/tests/corpus/native-worker-port-lifetime.ts",
+      "start": 939,
+      "end": 945
+     }
+    },
+    {
+     "code": "SC0001",
+     "message": "Property 'ref' does not exist on type '{}'.",
+     "loc": {
+      "file": "<repo>/tests/corpus/native-worker-port-lifetime.ts",
+      "start": 959,
+      "end": 962
+     }
+    },
+    {
+     "code": "SC0001",
+     "message": "Property 'hasRef' does not exist on type '{}'.",
+     "loc": {
+      "file": "<repo>/tests/corpus/native-worker-port-lifetime.ts",
+      "start": 987,
+      "end": 993
+     }
+    },
+    {
+     "code": "SC0001",
+     "message": "Property 'postMessage' does not exist on type '{}'.",
+     "loc": {
+      "file": "<repo>/tests/corpus/native-worker-port-lifetime.ts",
+      "start": 1020,
+      "end": 1031
+     }
+    },
+    {
+     "code": "SC0001",
+     "message": "Property 'close' does not exist on type '{}'.",
+     "loc": {
+      "file": "<repo>/tests/corpus/native-worker-port-lifetime.ts",
+      "start": 1082,
+      "end": 1087
+     }
+    },
+    {
+     "code": "SC0001",
+     "message": "Property 'hasRef' does not exist on type '{}'.",
+     "loc": {
+      "file": "<repo>/tests/corpus/native-worker-port-lifetime.ts",
+      "start": 1111,
+      "end": 1117
+     }
+    },
+    {
+     "code": "SC0001",
+     "message": "Property 'hasRef' does not exist on type '{}'.",
+     "loc": {
+      "file": "<repo>/tests/corpus/native-worker-port-lifetime.ts",
+      "start": 1209,
+      "end": 1215
+     }
+    }
+   ]
+  },
+  "<repo>/tests/corpus/native-worker-process-exit.ts": {
+   "order": [
+    "<repo>/tests/corpus/native-worker-process-exit.ts"
+   ],
+   "diags": [
+    {
+     "code": "SC0001",
+     "message": "Argument of type '(code: number) => void' is not assignable to parameter of type '(...args: unknown[]) => void'.\n  Types of parameters 'code' and 'args' are incompatible.\n    Type 'unknown' is not assignable to type 'number'.",
+     "loc": {
+      "file": "<repo>/tests/corpus/native-worker-process-exit.ts",
+      "start": 243,
+      "end": 302
+     }
+    },
+    {
+     "code": "SC0001",
+     "message": "Property 'postMessage' does not exist on type '{}'.",
+     "loc": {
+      "file": "<repo>/tests/corpus/native-worker-process-exit.ts",
+      "start": 365,
+      "end": 376
+     }
+    }
+   ]
+  },
+  "<repo>/tests/corpus/native-worker-publish-classes.ts": {
+   "order": [
+    "<repo>/tests/corpus/native-worker-publish-classes.ts"
+   ],
+   "diags": [
+    {
+     "code": "SC0001",
+     "message": "Cannot find module '@scriptc/threads' or its corresponding type declarations.",
+     "loc": {
+      "file": "<repo>/tests/corpus/native-worker-publish-classes.ts",
+      "start": 108,
+      "end": 126
+     }
+    },
+    {
+     "code": "SC0001",
+     "message": "Argument of type '(code: number) => void' is not assignable to parameter of type '(...args: unknown[]) => void'.\n  Types of parameters 'code' and 'args' are incompatible.\n    Type 'unknown' is not assignable to type 'number'.",
+     "loc": {
+      "file": "<repo>/tests/corpus/native-worker-publish-classes.ts",
+      "start": 5186,
+      "end": 5205
+     }
+    },
+    {
+     "code": "SC0001",
+     "message": "Property 'postMessage' does not exist on type '{}'.",
+     "loc": {
+      "file": "<repo>/tests/corpus/native-worker-publish-classes.ts",
+      "start": 5474,
+      "end": 5485
+     }
+    },
+    {
+     "code": "SC1010",
+     "message": "the '@scriptc/threads' package (nothing installed resolves it) is not supported yet",
+     "loc": {
+      "file": "<repo>/tests/corpus/native-worker-publish-classes.ts",
+      "start": 84,
+      "end": 127
+     },
+     "milestone": "M4",
+     "hint": "relative imports (./file, ../dir/file), package.json-mediated project imports (#alias via the imports field, self-name references via exports), installed npm packages (their code runs under --dynamic), and the built-in fs, fs/promises, path, os, url, crypto, zlib, child_process, net, http, tls, https, http2, dgram, dns, util, util/types, string_decoder, querystring, readline, events, stream, stream/promises, stream/consumers, buffer, assert, assert/strict, worker_threads, cluster, tty, async_hooks, timers, timers/promises, diagnostics_channel, perf_hooks, module, and console modules (bare or node:-prefixed) and node:test (node:-prefixed only, like in Node) are supported"
+    }
+   ]
+  },
+  "<repo>/tests/corpus/native-worker-publish-refusals.ts": {
+   "order": [
+    "<repo>/tests/corpus/native-worker-publish-refusals.ts"
+   ],
+   "diags": [
+    {
+     "code": "SC0001",
+     "message": "Cannot find module '@scriptc/threads' or its corresponding type declarations.",
+     "loc": {
+      "file": "<repo>/tests/corpus/native-worker-publish-refusals.ts",
+      "start": 24,
+      "end": 42
+     }
+    },
+    {
+     "code": "SC1010",
+     "message": "the '@scriptc/threads' package (nothing installed resolves it) is not supported yet",
+     "loc": {
+      "file": "<repo>/tests/corpus/native-worker-publish-refusals.ts",
+      "start": 0,
+      "end": 43
+     },
+     "milestone": "M4",
+     "hint": "relative imports (./file, ../dir/file), package.json-mediated project imports (#alias via the imports field, self-name references via exports), installed npm packages (their code runs under --dynamic), and the built-in fs, fs/promises, path, os, url, crypto, zlib, child_process, net, http, tls, https, http2, dgram, dns, util, util/types, string_decoder, querystring, readline, events, stream, stream/promises, stream/consumers, buffer, assert, assert/strict, worker_threads, cluster, tty, async_hooks, timers, timers/promises, diagnostics_channel, perf_hooks, module, and console modules (bare or node:-prefixed) and node:test (node:-prefixed only, like in Node) are supported"
+    }
+   ]
+  },
+  "<repo>/tests/corpus/native-worker-published-graphs.ts": {
+   "order": [
+    "<repo>/tests/corpus/native-worker-published-graphs.ts"
+   ],
+   "diags": [
+    {
+     "code": "SC0001",
+     "message": "Argument of type '(code: number) => void' is not assignable to parameter of type '(...args: unknown[]) => void'.\n  Types of parameters 'code' and 'args' are incompatible.\n    Type 'unknown' is not assignable to type 'number'.",
+     "loc": {
+      "file": "<repo>/tests/corpus/native-worker-published-graphs.ts",
+      "start": 1945,
+      "end": 1964
+     }
+    },
+    {
+     "code": "SC0001",
+     "message": "Property 'postMessage' does not exist on type '{}'.",
+     "loc": {
+      "file": "<repo>/tests/corpus/native-worker-published-graphs.ts",
+      "start": 2409,
+      "end": 2420
+     }
+    },
+    {
+     "code": "SC0001",
+     "message": "Property 'postMessage' does not exist on type '{}'.",
+     "loc": {
+      "file": "<repo>/tests/corpus/native-worker-published-graphs.ts",
+      "start": 2460,
+      "end": 2471
+     }
+    },
+    {
+     "code": "SC0001",
+     "message": "Property 'on' does not exist on type '{}'.",
+     "loc": {
+      "file": "<repo>/tests/corpus/native-worker-published-graphs.ts",
+      "start": 2531,
+      "end": 2533
+     }
+    },
+    {
+     "code": "SC0001",
+     "message": "Property 'postMessage' does not exist on type '{}'.",
+     "loc": {
+      "file": "<repo>/tests/corpus/native-worker-published-graphs.ts",
+      "start": 2652,
+      "end": 2663
+     }
+    },
+    {
+     "code": "SC0001",
+     "message": "Property 'postMessage' does not exist on type '{}'.",
+     "loc": {
+      "file": "<repo>/tests/corpus/native-worker-published-graphs.ts",
+      "start": 2723,
+      "end": 2734
+     }
+    },
+    {
+     "code": "SC0001",
+     "message": "Property 'postMessage' does not exist on type '{}'.",
+     "loc": {
+      "file": "<repo>/tests/corpus/native-worker-published-graphs.ts",
+      "start": 2861,
+      "end": 2872
+     }
+    },
+    {
+     "code": "SC0001",
+     "message": "Property 'postMessage' does not exist on type '{}'.",
+     "loc": {
+      "file": "<repo>/tests/corpus/native-worker-published-graphs.ts",
+      "start": 2924,
+      "end": 2935
+     }
+    },
+    {
+     "code": "SC0001",
+     "message": "Property 'close' does not exist on type '{}'.",
+     "loc": {
+      "file": "<repo>/tests/corpus/native-worker-published-graphs.ts",
+      "start": 3014,
+      "end": 3019
+     }
+    }
+   ]
+  },
+  "<repo>/tests/corpus/native-worker-references.ts": {
+   "order": [
+    "<repo>/tests/corpus/native-worker-references.ts"
+   ],
+   "diags": [
+    {
+     "code": "SC0001",
+     "message": "Property 'unref' does not exist on type 'Worker'.",
+     "loc": {
+      "file": "<repo>/tests/corpus/native-worker-references.ts",
+      "start": 244,
+      "end": 249
+     }
+    },
+    {
+     "code": "SC0001",
+     "message": "Property 'ref' does not exist on type 'Worker'.",
+     "loc": {
+      "file": "<repo>/tests/corpus/native-worker-references.ts",
+      "start": 267,
+      "end": 270
+     }
+    },
+    {
+     "code": "SC0001",
+     "message": "Property 'threadId' does not exist on type 'Worker'.",
+     "loc": {
+      "file": "<repo>/tests/corpus/native-worker-references.ts",
+      "start": 281,
+      "end": 289
+     }
+    },
+    {
+     "code": "SC0001",
+     "message": "Property 'once' does not exist on type 'Worker'.",
+     "loc": {
+      "file": "<repo>/tests/corpus/native-worker-references.ts",
+      "start": 307,
+      "end": 311
+     }
+    },
+    {
+     "code": "SC0001",
+     "message": "Property 'once' does not exist on type 'Worker'.",
+     "loc": {
+      "file": "<repo>/tests/corpus/native-worker-references.ts",
+      "start": 363,
+      "end": 367
+     }
+    },
+    {
+     "code": "SC0001",
+     "message": "Property 'once' does not exist on type 'Worker'.",
+     "loc": {
+      "file": "<repo>/tests/corpus/native-worker-references.ts",
+      "start": 442,
+      "end": 446
+     }
+    },
+    {
+     "code": "SC0001",
+     "message": "Property 'threadId' does not exist on type 'Worker'.",
+     "loc": {
+      "file": "<repo>/tests/corpus/native-worker-references.ts",
+      "start": 508,
+      "end": 516
+     }
+    },
+    {
+     "code": "SC0001",
+     "message": "Property 'unref' does not exist on type 'Worker'.",
+     "loc": {
+      "file": "<repo>/tests/corpus/native-worker-references.ts",
+      "start": 601,
+      "end": 606
+     }
+    },
+    {
+     "code": "SC0001",
+     "message": "Property 'postMessage' does not exist on type '{}'.",
+     "loc": {
+      "file": "<repo>/tests/corpus/native-worker-references.ts",
+      "start": 765,
+      "end": 776
+     }
+    }
+   ]
+  },
+  "<repo>/tests/corpus/native-worker-roots/main.ts": {
+   "order": [
+    "<repo>/tests/corpus/native-worker-roots/main.ts"
+   ],
+   "diags": [
+    {
+     "code": "SC0001",
+     "message": "Property 'once' does not exist on type 'Worker'.",
+     "loc": {
+      "file": "<repo>/tests/corpus/native-worker-roots/main.ts",
+      "start": 257,
+      "end": 261
+     }
+    },
+    {
+     "code": "SC0001",
+     "message": "Property 'once' does not exist on type 'Worker'.",
+     "loc": {
+      "file": "<repo>/tests/corpus/native-worker-roots/main.ts",
+      "start": 465,
+      "end": 469
+     }
+    }
+   ]
+  },
+  "<repo>/tests/corpus/native-worker-shared-views.ts": {
+   "order": [
+    "<repo>/tests/corpus/native-worker-shared-views.ts"
+   ],
+   "diags": [
+    {
+     "code": "SC0001",
+     "message": "Argument of type '(code: number) => void' is not assignable to parameter of type '(...args: unknown[]) => void'.\n  Types of parameters 'code' and 'args' are incompatible.\n    Type 'unknown' is not assignable to type 'number'.",
+     "loc": {
+      "file": "<repo>/tests/corpus/native-worker-shared-views.ts",
+      "start": 637,
+      "end": 734
+     }
+    },
+    {
+     "code": "SC0001",
+     "message": "Property 'postMessage' does not exist on type '{}'.",
+     "loc": {
+      "file": "<repo>/tests/corpus/native-worker-shared-views.ts",
+      "start": 884,
+      "end": 895
+     }
+    },
+    {
+     "code": "SC0001",
+     "message": "Property 'postMessage' does not exist on type '{}'.",
+     "loc": {
+      "file": "<repo>/tests/corpus/native-worker-shared-views.ts",
+      "start": 1165,
+      "end": 1176
+     }
+    }
+   ]
+  },
+  "<repo>/tests/corpus/native-worker-stack-overflow.ts": {
+   "order": [
+    "<repo>/tests/corpus/native-worker-stack-overflow.ts"
+   ],
+   "diags": [
+    {
+     "code": "SC0001",
+     "message": "Argument of type '(text: string) => number' is not assignable to parameter of type '(...args: unknown[]) => void'.\n  Types of parameters 'text' and 'args' are incompatible.\n    Type 'unknown' is not assignable to type 'string'.",
+     "loc": {
+      "file": "<repo>/tests/corpus/native-worker-stack-overflow.ts",
+      "start": 675,
+      "end": 733
+     }
+    },
+    {
+     "code": "SC0001",
+     "message": "Argument of type '(error: Error) => number' is not assignable to parameter of type '(...args: unknown[]) => void'.\n  Types of parameters 'error' and 'args' are incompatible.\n    Type 'unknown' is not assignable to type 'Error'.",
+     "loc": {
+      "file": "<repo>/tests/corpus/native-worker-stack-overflow.ts",
+      "start": 761,
+      "end": 877
+     }
+    },
+    {
+     "code": "SC0001",
+     "message": "Argument of type '(code: number) => void' is not assignable to parameter of type '(...args: unknown[]) => void'.\n  Types of parameters 'code' and 'args' are incompatible.\n    Type 'unknown' is not assignable to type 'number'.",
+     "loc": {
+      "file": "<repo>/tests/corpus/native-worker-stack-overflow.ts",
+      "start": 912,
+      "end": 931
+     }
+    },
+    {
+     "code": "SC0001",
+     "message": "Property 'postMessage' does not exist on type '{}'.",
+     "loc": {
+      "file": "<repo>/tests/corpus/native-worker-stack-overflow.ts",
+      "start": 1215,
+      "end": 1226
+     }
+    },
+    {
+     "code": "SC0001",
+     "message": "Property 'postMessage' does not exist on type '{}'.",
+     "loc": {
+      "file": "<repo>/tests/corpus/native-worker-stack-overflow.ts",
+      "start": 1300,
+      "end": 1311
+     }
+    },
+    {
+     "code": "SC0001",
+     "message": "Property 'postMessage' does not exist on type '{}'.",
+     "loc": {
+      "file": "<repo>/tests/corpus/native-worker-stack-overflow.ts",
+      "start": 1367,
+      "end": 1378
+     }
+    }
+   ]
+  },
+  "<repo>/tests/corpus/native-worker-terminate-exception-state.ts": {
+   "order": [
+    "<repo>/tests/corpus/native-worker-terminate-exception-state.ts"
+   ],
+   "diags": [
+    {
+     "code": "SC0001",
+     "message": "Property 'postMessage' does not exist on type '{}'.",
+     "loc": {
+      "file": "<repo>/tests/corpus/native-worker-terminate-exception-state.ts",
+      "start": 954,
+      "end": 965
+     }
+    },
+    {
+     "code": "SC0001",
+     "message": "Property 'once' does not exist on type 'Worker'.",
+     "loc": {
+      "file": "<repo>/tests/corpus/native-worker-terminate-exception-state.ts",
+      "start": 3697,
+      "end": 3701
+     }
+    },
+    {
+     "code": "SC0001",
+     "message": "Property 'once' does not exist on type 'Worker'.",
+     "loc": {
+      "file": "<repo>/tests/corpus/native-worker-terminate-exception-state.ts",
+      "start": 3838,
+      "end": 3842
+     }
+    },
+    {
+     "code": "SC0001",
+     "message": "Property 'once' does not exist on type 'Worker'.",
+     "loc": {
+      "file": "<repo>/tests/corpus/native-worker-terminate-exception-state.ts",
+      "start": 4299,
+      "end": 4303
+     }
+    }
+   ]
+  },
+  "<repo>/tests/corpus/native-worker-terminate-loop.ts": {
+   "order": [
+    "<repo>/tests/corpus/native-worker-terminate-loop.ts"
+   ],
+   "diags": [
+    {
+     "code": "SC0001",
+     "message": "Argument of type '(code: number) => void' is not assignable to parameter of type '(...args: unknown[]) => void'.\n  Types of parameters 'code' and 'args' are incompatible.\n    Type 'unknown' is not assignable to type 'number'.",
+     "loc": {
+      "file": "<repo>/tests/corpus/native-worker-terminate-loop.ts",
+      "start": 293,
+      "end": 336
+     }
+    },
+    {
+     "code": "SC0001",
+     "message": "Property 'postMessage' does not exist on type '{}'.",
+     "loc": {
+      "file": "<repo>/tests/corpus/native-worker-terminate-loop.ts",
+      "start": 362,
+      "end": 373
+     }
+    }
+   ]
+  },
+  "<repo>/tests/corpus/native-worker-terminate-recursion.ts": {
+   "order": [
+    "<repo>/tests/corpus/native-worker-terminate-recursion.ts"
+   ],
+   "diags": [
+    {
+     "code": "SC0001",
+     "message": "Property 'once' does not exist on type 'Worker'.",
+     "loc": {
+      "file": "<repo>/tests/corpus/native-worker-terminate-recursion.ts",
+      "start": 1479,
+      "end": 1483
+     }
+    },
+    {
+     "code": "SC0001",
+     "message": "Property 'once' does not exist on type 'Worker'.",
+     "loc": {
+      "file": "<repo>/tests/corpus/native-worker-terminate-recursion.ts",
+      "start": 1559,
+      "end": 1563
+     }
+    },
+    {
+     "code": "SC0001",
+     "message": "Property 'postMessage' does not exist on type '{}'.",
+     "loc": {
+      "file": "<repo>/tests/corpus/native-worker-terminate-recursion.ts",
+      "start": 1762,
+      "end": 1773
+     }
+    }
+   ]
+  },
+  "<repo>/tests/corpus/native-worker-terminate-suspended.ts": {
+   "order": [
+    "<repo>/tests/corpus/native-worker-terminate-suspended.ts"
+   ],
+   "diags": [
+    {
+     "code": "SC0001",
+     "message": "Argument of type '(code: number) => void' is not assignable to parameter of type '(...args: unknown[]) => void'.\n  Types of parameters 'code' and 'args' are incompatible.\n    Type 'unknown' is not assignable to type 'number'.",
+     "loc": {
+      "file": "<repo>/tests/corpus/native-worker-terminate-suspended.ts",
+      "start": 636,
+      "end": 679
+     }
+    },
+    {
+     "code": "SC0001",
+     "message": "Property 'on' does not exist on type '{}'.",
+     "loc": {
+      "file": "<repo>/tests/corpus/native-worker-terminate-suspended.ts",
+      "start": 763,
+      "end": 765
+     }
+    },
+    {
+     "code": "SC0001",
+     "message": "Property 'postMessage' does not exist on type '{}'.",
+     "loc": {
+      "file": "<repo>/tests/corpus/native-worker-terminate-suspended.ts",
+      "start": 802,
+      "end": 813
+     }
+    }
+   ]
+  },
+  "<repo>/tests/corpus/native-worker-terminate-tested-loops.ts": {
+   "order": [
+    "<repo>/tests/corpus/native-worker-terminate-tested-loops.ts"
+   ],
+   "diags": [
+    {
+     "code": "SC0001",
+     "message": "Property 'postMessage' does not exist on type '{}'.",
+     "loc": {
+      "file": "<repo>/tests/corpus/native-worker-terminate-tested-loops.ts",
+      "start": 751,
+      "end": 762
+     }
+    },
+    {
+     "code": "SC0001",
+     "message": "Property 'once' does not exist on type 'Worker'.",
+     "loc": {
+      "file": "<repo>/tests/corpus/native-worker-terminate-tested-loops.ts",
+      "start": 2944,
+      "end": 2948
+     }
+    },
+    {
+     "code": "SC0001",
+     "message": "Property 'once' does not exist on type 'Worker'.",
+     "loc": {
+      "file": "<repo>/tests/corpus/native-worker-terminate-tested-loops.ts",
+      "start": 3085,
+      "end": 3089
+     }
+    }
+   ]
+  },
+  "<repo>/tests/corpus/native-worker-terminate-wait.ts": {
+   "order": [
+    "<repo>/tests/corpus/native-worker-terminate-wait.ts"
+   ],
+   "diags": [
+    {
+     "code": "SC0001",
+     "message": "Argument of type '(code: number) => void' is not assignable to parameter of type '(...args: unknown[]) => void'.\n  Types of parameters 'code' and 'args' are incompatible.\n    Type 'unknown' is not assignable to type 'number'.",
+     "loc": {
+      "file": "<repo>/tests/corpus/native-worker-terminate-wait.ts",
+      "start": 443,
+      "end": 486
+     }
+    },
+    {
+     "code": "SC0001",
+     "message": "Property 'postMessage' does not exist on type '{}'.",
+     "loc": {
+      "file": "<repo>/tests/corpus/native-worker-terminate-wait.ts",
+      "start": 578,
+      "end": 589
+     }
+    }
+   ]
+  },
+  "<repo>/tests/corpus/native-worker-typed-arrays.ts": {
+   "order": [
+    "<repo>/tests/corpus/native-worker-typed-arrays.ts"
+   ],
+   "diags": [
+    {
+     "code": "SC0001",
+     "message": "Argument of type '(line: string) => void' is not assignable to parameter of type '(...args: unknown[]) => void'.\n  Types of parameters 'line' and 'args' are incompatible.\n    Type 'unknown' is not assignable to type 'string'.",
+     "loc": {
+      "file": "<repo>/tests/corpus/native-worker-typed-arrays.ts",
+      "start": 1875,
+      "end": 1894
+     }
+    },
+    {
+     "code": "SC0001",
+     "message": "Argument of type '(code: number) => void' is not assignable to parameter of type '(...args: unknown[]) => void'.\n  Types of parameters 'code' and 'args' are incompatible.\n    Type 'unknown' is not assignable to type 'number'.",
+     "loc": {
+      "file": "<repo>/tests/corpus/native-worker-typed-arrays.ts",
+      "start": 1944,
+      "end": 1963
+     }
+    },
+    {
+     "code": "SC0001",
+     "message": "Property 'postMessage' does not exist on type '{}'.",
+     "loc": {
+      "file": "<repo>/tests/corpus/native-worker-typed-arrays.ts",
+      "start": 2244,
+      "end": 2255
+     }
+    },
+    {
+     "code": "SC0001",
+     "message": "Property 'postMessage' does not exist on type '{}'.",
+     "loc": {
+      "file": "<repo>/tests/corpus/native-worker-typed-arrays.ts",
+      "start": 2420,
+      "end": 2431
+     }
+    }
+   ]
+  },
   "<repo>/tests/corpus/nested-map-cycles.ts": {
    "order": [
     "<repo>/tests/corpus/nested-map-cycles.ts"
@@ -10629,6 +14193,30 @@
   "<repo>/tests/corpus/nested-map-values.ts": {
    "order": [
     "<repo>/tests/corpus/nested-map-values.ts"
+   ],
+   "diags": []
+  },
+  "<repo>/tests/corpus/never-returning-calls.ts": {
+   "order": [
+    "<repo>/tests/corpus/never-returning-calls.ts"
+   ],
+   "diags": []
+  },
+  "<repo>/tests/corpus/next-tick-commonjs-entry.cjs": {
+   "order": [
+    "<repo>/tests/corpus/next-tick-commonjs-entry.cjs"
+   ],
+   "diags": []
+  },
+  "<repo>/tests/corpus/node24-buffer-encoding-errors.ts": {
+   "order": [
+    "<repo>/tests/corpus/node24-buffer-encoding-errors.ts"
+   ],
+   "diags": []
+  },
+  "<repo>/tests/corpus/node24-buffer-encoding.ts": {
+   "order": [
+    "<repo>/tests/corpus/node24-buffer-encoding.ts"
    ],
    "diags": []
   },
@@ -10671,6 +14259,61 @@
   "<repo>/tests/corpus/node24-deep-equality.ts": {
    "order": [
     "<repo>/tests/corpus/node24-deep-equality.ts"
+   ],
+   "diags": []
+  },
+  "<repo>/tests/corpus/node24-env-files-errors.ts": {
+   "order": [
+    "<repo>/tests/corpus/node24-env-files-errors.ts"
+   ],
+   "diags": []
+  },
+  "<repo>/tests/corpus/node24-env-files.ts": {
+   "order": [
+    "<repo>/tests/corpus/node24-env-files.ts"
+   ],
+   "diags": []
+  },
+  "<repo>/tests/corpus/node24-env-imports.cjs": {
+   "order": [
+    "<repo>/tests/corpus/node24-env-imports.cjs"
+   ],
+   "diags": []
+  },
+  "<repo>/tests/corpus/node24-env-parse-errors.ts": {
+   "order": [
+    "<repo>/tests/corpus/node24-env-parse-errors.ts"
+   ],
+   "diags": []
+  },
+  "<repo>/tests/corpus/node24-env-parse.ts": {
+   "order": [
+    "<repo>/tests/corpus/node24-env-parse.ts"
+   ],
+   "diags": []
+  },
+  "<repo>/tests/corpus/node24-esm-metadata/main.mjs": {
+   "order": [
+    "<repo>/tests/corpus/node24-esm-metadata/child with ü.mjs",
+    "<repo>/tests/corpus/node24-esm-metadata/main.mjs"
+   ],
+   "diags": []
+  },
+  "<repo>/tests/corpus/node24-file-url-buffer.ts": {
+   "order": [
+    "<repo>/tests/corpus/node24-file-url-buffer.ts"
+   ],
+   "diags": []
+  },
+  "<repo>/tests/corpus/node24-file-url-errors.js": {
+   "order": [
+    "<repo>/tests/corpus/node24-file-url-errors.js"
+   ],
+   "diags": []
+  },
+  "<repo>/tests/corpus/node24-file-url-options.ts": {
+   "order": [
+    "<repo>/tests/corpus/node24-file-url-options.ts"
    ],
    "diags": []
   },
@@ -10764,9 +14407,195 @@
    ],
    "diags": []
   },
+  "<repo>/tests/corpus/node24-no-error-assertions-coercion.js": {
+   "order": [
+    "<repo>/tests/corpus/node24-no-error-assertions-coercion.js"
+   ],
+   "diags": []
+  },
+  "<repo>/tests/corpus/node24-no-error-assertions.cjs": {
+   "order": [
+    "<repo>/tests/corpus/node24-no-error-assertions.cjs"
+   ],
+   "diags": []
+  },
+  "<repo>/tests/corpus/node24-no-error-assertions.ts": {
+   "order": [
+    "<repo>/tests/corpus/node24-no-error-assertions.ts"
+   ],
+   "diags": []
+  },
+  "<repo>/tests/corpus/node24-parseargs.js": {
+   "order": [
+    "<repo>/tests/corpus/node24-parseargs.js"
+   ],
+   "diags": []
+  },
+  "<repo>/tests/corpus/node24-string-decoder.ts": {
+   "order": [
+    "<repo>/tests/corpus/node24-string-decoder.ts"
+   ],
+   "diags": []
+  },
+  "<repo>/tests/corpus/node24-style-text-environment.js": {
+   "order": [
+    "<repo>/tests/corpus/node24-style-text-environment.js"
+   ],
+   "diags": []
+  },
+  "<repo>/tests/corpus/node24-style-text-validation.js": {
+   "order": [
+    "<repo>/tests/corpus/node24-style-text-validation.js"
+   ],
+   "diags": []
+  },
+  "<repo>/tests/corpus/node24-style-text.cjs": {
+   "order": [
+    "<repo>/tests/corpus/node24-style-text.cjs"
+   ],
+   "diags": []
+  },
+  "<repo>/tests/corpus/node24-style-text.ts": {
+   "order": [
+    "<repo>/tests/corpus/node24-style-text.ts"
+   ],
+   "diags": []
+  },
+  "<repo>/tests/corpus/node24-system-error-validation.js": {
+   "order": [
+    "<repo>/tests/corpus/node24-system-error-validation.js"
+   ],
+   "diags": []
+  },
+  "<repo>/tests/corpus/node24-system-errors.cjs": {
+   "order": [
+    "<repo>/tests/corpus/node24-system-errors.cjs"
+   ],
+   "diags": []
+  },
+  "<repo>/tests/corpus/node24-system-errors.ts": {
+   "order": [
+    "<repo>/tests/corpus/node24-system-errors.ts"
+   ],
+   "diags": []
+  },
+  "<repo>/tests/corpus/node24-text-codec-properties.ts": {
+   "order": [
+    "<repo>/tests/corpus/node24-text-codec-properties.ts"
+   ],
+   "diags": []
+  },
+  "<repo>/tests/corpus/node24-text-encode-into.ts": {
+   "order": [
+    "<repo>/tests/corpus/node24-text-encode-into.ts"
+   ],
+   "diags": []
+  },
+  "<repo>/tests/corpus/node24-text-utilities-coercion.js": {
+   "order": [
+    "<repo>/tests/corpus/node24-text-utilities-coercion.js"
+   ],
+   "diags": []
+  },
+  "<repo>/tests/corpus/node24-text-utilities-validation.js": {
+   "order": [
+    "<repo>/tests/corpus/node24-text-utilities-validation.js"
+   ],
+   "diags": []
+  },
+  "<repo>/tests/corpus/node24-text-utilities.cjs": {
+   "order": [
+    "<repo>/tests/corpus/node24-text-utilities.cjs"
+   ],
+   "diags": []
+  },
+  "<repo>/tests/corpus/node24-text-utilities.ts": {
+   "order": [
+    "<repo>/tests/corpus/node24-text-utilities.ts"
+   ],
+   "diags": []
+  },
+  "<repo>/tests/corpus/node24-url-authority-coercion.js": {
+   "order": [
+    "<repo>/tests/corpus/node24-url-authority-coercion.js"
+   ],
+   "diags": []
+  },
+  "<repo>/tests/corpus/node24-url-authority.ts": {
+   "order": [
+    "<repo>/tests/corpus/node24-url-authority.ts"
+   ],
+   "diags": []
+  },
+  "<repo>/tests/corpus/node24-url-factories.ts": {
+   "order": [
+    "<repo>/tests/corpus/node24-url-factories.ts"
+   ],
+   "diags": []
+  },
+  "<repo>/tests/corpus/node24-url-factory-errors.ts": {
+   "order": [
+    "<repo>/tests/corpus/node24-url-factory-errors.ts"
+   ],
+   "diags": []
+  },
+  "<repo>/tests/corpus/node24-url-mutation-coercion.js": {
+   "order": [
+    "<repo>/tests/corpus/node24-url-mutation-coercion.js"
+   ],
+   "diags": []
+  },
+  "<repo>/tests/corpus/node24-url-mutation.ts": {
+   "order": [
+    "<repo>/tests/corpus/node24-url-mutation.ts"
+   ],
+   "diags": []
+  },
+  "<repo>/tests/corpus/node24-util-types.cjs": {
+   "order": [
+    "<repo>/tests/corpus/node24-util-types.cjs"
+   ],
+   "diags": []
+  },
+  "<repo>/tests/corpus/node24-util-types.js": {
+   "order": [
+    "<repo>/tests/corpus/node24-util-types.js"
+   ],
+   "diags": []
+  },
+  "<repo>/tests/corpus/node24-util-types.ts": {
+   "order": [
+    "<repo>/tests/corpus/node24-util-types.ts"
+   ],
+   "diags": []
+  },
+  "<repo>/tests/corpus/non-null-class-iteration.ts": {
+   "order": [
+    "<repo>/tests/corpus/non-null-class-iteration.ts"
+   ],
+   "diags": []
+  },
+  "<repo>/tests/corpus/nonnull-element-arguments.ts": {
+   "order": [
+    "<repo>/tests/corpus/nonnull-element-arguments.ts"
+   ],
+   "diags": []
+  },
+  "<repo>/tests/corpus/nonnull-forwarded-class-values.ts": {
+   "order": [
+    "<repo>/tests/corpus/nonnull-forwarded-class-values.ts"
+   ],
+   "diags": []
+  },
   "<repo>/tests/corpus/nullable-object-extension.mjs": {
    "order": [
     "<repo>/tests/corpus/nullable-object-extension.mjs"
+   ],
+   "diags": []
+  },
+  "<repo>/tests/corpus/nullish-asserted-class-arms.ts": {
+   "order": [
+    "<repo>/tests/corpus/nullish-asserted-class-arms.ts"
    ],
    "diags": []
   },
@@ -10782,9 +14611,21 @@
    ],
    "diags": []
   },
+  "<repo>/tests/corpus/number-parse-statics.ts": {
+   "order": [
+    "<repo>/tests/corpus/number-parse-statics.ts"
+   ],
+   "diags": []
+  },
   "<repo>/tests/corpus/number-predicates-unknown.ts": {
    "order": [
     "<repo>/tests/corpus/number-predicates-unknown.ts"
+   ],
+   "diags": []
+  },
+  "<repo>/tests/corpus/numeric-call-specialization.ts": {
+   "order": [
+    "<repo>/tests/corpus/numeric-call-specialization.ts"
    ],
    "diags": []
   },
@@ -10803,6 +14644,12 @@
   "<repo>/tests/corpus/object-inherited-to-string.js": {
    "order": [
     "<repo>/tests/corpus/object-inherited-to-string.js"
+   ],
+   "diags": []
+  },
+  "<repo>/tests/corpus/object-key-indexes.js": {
+   "order": [
+    "<repo>/tests/corpus/object-key-indexes.js"
    ],
    "diags": []
   },
@@ -10839,6 +14686,24 @@
    ],
    "diags": []
   },
+  "<repo>/tests/corpus/optional-class-flows.ts": {
+   "order": [
+    "<repo>/tests/corpus/optional-class-flows.ts"
+   ],
+   "diags": []
+  },
+  "<repo>/tests/corpus/optional-element-defaults.ts": {
+   "order": [
+    "<repo>/tests/corpus/optional-element-defaults.ts"
+   ],
+   "diags": []
+  },
+  "<repo>/tests/corpus/optional-flag-comparisons.ts": {
+   "order": [
+    "<repo>/tests/corpus/optional-flag-comparisons.ts"
+   ],
+   "diags": []
+  },
   "<repo>/tests/corpus/optional-native-callables.js": {
    "order": [
     "<repo>/tests/corpus/optional-native-callables.js"
@@ -10872,6 +14737,12 @@
   "<repo>/tests/corpus/primitive-and-function-descriptors.js": {
    "order": [
     "<repo>/tests/corpus/primitive-and-function-descriptors.js"
+   ],
+   "diags": []
+  },
+  "<repo>/tests/corpus/primitive-union-string.ts": {
+   "order": [
+    "<repo>/tests/corpus/primitive-union-string.ts"
    ],
    "diags": []
   },
@@ -10935,9 +14806,40 @@
    ],
    "diags": []
   },
+  "<repo>/tests/corpus/process-version-pin.ts": {
+   "order": [
+    "<repo>/tests/corpus/process-version-pin.ts"
+   ],
+   "diags": [
+    {
+     "code": "SC0001",
+     "message": "Property 'version' does not exist on type '{ getBuiltinModule(id: string): unknown; hrtime: { (time?: [number, number] | undefined): [number, number]; bigint(): bigint; }; argv: string[]; platform: string; readonly arch: string; readonly versions: ProcessVersions; ... 35 more ...; disconnect(): void; }'. Did you mean 'versions'?",
+     "loc": {
+      "file": "<repo>/tests/corpus/process-version-pin.ts",
+      "start": 141,
+      "end": 148
+     }
+    },
+    {
+     "code": "SC0001",
+     "message": "Property 'version' does not exist on type '{ getBuiltinModule(id: string): unknown; hrtime: { (time?: [number, number] | undefined): [number, number]; bigint(): bigint; }; argv: string[]; platform: string; readonly arch: string; readonly versions: ProcessVersions; ... 35 more ...; disconnect(): void; }'. Did you mean 'versions'?",
+     "loc": {
+      "file": "<repo>/tests/corpus/process-version-pin.ts",
+      "start": 194,
+      "end": 201
+     }
+    }
+   ]
+  },
   "<repo>/tests/corpus/process-versions-storage.ts": {
    "order": [
     "<repo>/tests/corpus/process-versions-storage.ts"
+   ],
+   "diags": []
+  },
+  "<repo>/tests/corpus/projected-collection-lifetimes.ts": {
+   "order": [
+    "<repo>/tests/corpus/projected-collection-lifetimes.ts"
    ],
    "diags": []
   },
@@ -10965,9 +14867,39 @@
    ],
    "diags": []
   },
+  "<repo>/tests/corpus/record-field-presence.ts": {
+   "order": [
+    "<repo>/tests/corpus/record-field-presence.ts"
+   ],
+   "diags": []
+  },
+  "<repo>/tests/corpus/record-key-order.ts": {
+   "order": [
+    "<repo>/tests/corpus/record-key-order.ts"
+   ],
+   "diags": []
+  },
   "<repo>/tests/corpus/record-optional-json-presence.ts": {
    "order": [
     "<repo>/tests/corpus/record-optional-json-presence.ts"
+   ],
+   "diags": []
+  },
+  "<repo>/tests/corpus/record-presence-copies.ts": {
+   "order": [
+    "<repo>/tests/corpus/record-presence-copies.ts"
+   ],
+   "diags": []
+  },
+  "<repo>/tests/corpus/record-presence-delete-json.ts": {
+   "order": [
+    "<repo>/tests/corpus/record-presence-delete-json.ts"
+   ],
+   "diags": []
+  },
+  "<repo>/tests/corpus/record-unchecked-read-presence.ts": {
+   "order": [
+    "<repo>/tests/corpus/record-unchecked-read-presence.ts"
    ],
    "diags": []
   },
@@ -10995,6 +14927,18 @@
    ],
    "diags": []
   },
+  "<repo>/tests/corpus/regex-callback-replacements.ts": {
+   "order": [
+    "<repo>/tests/corpus/regex-callback-replacements.ts"
+   ],
+   "diags": []
+  },
+  "<repo>/tests/corpus/regex-callback-values.js": {
+   "order": [
+    "<repo>/tests/corpus/regex-callback-values.js"
+   ],
+   "diags": []
+  },
   "<repo>/tests/corpus/regex-checked-casts.ts": {
    "order": [
     "<repo>/tests/corpus/regex-checked-casts.ts"
@@ -11004,6 +14948,24 @@
   "<repo>/tests/corpus/regex-checked-storage.js": {
    "order": [
     "<repo>/tests/corpus/regex-checked-storage.js"
+   ],
+   "diags": []
+  },
+  "<repo>/tests/corpus/regex-exec-long-subject.ts": {
+   "order": [
+    "<repo>/tests/corpus/regex-exec-long-subject.ts"
+   ],
+   "diags": []
+  },
+  "<repo>/tests/corpus/regex-input-lifetimes.ts": {
+   "order": [
+    "<repo>/tests/corpus/regex-input-lifetimes.ts"
+   ],
+   "diags": []
+  },
+  "<repo>/tests/corpus/regex-native-matcher.ts": {
+   "order": [
+    "<repo>/tests/corpus/regex-native-matcher.ts"
    ],
    "diags": []
   },
@@ -11022,6 +14984,18 @@
   "<repo>/tests/corpus/regex-split-captures.ts": {
    "order": [
     "<repo>/tests/corpus/regex-split-captures.ts"
+   ],
+   "diags": []
+  },
+  "<repo>/tests/corpus/regex-text-paths.ts": {
+   "order": [
+    "<repo>/tests/corpus/regex-text-paths.ts"
+   ],
+   "diags": []
+  },
+  "<repo>/tests/corpus/regexp-constructor-repeat.ts": {
+   "order": [
+    "<repo>/tests/corpus/regexp-constructor-repeat.ts"
    ],
    "diags": []
   },
@@ -11055,6 +15029,12 @@
    ],
    "diags": []
   },
+  "<repo>/tests/corpus/repeat-and-typed-read-errors.ts": {
+   "order": [
+    "<repo>/tests/corpus/repeat-and-typed-read-errors.ts"
+   ],
+   "diags": []
+  },
   "<repo>/tests/corpus/rest-optional-array-arguments.ts": {
    "order": [
     "<repo>/tests/corpus/rest-optional-array-arguments.ts"
@@ -11070,6 +15050,18 @@
   "<repo>/tests/corpus/return-void-through-finally.ts": {
    "order": [
     "<repo>/tests/corpus/return-void-through-finally.ts"
+   ],
+   "diags": []
+  },
+  "<repo>/tests/corpus/runtime-optional-string-flows.ts": {
+   "order": [
+    "<repo>/tests/corpus/runtime-optional-string-flows.ts"
+   ],
+   "diags": []
+  },
+  "<repo>/tests/corpus/scalar-string-slices.ts": {
+   "order": [
+    "<repo>/tests/corpus/scalar-string-slices.ts"
    ],
    "diags": []
   },
@@ -11100,6 +15092,48 @@
   "<repo>/tests/corpus/set-optional-seeds.ts": {
    "order": [
     "<repo>/tests/corpus/set-optional-seeds.ts"
+   ],
+   "diags": []
+  },
+  "<repo>/tests/corpus/small-collection-transitions.ts": {
+   "order": [
+    "<repo>/tests/corpus/small-collection-transitions.ts"
+   ],
+   "diags": []
+  },
+  "<repo>/tests/corpus/stack-depth-async-bodies.ts": {
+   "order": [
+    "<repo>/tests/corpus/stack-depth-async-bodies.ts"
+   ],
+   "diags": []
+  },
+  "<repo>/tests/corpus/stack-overflow-async.ts": {
+   "order": [
+    "<repo>/tests/corpus/stack-overflow-async.ts"
+   ],
+   "diags": []
+  },
+  "<repo>/tests/corpus/stack-overflow-caught.ts": {
+   "order": [
+    "<repo>/tests/corpus/stack-overflow-caught.ts"
+   ],
+   "diags": []
+  },
+  "<repo>/tests/corpus/stack-overflow-finally.ts": {
+   "order": [
+    "<repo>/tests/corpus/stack-overflow-finally.ts"
+   ],
+   "diags": []
+  },
+  "<repo>/tests/corpus/stack-overflow-shapes.ts": {
+   "order": [
+    "<repo>/tests/corpus/stack-overflow-shapes.ts"
+   ],
+   "diags": []
+  },
+  "<repo>/tests/corpus/stack-overflow-uncaught.ts": {
+   "order": [
+    "<repo>/tests/corpus/stack-overflow-uncaught.ts"
    ],
    "diags": []
   },
@@ -11146,9 +15180,51 @@
    ],
    "diags": []
   },
+  "<repo>/tests/corpus/string-char-code-integer-loops.ts": {
+   "order": [
+    "<repo>/tests/corpus/string-char-code-integer-loops.ts"
+   ],
+   "diags": []
+  },
   "<repo>/tests/corpus/string-code-points.ts": {
    "order": [
     "<repo>/tests/corpus/string-code-points.ts"
+   ],
+   "diags": []
+  },
+  "<repo>/tests/corpus/string-concat-number-parts.ts": {
+   "order": [
+    "<repo>/tests/corpus/string-concat-number-parts.ts"
+   ],
+   "diags": []
+  },
+  "<repo>/tests/corpus/string-construction-order.ts": {
+   "order": [
+    "<repo>/tests/corpus/string-construction-order.ts"
+   ],
+   "diags": []
+  },
+  "<repo>/tests/corpus/string-lifetimes-boundaries.ts": {
+   "order": [
+    "<repo>/tests/corpus/string-lifetimes-boundaries.ts"
+   ],
+   "diags": []
+  },
+  "<repo>/tests/corpus/string-lifetimes-evaluation.ts": {
+   "order": [
+    "<repo>/tests/corpus/string-lifetimes-evaluation.ts"
+   ],
+   "diags": []
+  },
+  "<repo>/tests/corpus/string-lifetimes-iteration.ts": {
+   "order": [
+    "<repo>/tests/corpus/string-lifetimes-iteration.ts"
+   ],
+   "diags": []
+  },
+  "<repo>/tests/corpus/string-lifetimes-operations.ts": {
+   "order": [
+    "<repo>/tests/corpus/string-lifetimes-operations.ts"
    ],
    "diags": []
   },
@@ -11170,9 +15246,33 @@
    ],
    "diags": []
   },
+  "<repo>/tests/corpus/string-split-traversal.ts": {
+   "order": [
+    "<repo>/tests/corpus/string-split-traversal.ts"
+   ],
+   "diags": []
+  },
   "<repo>/tests/corpus/structural-class-properties.ts": {
    "order": [
     "<repo>/tests/corpus/structural-class-properties.ts"
+   ],
+   "diags": []
+  },
+  "<repo>/tests/corpus/structured-text-boundaries.js": {
+   "order": [
+    "<repo>/tests/corpus/structured-text-boundaries.js"
+   ],
+   "diags": []
+  },
+  "<repo>/tests/corpus/structured-text-storage.ts": {
+   "order": [
+    "<repo>/tests/corpus/structured-text-storage.ts"
+   ],
+   "diags": []
+  },
+  "<repo>/tests/corpus/switch-integer-dispatch.ts": {
+   "order": [
+    "<repo>/tests/corpus/switch-integer-dispatch.ts"
    ],
    "diags": []
   },
@@ -11221,6 +15321,73 @@
    ],
    "diags": []
   },
+  "<repo>/tests/corpus/synchronous-callback-lifetimes.ts": {
+   "order": [
+    "<repo>/tests/corpus/synchronous-callback-lifetimes.ts"
+   ],
+   "diags": []
+  },
+  "<repo>/tests/corpus/terminal-stream-properties.ts": {
+   "order": [
+    "<repo>/tests/corpus/terminal-stream-properties.ts"
+   ],
+   "diags": [
+    {
+     "code": "SC0001",
+     "message": "Property 'columns' does not exist on type 'WriteStream'.",
+     "loc": {
+      "file": "<repo>/tests/corpus/terminal-stream-properties.ts",
+      "start": 156,
+      "end": 163
+     }
+    },
+    {
+     "code": "SC0001",
+     "message": "Property 'rows' does not exist on type 'WriteStream'.",
+     "loc": {
+      "file": "<repo>/tests/corpus/terminal-stream-properties.ts",
+      "start": 187,
+      "end": 191
+     }
+    },
+    {
+     "code": "SC0001",
+     "message": "Property 'columns' does not exist on type '{ write(data: string | Uint8Array<ArrayBufferLike>, callback?: ((error?: Error | null | undefined) => void) | undefined): boolean; write(data: string | Uint8Array<...>, encoding: BufferEncoding, callback?: ((error?: Error | ... 1 more ... | undefined) => void) | undefined): boolean; readonly isTTY: boolean; }'.",
+     "loc": {
+      "file": "<repo>/tests/corpus/terminal-stream-properties.ts",
+      "start": 447,
+      "end": 454
+     }
+    },
+    {
+     "code": "SC0001",
+     "message": "Property 'rows' does not exist on type '{ write(data: string | Uint8Array<ArrayBufferLike>, callback?: ((error?: Error | null | undefined) => void) | undefined): boolean; write(data: string | Uint8Array<...>, encoding: BufferEncoding, callback?: ((error?: Error | ... 1 more ... | undefined) => void) | undefined): boolean; readonly isTTY: boolean; }'.",
+     "loc": {
+      "file": "<repo>/tests/corpus/terminal-stream-properties.ts",
+      "start": 460,
+      "end": 464
+     }
+    },
+    {
+     "code": "SC0001",
+     "message": "Property 'columns' does not exist on type 'WriteStream'.",
+     "loc": {
+      "file": "<repo>/tests/corpus/terminal-stream-properties.ts",
+      "start": 581,
+      "end": 588
+     }
+    },
+    {
+     "code": "SC0001",
+     "message": "Property 'getWindowSize' does not exist on type '{ write(data: string | Uint8Array<ArrayBufferLike>, callback?: ((error?: Error | null | undefined) => void) | undefined): boolean; write(data: string | Uint8Array<...>, encoding: BufferEncoding, callback?: ((error?: Error | ... 1 more ... | undefined) => void) | undefined): boolean; readonly isTTY: boolean; }'.",
+     "loc": {
+      "file": "<repo>/tests/corpus/terminal-stream-properties.ts",
+      "start": 614,
+      "end": 627
+     }
+    }
+   ]
+  },
   "<repo>/tests/corpus/text-codec-values/main.ts": {
    "order": [
     "<repo>/tests/corpus/text-codec-values/shared.ts",
@@ -11232,6 +15399,18 @@
   "<repo>/tests/corpus/text-codec-var.ts": {
    "order": [
     "<repo>/tests/corpus/text-codec-var.ts"
+   ],
+   "diags": []
+  },
+  "<repo>/tests/corpus/text-encode-into-boundaries.ts": {
+   "order": [
+    "<repo>/tests/corpus/text-encode-into-boundaries.ts"
+   ],
+   "diags": []
+  },
+  "<repo>/tests/corpus/timers-clear-many.ts": {
+   "order": [
+    "<repo>/tests/corpus/timers-clear-many.ts"
    ],
    "diags": []
   },
@@ -11256,6 +15435,12 @@
   "<repo>/tests/corpus/tuple-forof-visitation.ts": {
    "order": [
     "<repo>/tests/corpus/tuple-forof-visitation.ts"
+   ],
+   "diags": []
+  },
+  "<repo>/tests/corpus/typed-array-bulk-conversion.mjs": {
+   "order": [
+    "<repo>/tests/corpus/typed-array-bulk-conversion.mjs"
    ],
    "diags": []
   },
@@ -11307,6 +15492,36 @@
    ],
    "diags": []
   },
+  "<repo>/tests/corpus/typed-array-missing-index-read.ts": {
+   "order": [
+    "<repo>/tests/corpus/typed-array-missing-index-read.ts"
+   ],
+   "diags": []
+  },
+  "<repo>/tests/corpus/typed-array-nan-coded-reads.ts": {
+   "order": [
+    "<repo>/tests/corpus/typed-array-nan-coded-reads.ts"
+   ],
+   "diags": []
+  },
+  "<repo>/tests/corpus/typed-array-numeric-import.ts": {
+   "order": [
+    "<repo>/tests/corpus/typed-array-numeric-import.ts"
+   ],
+   "diags": []
+  },
+  "<repo>/tests/corpus/typed-array-present-reads.ts": {
+   "order": [
+    "<repo>/tests/corpus/typed-array-present-reads.ts"
+   ],
+   "diags": []
+  },
+  "<repo>/tests/corpus/typed-array-reversed-storage.ts": {
+   "order": [
+    "<repo>/tests/corpus/typed-array-reversed-storage.ts"
+   ],
+   "diags": []
+  },
   "<repo>/tests/corpus/typed-array-unknown.ts": {
    "order": [
     "<repo>/tests/corpus/typed-array-unknown.ts"
@@ -11329,6 +15544,12 @@
    "order": [
     "<repo>/tests/corpus/typed-collection-views/use.mjs",
     "<repo>/tests/corpus/typed-collection-views/main.ts"
+   ],
+   "diags": []
+  },
+  "<repo>/tests/corpus/typed-index-arguments.ts": {
+   "order": [
+    "<repo>/tests/corpus/typed-index-arguments.ts"
    ],
    "diags": []
   },
@@ -11359,6 +15580,18 @@
   "<repo>/tests/corpus/typeof-checked-comparison.js": {
    "order": [
     "<repo>/tests/corpus/typeof-checked-comparison.js"
+   ],
+   "diags": []
+  },
+  "<repo>/tests/corpus/uint8array-sort-domains.ts": {
+   "order": [
+    "<repo>/tests/corpus/uint8array-sort-domains.ts"
+   ],
+   "diags": []
+  },
+  "<repo>/tests/corpus/unicode-case-paths.ts": {
+   "order": [
+    "<repo>/tests/corpus/unicode-case-paths.ts"
    ],
    "diags": []
   },
@@ -11410,6 +15643,12 @@
    ],
    "diags": []
   },
+  "<repo>/tests/corpus/union-reference-comparison.ts": {
+   "order": [
+    "<repo>/tests/corpus/union-reference-comparison.ts"
+   ],
+   "diags": []
+  },
   "<repo>/tests/corpus/unknown-array-holes.ts": {
    "order": [
     "<repo>/tests/corpus/unknown-array-holes.ts"
@@ -11437,6 +15676,12 @@
   "<repo>/tests/corpus/url-runtime-base.ts": {
    "order": [
     "<repo>/tests/corpus/url-runtime-base.ts"
+   ],
+   "diags": []
+  },
+  "<repo>/tests/corpus/utf8-span-decoding.ts": {
+   "order": [
+    "<repo>/tests/corpus/utf8-span-decoding.ts"
    ],
    "diags": []
   },
@@ -11475,6 +15720,67 @@
     "<repo>/tests/corpus/weak-set-native.js"
    ],
    "diags": []
+  },
+  "<repo>/tests/corpus/worker-class-instance-clone.ts": {
+   "order": [
+    "<repo>/tests/corpus/worker-class-instance-clone.ts"
+   ],
+   "diags": [
+    {
+     "code": "SC0001",
+     "message": "Argument of type '(code: number) => void' is not assignable to parameter of type '(...args: unknown[]) => void'.\n  Types of parameters 'code' and 'args' are incompatible.\n    Type 'unknown' is not assignable to type 'number'.",
+     "loc": {
+      "file": "<repo>/tests/corpus/worker-class-instance-clone.ts",
+      "start": 1527,
+      "end": 1599
+     }
+    },
+    {
+     "code": "SC0001",
+     "message": "Property 'postMessage' does not exist on type '{}'.",
+     "loc": {
+      "file": "<repo>/tests/corpus/worker-class-instance-clone.ts",
+      "start": 1697,
+      "end": 1708
+     }
+    },
+    {
+     "code": "SC0001",
+     "message": "Property 'once' does not exist on type '{}'.",
+     "loc": {
+      "file": "<repo>/tests/corpus/worker-class-instance-clone.ts",
+      "start": 1785,
+      "end": 1789
+     }
+    },
+    {
+     "code": "SC0001",
+     "message": "Property 'postMessage' does not exist on type '{}'.",
+     "loc": {
+      "file": "<repo>/tests/corpus/worker-class-instance-clone.ts",
+      "start": 1873,
+      "end": 1884
+     }
+    },
+    {
+     "code": "SC0001",
+     "message": "Property 'postMessage' does not exist on type '{}'.",
+     "loc": {
+      "file": "<repo>/tests/corpus/worker-class-instance-clone.ts",
+      "start": 2002,
+      "end": 2013
+     }
+    },
+    {
+     "code": "SC0001",
+     "message": "Property 'close' does not exist on type '{}'.",
+     "loc": {
+      "file": "<repo>/tests/corpus/worker-class-instance-clone.ts",
+      "start": 2053,
+      "end": 2058
+     }
+    }
+   ]
   },
   "<repo>/tests/diagnostics/accessors.ts": {
    "order": [
@@ -12177,6 +16483,12 @@
    ],
    "diags": []
   },
+  "<repo>/tests/diagnostics/import-meta-rest.ts": {
+   "order": [
+    "<repo>/tests/diagnostics/import-meta-rest.ts"
+   ],
+   "diags": []
+  },
   "<repo>/tests/diagnostics/import-meta-write.ts": {
    "order": [
     "<repo>/tests/diagnostics/import-meta-write.ts"
@@ -12554,6 +16866,12 @@
    ],
    "diags": []
   },
+  "<repo>/tests/diagnostics/no-error-assertion-fences.ts": {
+   "order": [
+    "<repo>/tests/diagnostics/no-error-assertion-fences.ts"
+   ],
+   "diags": []
+  },
   "<repo>/tests/diagnostics/node-fallback-fence.ts": {
    "order": [
     "<repo>/tests/diagnostics/node-fallback-fence.ts"
@@ -12732,7 +17050,36 @@
    "order": [
     "<repo>/tests/diagnostics/spi-off/main.ts"
    ],
-   "diags": []
+   "diags": [
+    {
+     "code": "SC0002",
+     "message": "this project's tsconfig disables strict, which scriptc requires (the strict family's members default to it, and the lowering relies on them)",
+     "loc": {
+      "file": "<repo>/tests/diagnostics/spi-off/tsconfig.json",
+      "start": 0,
+      "end": 0
+     },
+     "hint": "set \"strict\": true in the project tsconfig (members it should not turn on, such as noImplicitAny, can stay off individually)"
+    },
+    {
+     "code": "SC0001",
+     "message": "Property 'v' has no initializer and is not definitely assigned in the constructor.",
+     "loc": {
+      "file": "<repo>/tests/diagnostics/spi-off/main.ts",
+      "start": 676,
+      "end": 677
+     }
+    },
+    {
+     "code": "SC0001",
+     "message": "Property 'm' has no initializer and is not definitely assigned in the constructor.",
+     "loc": {
+      "file": "<repo>/tests/diagnostics/spi-off/main.ts",
+      "start": 777,
+      "end": 778
+     }
+    }
+   ]
   },
   "<repo>/tests/diagnostics/spread-fences.ts": {
    "order": [
@@ -12856,6 +17203,24 @@
   "<repo>/tests/diagnostics/unions.ts": {
    "order": [
     "<repo>/tests/diagnostics/unions.ts"
+   ],
+   "diags": []
+  },
+  "<repo>/tests/diagnostics/url-mutation-object-plus.ts": {
+   "order": [
+    "<repo>/tests/diagnostics/url-mutation-object-plus.ts"
+   ],
+   "diags": []
+  },
+  "<repo>/tests/diagnostics/url-mutation-operator.ts": {
+   "order": [
+    "<repo>/tests/diagnostics/url-mutation-operator.ts"
+   ],
+   "diags": []
+  },
+  "<repo>/tests/diagnostics/url-mutation-runtime-key.ts": {
+   "order": [
+    "<repo>/tests/diagnostics/url-mutation-runtime-key.ts"
    ],
    "diags": []
   },
@@ -13157,6 +17522,18 @@
    ],
    "diags": []
   },
+  "<repo>/tests/fixtures/npm/cases/node24-async-events/main.ts": {
+   "order": [
+    "<repo>/tests/fixtures/npm/cases/node24-async-events/main.ts"
+   ],
+   "diags": []
+  },
+  "<repo>/tests/fixtures/npm/cases/node24-commonjs-metadata/main.ts": {
+   "order": [
+    "<repo>/tests/fixtures/npm/cases/node24-commonjs-metadata/main.ts"
+   ],
+   "diags": []
+  },
   "<repo>/tests/fixtures/npm/cases/node24-crypto-kdf/main.ts": {
    "order": [
     "<repo>/tests/fixtures/npm/cases/node24-crypto-kdf/main.ts"
@@ -13169,9 +17546,219 @@
    ],
    "diags": []
   },
+  "<repo>/tests/fixtures/npm/cases/node24-diagnostics-async/main.ts": {
+   "order": [
+    "<repo>/tests/fixtures/npm/cases/node24-diagnostics-async/main.ts"
+   ],
+   "diags": []
+  },
+  "<repo>/tests/fixtures/npm/cases/node24-diagnostics-subscriber-throw/main.ts": {
+   "order": [
+    "<repo>/tests/fixtures/npm/cases/node24-diagnostics-subscriber-throw/main.ts"
+   ],
+   "diags": []
+  },
+  "<repo>/tests/fixtures/npm/cases/node24-diagnostics-tracing/main.ts": {
+   "order": [
+    "<repo>/tests/fixtures/npm/cases/node24-diagnostics-tracing/main.ts"
+   ],
+   "diags": []
+  },
+  "<repo>/tests/fixtures/npm/cases/node24-diagnostics-transform-throw/main.ts": {
+   "order": [
+    "<repo>/tests/fixtures/npm/cases/node24-diagnostics-transform-throw/main.ts"
+   ],
+   "diags": []
+  },
+  "<repo>/tests/fixtures/npm/cases/node24-env/main.ts": {
+   "order": [
+    "<repo>/tests/fixtures/npm/cases/node24-env/main.ts"
+   ],
+   "diags": []
+  },
+  "<repo>/tests/fixtures/npm/cases/node24-esm-metadata/main.ts": {
+   "order": [
+    "<repo>/tests/fixtures/npm/cases/node24-esm-metadata/main.ts"
+   ],
+   "diags": []
+  },
+  "<repo>/tests/fixtures/npm/cases/node24-event-emitter/main.ts": {
+   "order": [
+    "<repo>/tests/fixtures/npm/cases/node24-event-emitter/main.ts"
+   ],
+   "diags": []
+  },
+  "<repo>/tests/fixtures/npm/cases/node24-file-url-conversion/main.ts": {
+   "order": [
+    "<repo>/tests/fixtures/npm/cases/node24-file-url-conversion/main.ts"
+   ],
+   "diags": []
+  },
   "<repo>/tests/fixtures/npm/cases/node24-fs-descriptors/main.ts": {
    "order": [
     "<repo>/tests/fixtures/npm/cases/node24-fs-descriptors/main.ts"
+   ],
+   "diags": []
+  },
+  "<repo>/tests/fixtures/npm/cases/node24-mime-errors/main.ts": {
+   "order": [
+    "<repo>/tests/fixtures/npm/cases/node24-mime-errors/main.ts"
+   ],
+   "diags": []
+  },
+  "<repo>/tests/fixtures/npm/cases/node24-mime/main.ts": {
+   "order": [
+    "<repo>/tests/fixtures/npm/cases/node24-mime/main.ts"
+   ],
+   "diags": []
+  },
+  "<repo>/tests/fixtures/npm/cases/node24-no-error-assertions/main.ts": {
+   "order": [
+    "<repo>/tests/fixtures/npm/cases/node24-no-error-assertions/main.ts"
+   ],
+   "diags": []
+  },
+  "<repo>/tests/fixtures/npm/cases/node24-parseargs/main.ts": {
+   "order": [
+    "<repo>/tests/fixtures/npm/cases/node24-parseargs/main.ts"
+   ],
+   "diags": []
+  },
+  "<repo>/tests/fixtures/npm/cases/node24-promise-timers/main.ts": {
+   "order": [
+    "<repo>/tests/fixtures/npm/cases/node24-promise-timers/main.ts"
+   ],
+   "diags": []
+  },
+  "<repo>/tests/fixtures/npm/cases/node24-string-decoder/main.ts": {
+   "order": [
+    "<repo>/tests/fixtures/npm/cases/node24-string-decoder/main.ts"
+   ],
+   "diags": []
+  },
+  "<repo>/tests/fixtures/npm/cases/node24-style-text/main.ts": {
+   "order": [
+    "<repo>/tests/fixtures/npm/cases/node24-style-text/main.ts"
+   ],
+   "diags": []
+  },
+  "<repo>/tests/fixtures/npm/cases/node24-system-errors/main.ts": {
+   "order": [
+    "<repo>/tests/fixtures/npm/cases/node24-system-errors/main.ts"
+   ],
+   "diags": []
+  },
+  "<repo>/tests/fixtures/npm/cases/node24-text-encoding/main.ts": {
+   "order": [
+    "<repo>/tests/fixtures/npm/cases/node24-text-encoding/main.ts"
+   ],
+   "diags": []
+  },
+  "<repo>/tests/fixtures/npm/cases/node24-text-utilities/main.ts": {
+   "order": [
+    "<repo>/tests/fixtures/npm/cases/node24-text-utilities/main.ts"
+   ],
+   "diags": []
+  },
+  "<repo>/tests/fixtures/npm/cases/node24-timers-unref/main.ts": {
+   "order": [
+    "<repo>/tests/fixtures/npm/cases/node24-timers-unref/main.ts"
+   ],
+   "diags": []
+  },
+  "<repo>/tests/fixtures/npm/cases/node24-url-authority/main.ts": {
+   "order": [
+    "<repo>/tests/fixtures/npm/cases/node24-url-authority/main.ts"
+   ],
+   "diags": []
+  },
+  "<repo>/tests/fixtures/npm/cases/node24-url-factories/main.ts": {
+   "order": [
+    "<repo>/tests/fixtures/npm/cases/node24-url-factories/main.ts"
+   ],
+   "diags": []
+  },
+  "<repo>/tests/fixtures/npm/cases/node24-url-mutation/main.ts": {
+   "order": [
+    "<repo>/tests/fixtures/npm/cases/node24-url-mutation/main.ts"
+   ],
+   "diags": []
+  },
+  "<repo>/tests/fixtures/npm/cases/node24-util-adapters/main.ts": {
+   "order": [
+    "<repo>/tests/fixtures/npm/cases/node24-util-adapters/main.ts"
+   ],
+   "diags": []
+  },
+  "<repo>/tests/fixtures/npm/cases/node24-util-types/main.ts": {
+   "order": [
+    "<repo>/tests/fixtures/npm/cases/node24-util-types/main.ts"
+   ],
+   "diags": []
+  },
+  "<repo>/tests/fixtures/npm/cases/node24-web-stream-encoding/main.ts": {
+   "order": [
+    "<repo>/tests/fixtures/npm/cases/node24-web-stream-encoding/main.ts"
+   ],
+   "diags": []
+  },
+  "<repo>/tests/fixtures/npm/cases/node24-web-stream-errors/main.ts": {
+   "order": [
+    "<repo>/tests/fixtures/npm/cases/node24-web-stream-errors/main.ts"
+   ],
+   "diags": []
+  },
+  "<repo>/tests/fixtures/npm/cases/node24-web-stream-lifecycle/main.ts": {
+   "order": [
+    "<repo>/tests/fixtures/npm/cases/node24-web-stream-lifecycle/main.ts"
+   ],
+   "diags": []
+  },
+  "<repo>/tests/fixtures/npm/cases/node24-web-stream-pipe-abort/main.ts": {
+   "order": [
+    "<repo>/tests/fixtures/npm/cases/node24-web-stream-pipe-abort/main.ts"
+   ],
+   "diags": []
+  },
+  "<repo>/tests/fixtures/npm/cases/node24-web-stream-pipe-errors/main.ts": {
+   "order": [
+    "<repo>/tests/fixtures/npm/cases/node24-web-stream-pipe-errors/main.ts"
+   ],
+   "diags": []
+  },
+  "<repo>/tests/fixtures/npm/cases/node24-web-stream-pipes/main.ts": {
+   "order": [
+    "<repo>/tests/fixtures/npm/cases/node24-web-stream-pipes/main.ts"
+   ],
+   "diags": []
+  },
+  "<repo>/tests/fixtures/npm/cases/node24-web-stream-queues/main.ts": {
+   "order": [
+    "<repo>/tests/fixtures/npm/cases/node24-web-stream-queues/main.ts"
+   ],
+   "diags": []
+  },
+  "<repo>/tests/fixtures/npm/cases/node24-web-stream-readable-lifecycle/main.ts": {
+   "order": [
+    "<repo>/tests/fixtures/npm/cases/node24-web-stream-readable-lifecycle/main.ts"
+   ],
+   "diags": []
+  },
+  "<repo>/tests/fixtures/npm/cases/node24-web-stream-readers/main.ts": {
+   "order": [
+    "<repo>/tests/fixtures/npm/cases/node24-web-stream-readers/main.ts"
+   ],
+   "diags": []
+  },
+  "<repo>/tests/fixtures/npm/cases/node24-web-stream-tee/main.ts": {
+   "order": [
+    "<repo>/tests/fixtures/npm/cases/node24-web-stream-tee/main.ts"
+   ],
+   "diags": []
+  },
+  "<repo>/tests/fixtures/npm/cases/node24-web-stream-transforms/main.ts": {
+   "order": [
+    "<repo>/tests/fixtures/npm/cases/node24-web-stream-transforms/main.ts"
    ],
    "diags": []
   },
@@ -13391,6 +17978,12 @@
    ],
    "diags": []
   },
+  "<repo>/tests/fixtures/node-types/env-files.ts": {
+   "order": [
+    "<repo>/tests/fixtures/node-types/env-files.ts"
+   ],
+   "diags": []
+  },
   "<repo>/tests/fixtures/node-types/fenced.ts": {
    "order": [
     "<repo>/tests/fixtures/node-types/fenced.ts"
@@ -13400,6 +17993,12 @@
   "<repo>/tests/fixtures/node-types/fetch-static.ts": {
    "order": [
     "<repo>/tests/fixtures/node-types/fetch-static.ts"
+   ],
+   "diags": []
+  },
+  "<repo>/tests/fixtures/node-types/file-url-conversion.ts": {
+   "order": [
+    "<repo>/tests/fixtures/node-types/file-url-conversion.ts"
    ],
    "diags": []
   },
@@ -13439,6 +18038,12 @@
     }
    ]
   },
+  "<repo>/tests/fixtures/node-types/no-error-assertions.ts": {
+   "order": [
+    "<repo>/tests/fixtures/node-types/no-error-assertions.ts"
+   ],
+   "diags": []
+  },
   "<repo>/tests/fixtures/node-types/path-os.ts": {
    "order": [
     "<repo>/tests/fixtures/node-types/path-os.ts"
@@ -13451,267 +18056,9 @@
    ],
    "diags": []
   },
-  "<repo>/tests/fixtures/node-types/url-getters.ts": {
+  "<repo>/tests/fixtures/node-types/style-text.ts": {
    "order": [
-    "<repo>/tests/fixtures/node-types/url-getters.ts"
-   ],
-   "diags": []
-  },
-  "<repo>/tests/corpus/node24-url-factories.ts": {
-   "order": [
-    "<repo>/tests/corpus/node24-url-factories.ts"
-   ],
-   "diags": []
-  },
-  "<repo>/tests/corpus/node24-url-factory-errors.ts": {
-   "order": [
-    "<repo>/tests/corpus/node24-url-factory-errors.ts"
-   ],
-   "diags": []
-  },
-  "<repo>/tests/fixtures/npm/cases/node24-url-factories/main.ts": {
-   "order": [
-    "<repo>/tests/fixtures/npm/cases/node24-url-factories/main.ts"
-   ],
-   "diags": []
-  },
-  "<repo>/tests/fixtures/node-types/url-factories.ts": {
-   "order": [
-    "<repo>/tests/fixtures/node-types/url-factories.ts"
-   ],
-   "diags": []
-  },
-  "<repo>/tests/corpus/node24-env-parse.ts": {
-   "order": [
-    "<repo>/tests/corpus/node24-env-parse.ts"
-   ],
-   "diags": []
-  },
-  "<repo>/tests/corpus/node24-env-parse-errors.ts": {
-   "order": [
-    "<repo>/tests/corpus/node24-env-parse-errors.ts"
-   ],
-   "diags": []
-  },
-  "<repo>/tests/corpus/node24-env-files.ts": {
-   "order": [
-    "<repo>/tests/corpus/node24-env-files.ts"
-   ],
-   "diags": []
-  },
-  "<repo>/tests/corpus/node24-env-files-errors.ts": {
-   "order": [
-    "<repo>/tests/corpus/node24-env-files-errors.ts"
-   ],
-   "diags": []
-  },
-  "<repo>/tests/corpus/node24-env-imports.cjs": {
-   "order": [
-    "<repo>/tests/corpus/node24-env-imports.cjs"
-   ],
-   "diags": []
-  },
-  "<repo>/tests/fixtures/npm/cases/node24-env/main.ts": {
-   "order": [
-    "<repo>/tests/fixtures/npm/cases/node24-env/main.ts"
-   ],
-   "diags": []
-  },
-  "<repo>/tests/fixtures/node-types/env-files.ts": {
-   "order": [
-    "<repo>/tests/fixtures/node-types/env-files.ts"
-   ],
-   "diags": []
-  },
-  "<repo>/tests/corpus/node24-buffer-encoding-errors.ts": {
-   "order": [
-    "<repo>/tests/corpus/node24-buffer-encoding-errors.ts"
-   ],
-   "diags": []
-  },
-  "<repo>/tests/corpus/node24-buffer-encoding.ts": {
-   "order": [
-    "<repo>/tests/corpus/node24-buffer-encoding.ts"
-   ],
-   "diags": []
-  },
-  "<repo>/tests/corpus/node24-text-codec-properties.ts": {
-   "order": [
-    "<repo>/tests/corpus/node24-text-codec-properties.ts"
-   ],
-   "diags": []
-  },
-  "<repo>/tests/corpus/node24-text-encode-into.ts": {
-   "order": [
-    "<repo>/tests/corpus/node24-text-encode-into.ts"
-   ],
-   "diags": []
-  },
-  "<repo>/tests/fixtures/node-types/text-encoding.ts": {
-   "order": [
-    "<repo>/tests/fixtures/node-types/text-encoding.ts"
-   ],
-   "diags": []
-  },
-  "<repo>/tests/fixtures/npm/cases/node24-text-encoding/main.ts": {
-   "order": [
-    "<repo>/tests/fixtures/npm/cases/node24-text-encoding/main.ts"
-   ],
-   "diags": []
-  },
-  "<repo>/tests/corpus/js-open-binding-writes.js": {
-   "order": [
-    "<repo>/tests/corpus/js-open-binding-writes.js"
-   ],
-   "diags": []
-  },
-  "<repo>/tests/corpus/node24-string-decoder.ts": {
-   "order": [
-    "<repo>/tests/corpus/node24-string-decoder.ts"
-   ],
-   "diags": []
-  },
-  "<repo>/tests/fixtures/npm/cases/node24-string-decoder/main.ts": {
-   "order": [
-    "<repo>/tests/fixtures/npm/cases/node24-string-decoder/main.ts"
-   ],
-   "diags": []
-  },
-  "<repo>/tests/corpus/node24-parseargs.js": {
-   "order": [
-    "<repo>/tests/corpus/node24-parseargs.js"
-   ],
-   "diags": []
-  },
-  "<repo>/tests/fixtures/npm/cases/node24-parseargs/main.ts": {
-   "order": [
-    "<repo>/tests/fixtures/npm/cases/node24-parseargs/main.ts"
-   ],
-   "diags": []
-  },
-  "<repo>/tests/fixtures/npm/cases/node24-util-adapters/main.ts": {
-   "order": [
-    "<repo>/tests/fixtures/npm/cases/node24-util-adapters/main.ts"
-   ],
-   "diags": []
-  },
-  "<repo>/tests/fixtures/npm/cases/node24-event-emitter/main.ts": {
-   "order": [
-    "<repo>/tests/fixtures/npm/cases/node24-event-emitter/main.ts"
-   ],
-   "diags": []
-  },
-  "<repo>/tests/fixtures/npm/cases/node24-async-events/main.ts": {
-   "order": [
-    "<repo>/tests/fixtures/npm/cases/node24-async-events/main.ts"
-   ],
-   "diags": []
-  },
-  "<repo>/tests/fixtures/npm/cases/node24-promise-timers/main.ts": {
-   "order": [
-    "<repo>/tests/fixtures/npm/cases/node24-promise-timers/main.ts"
-   ],
-   "diags": []
-  },
-  "<repo>/tests/fixtures/npm/cases/node24-timers-unref/main.ts": {
-   "order": [
-    "<repo>/tests/fixtures/npm/cases/node24-timers-unref/main.ts"
-   ],
-   "diags": []
-  },
-  "<repo>/tests/fixtures/npm/cases/node24-mime/main.ts": {
-   "order": [
-    "<repo>/tests/fixtures/npm/cases/node24-mime/main.ts"
-   ],
-   "diags": []
-  },
-  "<repo>/tests/fixtures/npm/cases/node24-mime-errors/main.ts": {
-   "order": [
-    "<repo>/tests/fixtures/npm/cases/node24-mime-errors/main.ts"
-   ],
-   "diags": []
-  },
-  "<repo>/tests/fixtures/npm/cases/node24-commonjs-metadata/main.ts": {
-   "order": [
-    "<repo>/tests/fixtures/npm/cases/node24-commonjs-metadata/main.ts"
-   ],
-   "diags": []
-  },
-  "<repo>/tests/fixtures/npm/cases/node24-diagnostics-async/main.ts": {
-   "order": [
-    "<repo>/tests/fixtures/npm/cases/node24-diagnostics-async/main.ts"
-   ],
-   "diags": []
-  },
-  "<repo>/tests/fixtures/npm/cases/node24-diagnostics-subscriber-throw/main.ts": {
-   "order": [
-    "<repo>/tests/fixtures/npm/cases/node24-diagnostics-subscriber-throw/main.ts"
-   ],
-   "diags": []
-  },
-  "<repo>/tests/fixtures/npm/cases/node24-diagnostics-tracing/main.ts": {
-   "order": [
-    "<repo>/tests/fixtures/npm/cases/node24-diagnostics-tracing/main.ts"
-   ],
-   "diags": []
-  },
-  "<repo>/tests/fixtures/npm/cases/node24-diagnostics-transform-throw/main.ts": {
-   "order": [
-    "<repo>/tests/fixtures/npm/cases/node24-diagnostics-transform-throw/main.ts"
-   ],
-   "diags": []
-  },
-  "<repo>/tests/corpus/node24-file-url-buffer.ts": {
-   "order": [
-    "<repo>/tests/corpus/node24-file-url-buffer.ts"
-   ],
-   "diags": []
-  },
-  "<repo>/tests/corpus/node24-file-url-errors.js": {
-   "order": [
-    "<repo>/tests/corpus/node24-file-url-errors.js"
-   ],
-   "diags": []
-  },
-  "<repo>/tests/corpus/node24-file-url-options.ts": {
-   "order": [
-    "<repo>/tests/corpus/node24-file-url-options.ts"
-   ],
-   "diags": []
-  },
-  "<repo>/tests/fixtures/npm/cases/node24-file-url-conversion/main.ts": {
-   "order": [
-    "<repo>/tests/fixtures/npm/cases/node24-file-url-conversion/main.ts"
-   ],
-   "diags": []
-  },
-  "<repo>/tests/fixtures/node-types/file-url-conversion.ts": {
-   "order": [
-    "<repo>/tests/fixtures/node-types/file-url-conversion.ts"
-   ],
-   "diags": []
-  },
-  "<repo>/tests/corpus/node24-system-errors.ts": {
-   "order": [
-    "<repo>/tests/corpus/node24-system-errors.ts"
-   ],
-   "diags": []
-  },
-  "<repo>/tests/corpus/node24-system-errors.cjs": {
-   "order": [
-    "<repo>/tests/corpus/node24-system-errors.cjs"
-   ],
-   "diags": []
-  },
-  "<repo>/tests/corpus/node24-system-error-validation.js": {
-   "order": [
-    "<repo>/tests/corpus/node24-system-error-validation.js"
-   ],
-   "diags": []
-  },
-  "<repo>/tests/fixtures/npm/cases/node24-system-errors/main.ts": {
-   "order": [
-    "<repo>/tests/fixtures/npm/cases/node24-system-errors/main.ts"
+    "<repo>/tests/fixtures/node-types/style-text.ts"
    ],
    "diags": []
   },
@@ -13721,27 +18068,9 @@
    ],
    "diags": []
   },
-  "<repo>/tests/corpus/node24-text-utilities.ts": {
+  "<repo>/tests/fixtures/node-types/text-encoding.ts": {
    "order": [
-    "<repo>/tests/corpus/node24-text-utilities.ts"
-   ],
-   "diags": []
-  },
-  "<repo>/tests/corpus/node24-text-utilities.cjs": {
-   "order": [
-    "<repo>/tests/corpus/node24-text-utilities.cjs"
-   ],
-   "diags": []
-  },
-  "<repo>/tests/corpus/node24-text-utilities-validation.js": {
-   "order": [
-    "<repo>/tests/corpus/node24-text-utilities-validation.js"
-   ],
-   "diags": []
-  },
-  "<repo>/tests/fixtures/npm/cases/node24-text-utilities/main.ts": {
-   "order": [
-    "<repo>/tests/fixtures/npm/cases/node24-text-utilities/main.ts"
+    "<repo>/tests/fixtures/node-types/text-encoding.ts"
    ],
    "diags": []
   },
@@ -13751,160 +18080,15 @@
    ],
    "diags": []
   },
-  "<repo>/tests/corpus/node24-text-utilities-coercion.js": {
+  "<repo>/tests/fixtures/node-types/url-factories.ts": {
    "order": [
-    "<repo>/tests/corpus/node24-text-utilities-coercion.js"
+    "<repo>/tests/fixtures/node-types/url-factories.ts"
    ],
    "diags": []
   },
-  "<repo>/tests/corpus/node24-no-error-assertions.ts": {
+  "<repo>/tests/fixtures/node-types/url-getters.ts": {
    "order": [
-    "<repo>/tests/corpus/node24-no-error-assertions.ts"
-   ],
-   "diags": []
-  },
-  "<repo>/tests/corpus/node24-no-error-assertions.cjs": {
-   "order": [
-    "<repo>/tests/corpus/node24-no-error-assertions.cjs"
-   ],
-   "diags": []
-  },
-  "<repo>/tests/fixtures/npm/cases/node24-no-error-assertions/main.ts": {
-   "order": [
-    "<repo>/tests/fixtures/npm/cases/node24-no-error-assertions/main.ts"
-   ],
-   "diags": []
-  },
-  "<repo>/tests/fixtures/node-types/no-error-assertions.ts": {
-   "order": [
-    "<repo>/tests/fixtures/node-types/no-error-assertions.ts"
-   ],
-   "diags": []
-  },
-  "<repo>/tests/corpus/node24-no-error-assertions-coercion.js": {
-   "order": [
-    "<repo>/tests/corpus/node24-no-error-assertions-coercion.js"
-   ],
-   "diags": []
-  },
-  "<repo>/tests/diagnostics/no-error-assertion-fences.ts": {
-   "order": [
-    "<repo>/tests/diagnostics/no-error-assertion-fences.ts"
-   ],
-   "diags": []
-  },
-  "<repo>/tests/corpus/node24-style-text-validation.js": {
-   "order": [
-    "<repo>/tests/corpus/node24-style-text-validation.js"
-   ],
-   "diags": []
-  },
-  "<repo>/tests/corpus/node24-style-text.cjs": {
-   "order": [
-    "<repo>/tests/corpus/node24-style-text.cjs"
-   ],
-   "diags": []
-  },
-  "<repo>/tests/corpus/node24-style-text.ts": {
-   "order": [
-    "<repo>/tests/corpus/node24-style-text.ts"
-   ],
-   "diags": []
-  },
-  "<repo>/tests/fixtures/node-types/style-text.ts": {
-   "order": [
-    "<repo>/tests/fixtures/node-types/style-text.ts"
-   ],
-   "diags": []
-  },
-  "<repo>/tests/fixtures/npm/cases/node24-style-text/main.ts": {
-   "order": [
-    "<repo>/tests/fixtures/npm/cases/node24-style-text/main.ts"
-   ],
-   "diags": []
-  },
-  "<repo>/tests/corpus/node24-style-text-environment.js": {
-   "order": [
-    "<repo>/tests/corpus/node24-style-text-environment.js"
-   ],
-   "diags": []
-  },
-  "<repo>/tests/corpus/node24-util-types.ts": {
-   "order": [
-    "<repo>/tests/corpus/node24-util-types.ts"
-   ],
-   "diags": []
-  },
-  "<repo>/tests/corpus/node24-util-types.js": {
-   "order": [
-    "<repo>/tests/corpus/node24-util-types.js"
-   ],
-   "diags": []
-  },
-  "<repo>/tests/corpus/node24-util-types.cjs": {
-   "order": [
-    "<repo>/tests/corpus/node24-util-types.cjs"
-   ],
-   "diags": []
-  },
-  "<repo>/tests/fixtures/npm/cases/node24-util-types/main.ts": {
-   "order": [
-    "<repo>/tests/fixtures/npm/cases/node24-util-types/main.ts"
-   ],
-   "diags": []
-  },
-  "<repo>/tests/fixtures/node-types/util-types.ts": {
-   "order": [
-    "<repo>/tests/fixtures/node-types/util-types.ts"
-   ],
-   "diags": []
-  },
-  "<repo>/tests/corpus/node24-esm-metadata/main.mjs": {
-   "order": [
-    "<repo>/tests/corpus/node24-esm-metadata/child with ü.mjs",
-    "<repo>/tests/corpus/node24-esm-metadata/main.mjs"
-   ],
-   "diags": []
-  },
-  "<repo>/tests/fixtures/npm/cases/node24-esm-metadata/main.ts": {
-   "order": [
-    "<repo>/tests/fixtures/npm/cases/node24-esm-metadata/main.ts"
-   ],
-   "diags": []
-  },
-  "<repo>/tests/diagnostics/import-meta-rest.ts": {
-   "order": [
-    "<repo>/tests/diagnostics/import-meta-rest.ts"
-   ],
-   "diags": []
-  },
-  "<repo>/tests/corpus/node24-url-mutation-coercion.js": {
-   "order": [
-    "<repo>/tests/corpus/node24-url-mutation-coercion.js"
-   ],
-   "diags": []
-  },
-  "<repo>/tests/corpus/node24-url-mutation.ts": {
-   "order": [
-    "<repo>/tests/corpus/node24-url-mutation.ts"
-   ],
-   "diags": []
-  },
-  "<repo>/tests/diagnostics/url-mutation-object-plus.ts": {
-   "order": [
-    "<repo>/tests/diagnostics/url-mutation-object-plus.ts"
-   ],
-   "diags": []
-  },
-  "<repo>/tests/diagnostics/url-mutation-operator.ts": {
-   "order": [
-    "<repo>/tests/diagnostics/url-mutation-operator.ts"
-   ],
-   "diags": []
-  },
-  "<repo>/tests/diagnostics/url-mutation-runtime-key.ts": {
-   "order": [
-    "<repo>/tests/diagnostics/url-mutation-runtime-key.ts"
+    "<repo>/tests/fixtures/node-types/url-getters.ts"
    ],
    "diags": []
   },
@@ -13914,324 +18098,9 @@
    ],
    "diags": []
   },
-  "<repo>/tests/fixtures/npm/cases/node24-url-mutation/main.ts": {
+  "<repo>/tests/fixtures/node-types/util-types.ts": {
    "order": [
-    "<repo>/tests/fixtures/npm/cases/node24-url-mutation/main.ts"
-   ],
-   "diags": []
-  },
-  "<repo>/tests/corpus/node24-url-authority.ts": {
-   "order": [
-    "<repo>/tests/corpus/node24-url-authority.ts"
-   ],
-   "diags": []
-  },
-  "<repo>/tests/corpus/node24-url-authority-coercion.js": {
-   "order": [
-    "<repo>/tests/corpus/node24-url-authority-coercion.js"
-   ],
-   "diags": []
-  },
-  "<repo>/tests/fixtures/npm/cases/node24-url-authority/main.ts": {
-   "order": [
-    "<repo>/tests/fixtures/npm/cases/node24-url-authority/main.ts"
-   ],
-   "diags": []
-  },
-  "<repo>/tests/fixtures/npm/cases/node24-web-stream-queues/main.ts": {
-   "order": [
-    "<repo>/tests/fixtures/npm/cases/node24-web-stream-queues/main.ts"
-   ],
-   "diags": []
-  },
-  "<repo>/tests/fixtures/npm/cases/node24-web-stream-lifecycle/main.ts": {
-   "order": [
-    "<repo>/tests/fixtures/npm/cases/node24-web-stream-lifecycle/main.ts"
-   ],
-   "diags": []
-  },
-  "<repo>/tests/fixtures/npm/cases/node24-web-stream-errors/main.ts": {
-   "order": [
-    "<repo>/tests/fixtures/npm/cases/node24-web-stream-errors/main.ts"
-   ],
-   "diags": []
-  },
-  "<repo>/tests/fixtures/npm/cases/node24-web-stream-pipes/main.ts": {
-   "order": [
-    "<repo>/tests/fixtures/npm/cases/node24-web-stream-pipes/main.ts"
-   ],
-   "diags": []
-  },
-  "<repo>/tests/fixtures/npm/cases/node24-web-stream-pipe-errors/main.ts": {
-   "order": [
-    "<repo>/tests/fixtures/npm/cases/node24-web-stream-pipe-errors/main.ts"
-   ],
-   "diags": []
-  },
-  "<repo>/tests/fixtures/npm/cases/node24-web-stream-pipe-abort/main.ts": {
-   "order": [
-    "<repo>/tests/fixtures/npm/cases/node24-web-stream-pipe-abort/main.ts"
-   ],
-   "diags": []
-  },
-  "<repo>/tests/fixtures/npm/cases/node24-web-stream-transforms/main.ts": {
-   "order": [
-    "<repo>/tests/fixtures/npm/cases/node24-web-stream-transforms/main.ts"
-   ],
-   "diags": []
-  },
-  "<repo>/tests/fixtures/npm/cases/node24-web-stream-encoding/main.ts": {
-   "order": [
-    "<repo>/tests/fixtures/npm/cases/node24-web-stream-encoding/main.ts"
-   ],
-   "diags": []
-  },
-  "<repo>/tests/fixtures/npm/cases/node24-web-stream-readers/main.ts": {
-   "order": [
-    "<repo>/tests/fixtures/npm/cases/node24-web-stream-readers/main.ts"
-   ],
-   "diags": []
-  },
-  "<repo>/tests/fixtures/npm/cases/node24-web-stream-readable-lifecycle/main.ts": {
-   "order": [
-    "<repo>/tests/fixtures/npm/cases/node24-web-stream-readable-lifecycle/main.ts"
-   ],
-   "diags": []
-  },
-  "<repo>/tests/fixtures/npm/cases/node24-web-stream-tee/main.ts": {
-   "order": [
-    "<repo>/tests/fixtures/npm/cases/node24-web-stream-tee/main.ts"
-   ],
-   "diags": []
-  },
-  "<repo>/tests/corpus/array-read-helper-effects.ts": {
-   "order": [
-    "<repo>/tests/corpus/array-read-helper-effects.ts"
-   ],
-   "diags": []
-  },
-  "<repo>/tests/corpus/call-lifetimes-argument-order.ts": {
-   "order": [
-    "<repo>/tests/corpus/call-lifetimes-argument-order.ts"
-   ],
-   "diags": []
-  },
-  "<repo>/tests/corpus/call-lifetimes-control-flow.ts": {
-   "order": [
-    "<repo>/tests/corpus/call-lifetimes-control-flow.ts"
-   ],
-   "diags": []
-  },
-  "<repo>/tests/corpus/call-lifetimes-owned-boundaries.ts": {
-   "order": [
-    "<repo>/tests/corpus/call-lifetimes-owned-boundaries.ts"
-   ],
-   "diags": []
-  },
-  "<repo>/tests/corpus/call-lifetimes-projections.ts": {
-   "order": [
-    "<repo>/tests/corpus/call-lifetimes-projections.ts"
-   ],
-   "diags": []
-  },
-  "<repo>/tests/corpus/call-lifetimes-union-values.ts": {
-   "order": [
-    "<repo>/tests/corpus/call-lifetimes-union-values.ts"
-   ],
-   "diags": []
-  },
-  "<repo>/tests/corpus/call-lifetimes-virtual-optionals.ts": {
-   "order": [
-    "<repo>/tests/corpus/call-lifetimes-virtual-optionals.ts"
-   ],
-   "diags": []
-  },
-  "<repo>/tests/corpus/array-argument-lifetimes-exits.ts": {
-   "order": [
-    "<repo>/tests/corpus/array-argument-lifetimes-exits.ts"
-   ],
-   "diags": []
-  },
-  "<repo>/tests/corpus/array-argument-lifetimes-mutation.ts": {
-   "order": [
-    "<repo>/tests/corpus/array-argument-lifetimes-mutation.ts"
-   ],
-   "diags": []
-  },
-  "<repo>/tests/corpus/array-argument-lifetimes-strings.ts": {
-   "order": [
-    "<repo>/tests/corpus/array-argument-lifetimes-strings.ts"
-   ],
-   "diags": []
-  },
-  "<repo>/tests/corpus/array-argument-lifetimes-values.ts": {
-   "order": [
-    "<repo>/tests/corpus/array-argument-lifetimes-values.ts"
-   ],
-   "diags": []
-  },
-  "<repo>/tests/corpus/input-lifetimes-modules/main.ts": {
-   "order": [
-    "<repo>/tests/corpus/input-lifetimes-modules/model.ts",
-    "<repo>/tests/corpus/input-lifetimes-modules/helpers.ts",
-    "<repo>/tests/corpus/input-lifetimes-modules/main.ts"
-   ],
-   "diags": []
-  },
-  "<repo>/tests/corpus/string-lifetimes-boundaries.ts": {
-   "order": [
-    "<repo>/tests/corpus/string-lifetimes-boundaries.ts"
-   ],
-   "diags": []
-  },
-  "<repo>/tests/corpus/string-lifetimes-evaluation.ts": {
-   "order": [
-    "<repo>/tests/corpus/string-lifetimes-evaluation.ts"
-   ],
-   "diags": []
-  },
-  "<repo>/tests/corpus/string-lifetimes-iteration.ts": {
-   "order": [
-    "<repo>/tests/corpus/string-lifetimes-iteration.ts"
-   ],
-   "diags": []
-  },
-  "<repo>/tests/corpus/string-lifetimes-operations.ts": {
-   "order": [
-    "<repo>/tests/corpus/string-lifetimes-operations.ts"
-   ],
-   "diags": []
-  },
-  "<repo>/tests/corpus/collection-ingestion.ts": {
-   "order": [
-    "<repo>/tests/corpus/collection-ingestion.ts"
-   ],
-   "diags": []
-  },
-  "<repo>/tests/corpus/collection-ingestion-mappers.ts": {
-   "order": [
-    "<repo>/tests/corpus/collection-ingestion-mappers.ts"
-   ],
-   "diags": []
-  },
-  "<repo>/tests/corpus/collection-ingestion-references.ts": {
-   "order": [
-    "<repo>/tests/corpus/collection-ingestion-references.ts"
-   ],
-   "diags": []
-  },
-  "<repo>/tests/corpus/collection-ingestion-protocol/main.ts": {
-   "order": [
-    "<repo>/tests/corpus/collection-ingestion-protocol/source.js",
-    "<repo>/tests/corpus/collection-ingestion-protocol/main.ts"
-   ],
-   "diags": []
-  },
-  "<repo>/tests/corpus/integer-view-control.ts": {
-   "order": [
-    "<repo>/tests/corpus/integer-view-control.ts"
-   ],
-   "diags": []
-  },
-  "<repo>/tests/corpus/integer-view-numbers.ts": {
-   "order": [
-    "<repo>/tests/corpus/integer-view-numbers.ts"
-   ],
-   "diags": []
-  },
-  "<repo>/tests/corpus/integer-view-storage.ts": {
-   "order": [
-    "<repo>/tests/corpus/integer-view-storage.ts"
-   ],
-   "diags": []
-  },
-  "<repo>/tests/corpus/counted-loop-numbers.ts": {
-   "order": [
-    "<repo>/tests/corpus/counted-loop-numbers.ts"
-   ],
-   "diags": []
-  },
-  "<repo>/tests/corpus/counted-loop-storage.ts": {
-   "order": [
-    "<repo>/tests/corpus/counted-loop-storage.ts"
-   ],
-   "diags": []
-  },
-  "<repo>/tests/corpus/byte-loop-bounds.ts": {
-   "order": [
-    "<repo>/tests/corpus/byte-loop-bounds.ts"
-   ],
-   "diags": []
-  },
-  "<repo>/tests/corpus/integer-flow-arithmetic.ts": {
-   "order": [
-    "<repo>/tests/corpus/integer-flow-arithmetic.ts"
-   ],
-   "diags": []
-  },
-  "<repo>/tests/corpus/integer-loop-forms.ts": {
-   "order": [
-    "<repo>/tests/corpus/integer-loop-forms.ts"
-   ],
-   "diags": []
-  },
-  "<repo>/tests/corpus/heap-input-aliases.ts": {
-   "order": [
-    "<repo>/tests/corpus/heap-input-aliases.ts"
-   ],
-   "diags": []
-  },
-  "<repo>/tests/corpus/heap-input-collections.ts": {
-   "order": [
-    "<repo>/tests/corpus/heap-input-collections.ts"
-   ],
-   "diags": []
-  },
-  "<repo>/tests/corpus/input-lifetime-intervals.ts": {
-   "order": [
-    "<repo>/tests/corpus/input-lifetime-intervals.ts"
-   ],
-   "diags": []
-  },
-  "<repo>/tests/corpus/regex-input-lifetimes.ts": {
-   "order": [
-    "<repo>/tests/corpus/regex-input-lifetimes.ts"
-   ],
-   "diags": []
-  },
-  "<repo>/tests/corpus/checked-value-input-lifetimes.ts": {
-   "order": [
-    "<repo>/tests/corpus/checked-value-input-lifetimes.ts"
-   ],
-   "diags": []
-  },
-  "<repo>/tests/corpus/checked-dispatch-input-lifetimes.js": {
-   "order": [
-    "<repo>/tests/corpus/checked-dispatch-input-lifetimes.js"
-   ],
-   "diags": []
-  },
-  "<repo>/tests/corpus/string-construction-order.ts": {
-   "order": [
-    "<repo>/tests/corpus/string-construction-order.ts"
-   ],
-   "diags": []
-  },
-  "<repo>/tests/corpus/collection-value-keys.ts": {
-   "order": [
-    "<repo>/tests/corpus/collection-value-keys.ts"
-   ],
-   "diags": []
-  },
-  "<repo>/tests/corpus/collection-storage-copies.ts": {
-   "order": [
-    "<repo>/tests/corpus/collection-storage-copies.ts"
-   ],
-   "diags": []
-  },
-  "<repo>/tests/corpus/byte-number-pipeline.ts": {
-   "order": [
-    "<repo>/tests/corpus/byte-number-pipeline.ts"
+    "<repo>/tests/fixtures/node-types/util-types.ts"
    ],
    "diags": []
   }

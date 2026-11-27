@@ -9,6 +9,7 @@ import { spawnSync } from "node:child_process";
 const repoRoot = resolve(dirname(fileURLToPath(import.meta.url)), "..");
 
 const ALLOWED_TYPESCRIPT5_IMPORTS = new Set([
+  "packages/compiler/src/backend/wasmgc/site-profile.ts",
   "packages/compiler/src/frontend/comptime-node.ts",
   "packages/compiler/src/frontend/ts7/world-check.ts",
   "packages/compiler/src/frontend/ts7/source-parser.test.ts",

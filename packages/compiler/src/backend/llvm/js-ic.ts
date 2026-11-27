@@ -129,14 +129,18 @@ export function debugJsIcWays(env: NodeJS.ProcessEnv = process.env): 0 | 1 | 2 |
   return ways;
 }
 
-const IC_WAYS_DEBUG: 0 | 1 | 2 | null = debugJsIcWays();
-const INLINE_WAYS: number = IC_WAYS_DEBUG ?? 2;
+/** SCRIPTC_DEBUG_JS_IC_WAYS, read once on first use rather than at load: this module is in an import cycle
+ * (js-groups.ts), and the compiler admits a cycle only when every member's top level is declarations (SC1016 when
+ * it compiles itself). */
+let icWaysDebug: { value: 0 | 1 | 2 | null } | undefined;
+const IC_WAYS_DEBUG = (): 0 | 1 | 2 | null => (icWaysDebug ??= { value: debugJsIcWays() }).value;
+const INLINE_WAYS = (): number => IC_WAYS_DEBUG() ?? 2;
 
 /* An attribution run gives an object literal's member stores their own probe
  * entry point, so a profile can split them from other stores. With the
  * variable unset the emitted code calls scr_js_store_probe as before. */
-const LITERAL_PROBE: string =
-  IC_WAYS_DEBUG === null ? "scr_js_store_probe" : "scr_js_literal_probe";
+const LITERAL_PROBE = (): string =>
+  IC_WAYS_DEBUG() === null ? "scr_js_store_probe" : "scr_js_literal_probe";
 const INLINE_PROTO = true;
 
 /** The address of slot `slot` of layout-mode object `d`. */
@@ -996,7 +1000,7 @@ function emitGet(host: Host, e: ExprOf<"call">, callee: IrFunction, key: string)
   const other = reads.length > 0 ? B.newLabel("icg.other") : probe;
   kindIs(host, receiver.name, DYN_KIND.OBJ, object, other);
   B.startBlock(object);
-  inlineLoad(host, receiver.name, ic, INLINE_WAYS, INLINE_PROTO, (cell) => cell, hits, hit, probe);
+  inlineLoad(host, receiver.name, ic, INLINE_WAYS(), INLINE_PROTO, (cell) => cell, hits, hit, probe);
   if (reads.length > 0) {
     B.startBlock(other);
     inlineCapsuleLoad(host, receiver.name, reads, hits, hit, probe);
@@ -1112,7 +1116,7 @@ function emitSet(host: Host, e: ExprOf<"call">, callee: IrFunction, key: string)
     host,
     receiver.name,
     ic,
-    INLINE_WAYS,
+    INLINE_WAYS(),
     (slot) => {
       const old = B.tmp();
       B.line(`${old} = load ptr, ptr ${slot}`);
@@ -1655,10 +1659,10 @@ function emitNamedSet(
 export function emitJsIcLiteralMember(host: Host, obj: string, key: string, value: string): void {
   const B = host.B;
   const ic = host.jsIcSite();
-  host.declare(`declare zeroext i1 @${LITERAL_PROBE}(ptr, ptr, ptr, ptr)`);
+  host.declare(`declare zeroext i1 @${LITERAL_PROBE()}(ptr, ptr, ptr, ptr)`);
   const done = B.tmp();
   B.line(
-    `${done} = call zeroext i1 @${LITERAL_PROBE}(ptr ${obj}, ptr ${key}, ptr ${value}, ptr ${ic})`,
+    `${done} = call zeroext i1 @${LITERAL_PROBE()}(ptr ${obj}, ptr ${key}, ptr ${value}, ptr ${ic})`,
   );
   const slow = B.newLabel("icl.slow");
   const join = B.newLabel("icl.j");
@@ -1693,7 +1697,7 @@ export function emitJsIcMethod(host: Host, e: ExprOf<"dynInvoke">, receiver: str
     host,
     receiver,
     ic,
-    INLINE_WAYS,
+    INLINE_WAYS(),
     INLINE_PROTO,
     (cell) => host.retainFrame(cell, DYN),
     incoming,

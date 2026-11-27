@@ -1,72 +1,128 @@
 # scriptw
 
-Compile TypeScript and JavaScript to WasmGC modules, and run them under Node, with no native toolchain to install.
+Compile TypeScript and JavaScript to WasmGC modules, then run them under Node or load them in a web page. Nothing native to install: the compiler is JavaScript and wasm, and npm installs TypeScript 7's type checker for your platform.
+
+scriptw is an independent fork of [scriptc](https://github.com/vercel-labs/scriptc) and is not affiliated with Vercel. Source and issues: [{{repository}}]({{repository}}).
+
+## Requirements
+
+Node.js 24 or later. The modules use WasmGC, exception handling and JS String Builtins (including imported string constants), which Node 22 lacks; on an older Node the CLI stops at startup and says so. A browser needs the same features; the package's tests load modules in headless Chromium.
+
+## Install
 
 ```console
-$ npx scriptw build app.ts --target wasmgc
+$ npm install --save-dev scriptw
+```
+
+Or run it once with `npx scriptw`.
+
+## The command line
+
+```console
 $ npx scriptw run app.ts
+$ npx scriptw build app.ts
+$ npx scriptw run app.wasm
 ```
 
-`build` writes `app.wasm` and its host sidecar `app.wasm.host.json`. `run` compiles to a temporary directory and runs the module in the same Node process; it also runs a built `.wasm`. `--release` compiles a release build.
+- `scriptw run <entry.ts>` compiles to a temporary directory and runs the module in the same Node process. Output, errors and the exit status follow Node's: an uncaught error prints its text and exits with status 1.
+- `scriptw build <entry.ts> [-o app.wasm]` writes `app.wasm` and its host sidecar `app.wasm.host.json`, the list of host imports the module uses.
+- `scriptw run <module.wasm>` runs a built module.
+- `--release` compiles a release build.
+- `--browser` compiles a page program: the DOM, timers and typed `host:` modules are in scope. Load it in a page with `scriptw/host` (below).
+- `scriptw --version` prints the package version, the compiler version and the source commit.
 
-Node 24 or later is required: the modules use WasmGC, exception handling and JS String Builtins.
+## Running a module in a web page
 
-## What is inside
-
-- The compiler's frontend, IR passes and WasmGC emitter, as JavaScript.
-- Binaryen 132 (the module builder) and wasm-opt 133, as JavaScript and wasm.
-- TypeScript 5.9 for the source-string parser.
-
-The type checker is TypeScript 7, which npm installs as a regular dependency: its package selects a native executable for the platform. It is the one part that is not JavaScript or wasm.
-
-## Native target
-
-`--target native` builds a native executable for this machine, and `--target native:<platform>` cross-builds for `linux-x64-gnu`, `win32-x64`, `darwin-arm64`, `darwin-x64` or `android-arm64`.
+`scriptw/host` exports `instantiateWasmGc`, the loader. It has no Node-only dependencies, so a bundler can take it as is, or a page can map it with an import map:
 
 ```console
-$ npx scriptw build app.ts --target native
-$ npx scriptw run app.ts --target native
-$ npx scriptw build app.ts --target native:android-arm64 --browser
+$ npx scriptw build page.ts --browser -o public/page.wasm
 ```
 
-A native build takes three companion packages:
-
-- `@scriptw/llvm-<machine>`: the LLVM helper, for the machine that builds;
-- `@scriptw/runtime-<target>`: the precompiled runtime for the target;
-- `@scriptw/host-<target>`: the native host a page program (`--browser`) links.
-
-None of them is published yet. Until they are, the package does not list them, and a native build takes each one from a directory: `SCRIPTW_LLVM_PACK`, `SCRIPTW_RUNTIME_PACK` and `SCRIPTW_HOST_PACK`. A build that is missing one fails and names the package.
-
-Once they are published, the package lists them as optional dependencies (`SCRIPTW_COMPANIONS=1 node npm/wasmgc/scripts/assemble.mjs`). npm then installs the ones that match this machine, and a cross build installs the target's runtime and host packages itself.
-
-`--browser` compiles a page program: DOM, timers and typed `host:` modules. Natively, its page operations go to the host island, which calls a host through one C vtable, `scr_host_ops()`. The host comes from the target's host package, which ships the host as sets of services: `full`, `ui` (window, GPU and network), `headless` (network only) and `offline`; Linux ships `full`, `headless` and `offline`, and Android `full` and `ui`. By default (`--host auto`) the build takes the smallest set that holds the services the program reaches: the window for canvases, `screen` and the clipboard; the GPU for `navigator.gpu`; audio for `AudioContext` and `Audio`; RTC for `RTCPeerConnection`; the network for `fetch`, `XMLHttpRequest` and `WebSocket`. The document, timers and storage are in every set. A program that reads globals by a computed name gets `full`. `--host <set>` names a set, `--host-features audio,-rtc` adds or removes services on top of what the program reaches, and `--explain-host` prints the choice and why. `--host-lib <archive>` links your own `scr_host_ops()` instead, and `--host quickjs` uses the embedded QuickJS engine instead of a host.
-
-`android-arm64` writes `<name>/libmain.so`, a shared library whose exported `main` an Android Activity calls. It needs the Android NDK: set `ANDROID_NDK_ROOT`, or install one under the SDK (`sdkmanager 'ndk;30.0.16248370'`). Packaging the library into an APK is left to the app's own Gradle build.
-
-## Building the package
-
-From a built checkout (`pnpm install && pnpm -r build`):
-
-```console
-$ node npm/wasmgc/scripts/assemble.mjs
-$ node npm/wasmgc/test/smoke.mjs npm/wasmgc/.stage/scriptw-0.1.0.tgz
+```ts:page.ts
+const list = document.createElement("ul");
+for (const name of ["parse", "check", "emit"]) {
+  const item = document.createElement("li");
+  item.textContent = name;
+  list.appendChild(item);
+}
+document.body.appendChild(list);
 ```
 
-`assemble.mjs` stages the package under `npm/wasmgc/.stage` and packs it. `smoke.mjs` installs the tarball into a clean directory and checks each sample under `test/samples` against Node running the same source.
+```html:public/index.html
+<!doctype html>
+<html>
+  <head>
+    <meta charset="utf-8">
+    <script type="importmap">
+      { "imports": { "scriptw/host": "/node_modules/scriptw/lib/host.mjs" } }
+    </script>
+  </head>
+  <body>
+    <script type="module">
+      import { instantiateWasmGc } from "scriptw/host";
 
-## Experimental: tsc-ts as a WasmGC checker
-
-`tsc-ts/` holds the first steps toward a package with no native executable: tsc-ts (the TypeScript 7 checker ported to TypeScript) compiled to WasmGC by this compiler, to stand in for tsgo.
-
-```console
-$ git clone --depth 1 --branch v0.1.5 https://github.com/vercel-labs/tsc-ts
-$ (cd tsc-ts && npm ci --ignore-scripts --omit=optional)
-$ node npm/wasmgc/tsc-ts/prepare.mjs tsc-ts
-$ node --max-old-space-size=14000 npm/wasmgc/tsc-ts/compile.mjs tsc-ts out/tsc-ts.wasm
+      const bytes = new Uint8Array(await (await fetch("/page.wasm")).arrayBuffer());
+      const program = await instantiateWasmGc(bytes);
+      await program.main();
+    </script>
+  </body>
+</html>
 ```
 
-`prepare.mjs` cuts tsc-ts's thread machinery, which a WasmGC build never uses. The compile gets through the whole program's frontend and lowering and stops at one internal compiler error: `Symbol.getMembers` and `Symbol.getExports` call a function the lowering drops (`byEscapedName` in `src/compiler/symbol.ts`). It does not yet emit a module, so the package still uses tsgo.
+Serve the directory over HTTP (a module script does not load from `file://`), with `node_modules/scriptw` reachable at the path the import map names. A page program writes to the page's own `console`.
+
+### Typed host modules
+
+A page program can import functions the page supplies. Declare the module in a `.d.ts` with a `host:` specifier:
+
+```ts:clock.d.ts
+declare module "host:clock" {
+  export function now(): number;
+  export function wait(ms: number): Promise<string>;
+}
+```
+
+```ts:page.ts
+/// <reference path="./clock.d.ts" />
+import { now, wait } from "host:clock";
+
+console.log("now", now(), await wait(5));
+```
+
+The page passes the implementation to the loader, by specifier:
+
+```js
+const program = await instantiateWasmGc(bytes, {
+  modules: {
+    "host:clock": {
+      now: () => Date.now(),
+      wait: (ms) => new Promise((resolve) => setTimeout(() => resolve(`after ${ms} ms`), ms)),
+    },
+  },
+});
+await program.main();
+```
+
+Parameters and results are numbers, booleans, strings, objects passed by reference, `Uint8Array` results, and promises of those. `host:` imports need `--browser`.
+
+The loader works the same under Node, so the module above runs there too when Node supplies `host:clock`.
+
+## The compiler as a function
+
+```js
+import { compile, formatDiagnostic } from "scriptw";
+
+const result = await compile("src/app.ts", { outPath: "dist/app.wasm", browser: false, release: true });
+if (!result.ok) for (const d of result.diagnostics) console.error(formatDiagnostic(d));
+```
+
+`compile` resolves to `{ ok: true, wasmPath, hostSidecarPath }` or `{ ok: false, diagnostics }`, where each diagnostic has a `message` and, when known, a `code`, `file`, `line` and `hint`. It runs under Node only; type declarations ship for both entry points.
+
+## Not yet published: the native target
+
+`--target native` and `--target native:<platform>` build native executables. They need companion packages (`@scriptw/llvm-*`, `@scriptw/runtime-*`, `@scriptw/host-*`) that are not on npm yet, so a native build fails and names the package it is missing. Until they are published, a native build is for contributors building from source.
 
 ## License
 
-Apache-2.0. See `LICENSE` and `NOTICE`.
+Apache-2.0. See `LICENSE` and `NOTICE`; the bundled Binaryen and TypeScript carry their own Apache-2.0 licenses in their directories.

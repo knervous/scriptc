@@ -1,0 +1,6 @@
+{
+  "title": "ready",
+  "selector": "#clock",
+  "html": "<p id=\"clock\">now 21 #42, after 3</p>",
+  "console": ["now 21 #42, after 3"]
+}

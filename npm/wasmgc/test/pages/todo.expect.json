@@ -1,0 +1,7 @@
+{
+  "title": "ready",
+  "click": ["#app button", "#app button"],
+  "selector": "#app",
+  "html": "<main id=\"app\"><ul><li>[x] parse</li><li>[x] check</li><li>[ ] emit</li></ul><button>clicks: 2</button></main>",
+  "console": ["done 2 of 3"]
+}

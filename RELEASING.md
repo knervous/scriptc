@@ -1,5 +1,7 @@
 # Releasing
 
+This fork does not publish the `scriptc` packages: upstream's release workflow is not carried here, and the steps below describe upstream's process. The fork publishes one package, `scriptw` (`npm/wasmgc`), with `.github/workflows/release-scriptw.yml`; see [npm/wasmgc/CONTRIBUTING.md](./npm/wasmgc/CONTRIBUTING.md).
+
 Releases are manual, single-commit affairs. The maintainer controls the changelog voice and format. `@scriptc/runtime`, every platform helper/runtime pack, `@scriptc/compiler`, and `scriptc` always publish together at the same version.
 
 To prepare a release:

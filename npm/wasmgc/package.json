@@ -4,7 +4,28 @@
   "private": true,
   "description": "Compile TypeScript and JavaScript to WasmGC modules with no native toolchain",
   "license": "Apache-2.0",
+  "keywords": [
+    "typescript",
+    "javascript",
+    "webassembly",
+    "wasm",
+    "wasmgc",
+    "compiler",
+    "aot",
+    "browser"
+  ],
   "type": "module",
+  "exports": {
+    ".": {
+      "types": "./lib/index.d.ts",
+      "default": "./lib/index.mjs"
+    },
+    "./host": {
+      "types": "./lib/host.d.ts",
+      "default": "./lib/host.mjs"
+    },
+    "./package.json": "./package.json"
+  },
   "bin": {
     "scriptw": "bin/cli.mjs"
   },
@@ -13,22 +34,23 @@
   },
   "scripts": {
     "assemble": "node scripts/assemble.mjs",
-    "smoke": "node test/smoke.mjs"
+    "smoke": "node test/smoke.mjs",
+    "test:browser": "node test/browser.mjs"
   },
-  "optionalDependencies": {
-    "@scriptw/llvm-linux-x64-gnu": "0.1.0",
-    "@scriptw/llvm-win32-x64": "0.1.0",
-    "@scriptw/llvm-darwin-arm64": "0.1.0",
-    "@scriptw/llvm-darwin-x64": "0.1.0",
-    "@scriptw/runtime-linux-x64-gnu": "0.1.0",
-    "@scriptw/runtime-win32-x64": "0.1.0",
-    "@scriptw/runtime-darwin-arm64": "0.1.0",
-    "@scriptw/runtime-darwin-x64": "0.1.0",
-    "@scriptw/runtime-android-arm64": "0.1.0",
-    "@scriptw/host-linux-x64-gnu": "0.1.0",
-    "@scriptw/host-win32-x64": "0.1.0",
-    "@scriptw/host-darwin-arm64": "0.1.0",
-    "@scriptw/host-darwin-x64": "0.1.0",
-    "@scriptw/host-android-arm64": "0.1.0"
-  }
+  "companions": [
+    "@scriptw/llvm-linux-x64-gnu",
+    "@scriptw/llvm-win32-x64",
+    "@scriptw/llvm-darwin-arm64",
+    "@scriptw/llvm-darwin-x64",
+    "@scriptw/runtime-linux-x64-gnu",
+    "@scriptw/runtime-win32-x64",
+    "@scriptw/runtime-darwin-arm64",
+    "@scriptw/runtime-darwin-x64",
+    "@scriptw/runtime-android-arm64",
+    "@scriptw/host-linux-x64-gnu",
+    "@scriptw/host-win32-x64",
+    "@scriptw/host-darwin-arm64",
+    "@scriptw/host-darwin-x64",
+    "@scriptw/host-android-arm64"
+  ]
 }

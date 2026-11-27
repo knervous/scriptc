@@ -312,7 +312,7 @@ import {
   emitRecordExpr,
 } from "./expr-primitives.js";
 import { emitControlExpr } from "./expr-control.js";
-import { emitCallExpr } from "./expr-calls.js";
+import { emitCallExpr, registerExprCallsReplays } from "./expr-calls.js";
 import { emitDynamicExpr } from "./expr-dynamic.js";
 import { emitIntrinsicExpr, emitSerializationExpr, emitAsyncExpr } from "./expr-async.js";
 import { PublishWalkers } from "./publish.js";
@@ -377,6 +377,7 @@ import {
   mapSet,
   emitMapLikeIntrinsic,
   emitSetNew,
+  registerExprContainersReplays,
 } from "./expr-containers.js";
 import {
   emitIntegerLoopIndex,
@@ -430,6 +431,7 @@ import {
   emitIoLibCall,
   emitGenericLibCall,
   emitLibCall,
+  registerLibDispatchReplays,
 } from "./lib-dispatch.js";
 import {
   assignCompactLayouts,
@@ -1248,7 +1250,9 @@ export const SUSPENDS =
 /** The literal text each SUSPENDS alternative starts with. The `@scr_` prefix
  * is joined to each suffix here so that a prefix is not read as an emitted
  * symbol name by the runtime ABI scan. */
-const SUSPEND_PREFIXES = [
+let suspendPrefixes: string[] | undefined;
+/** Computed on first use: the module's top level stays declarations (it is in an import cycle). */
+const SUSPEND_PREFIXES = (): string[] => suspendPrefixes ??= [
   "await_",
   "module_await",
   "promise_await_settled",
@@ -1262,7 +1266,7 @@ const SUSPEND_PREFIXES = [
 /** Whether `text` mentions a SUSPENDS entry point. The regex runs only on
  * text that holds one of its prefixes, which most function bodies do not. */
 export function mentionsSuspension(text: string): boolean {
-  return SUSPEND_PREFIXES.some((prefix) => text.includes(prefix)) && SUSPENDS.test(text);
+  return SUSPEND_PREFIXES().some((prefix) => text.includes(prefix)) && SUSPENDS.test(text);
 }
 /** The suspensions of a fiber body's own awaits, which its stackless
  * coroutine form suspends itself at instead. */
@@ -7661,6 +7665,7 @@ export class LlEmitter {
     // sets and flags, which replayed definitions must find as serial
     // emission left them (a helper set guards the declarations its first
     // request adds).
+    registerJournalReplays();
     replayJournal(this, chunk.entries, names, tags);
     const debugIds = new Map<string, string>();
     this.debug?.replay(chunk.debugRequests, (name) => this.functionNamed(name), debugIds);
@@ -10673,44 +10678,55 @@ function addEntry<V>(into: Map<string, V>, key: string, value: V): void {
   if (!into.has(key)) into.set(key, value);
 }
 
-registerReplay("jsIcSite", (emitter) => emitter.jsIcSite());
-registerReplay("jsGroup", (emitter) => emitter.jsGroup());
-registerContentReplay("jsGroupKeys", (emitter, args) => emitter.jsGroupKeys(args[0] as string[]));
-registerReplay("dynReadIcSite", (emitter) => emitter.dynReadIcSite());
-registerReplay("speculativeLoopSite", (emitter) => emitter.speculativeLoopSite());
-for (const op of [
-  "dyn.collectionDynOps",
-  "dyn.dynMatchHelper",
-  "dyn.jsonSchema",
-  "dyn.recordNameTable",
-  "dyn.jsonParseHelper",
-  "dyn.dynCheckHelper",
-  "dyn.dynCheckAdoptingHelper",
-  "dyn.toDynHelper",
-  "dyn.promiseDynAdapterHelper",
-  "dyn.dynFuncThunkHelper",
-  "dyn.dynFuncBoxHelper",
-  "dyn.jsEntryThunk",
-  "dyn.unnamedFuncBoxHelper",
-  "dyn.dynFuncAdapterHelper",
-  "dyn.messageListenerHelper",
-  "dyn.messageReaderHelper",
-])
-  registerContentReplay(op, (emitter, args) => emitter.dyn.replayHelper(op, args));
-for (const op of [
-  "dyn.dynToStrHelper",
-  "dyn.dynIterNHelper",
-  "dyn.dynDestrCheckHelper",
-  "dyn.dynKeyGetHelper",
-  "dyn.dynComputedKeyGetHelper",
-  "dyn.caughtToDynHelper",
-])
-  registerReplay(op, (emitter, args) => emitter.dyn.replayHelper(op, args));
-for (const op of [
-  "walkers.jsonWriteHelper",
-  "walkers.recordFieldWriter",
-  "walkers.unionJoinHelper",
-])
-  registerContentReplay(op, (emitter, args) => emitter.walkers.replayHelper(op, args));
-for (const op of ["publish.walker", "publish.refusal"])
-  registerContentReplay(op, (emitter, args) => emitter.publishWalkers.replayHelper(op, args));
+/** Registers every journal replay of the emitter and the modules in its import cycles, once, before the first
+ * merge replays a range (mergeChunk). Registration is a call, so it stays out of the modules' top level: the compiler
+ * admits an import cycle only when every member's top level is declarations (SC1016 when it compiles itself). */
+let journalReplaysRegistered = false;
+function registerJournalReplays(): void {
+  if (journalReplaysRegistered) return;
+  journalReplaysRegistered = true;
+  registerExprCallsReplays();
+  registerExprContainersReplays();
+  registerLibDispatchReplays();
+  registerReplay("jsIcSite", (emitter) => emitter.jsIcSite());
+  registerReplay("jsGroup", (emitter) => emitter.jsGroup());
+  registerContentReplay("jsGroupKeys", (emitter, args) => emitter.jsGroupKeys(args[0] as string[]));
+  registerReplay("dynReadIcSite", (emitter) => emitter.dynReadIcSite());
+  registerReplay("speculativeLoopSite", (emitter) => emitter.speculativeLoopSite());
+  for (const op of [
+    "dyn.collectionDynOps",
+    "dyn.dynMatchHelper",
+    "dyn.jsonSchema",
+    "dyn.recordNameTable",
+    "dyn.jsonParseHelper",
+    "dyn.dynCheckHelper",
+    "dyn.dynCheckAdoptingHelper",
+    "dyn.toDynHelper",
+    "dyn.promiseDynAdapterHelper",
+    "dyn.dynFuncThunkHelper",
+    "dyn.dynFuncBoxHelper",
+    "dyn.jsEntryThunk",
+    "dyn.unnamedFuncBoxHelper",
+    "dyn.dynFuncAdapterHelper",
+    "dyn.messageListenerHelper",
+    "dyn.messageReaderHelper",
+  ])
+    registerContentReplay(op, (emitter, args) => emitter.dyn.replayHelper(op, args));
+  for (const op of [
+    "dyn.dynToStrHelper",
+    "dyn.dynIterNHelper",
+    "dyn.dynDestrCheckHelper",
+    "dyn.dynKeyGetHelper",
+    "dyn.dynComputedKeyGetHelper",
+    "dyn.caughtToDynHelper",
+  ])
+    registerReplay(op, (emitter, args) => emitter.dyn.replayHelper(op, args));
+  for (const op of [
+    "walkers.jsonWriteHelper",
+    "walkers.recordFieldWriter",
+    "walkers.unionJoinHelper",
+  ])
+    registerContentReplay(op, (emitter, args) => emitter.walkers.replayHelper(op, args));
+  for (const op of ["publish.walker", "publish.refusal"])
+    registerContentReplay(op, (emitter, args) => emitter.publishWalkers.replayHelper(op, args));
+}

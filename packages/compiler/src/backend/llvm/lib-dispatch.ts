@@ -2058,9 +2058,13 @@ function allTupleAdapterFor(host: LlvmEmitterContext, fnName: string, tuple: IrT
   return adapter;
 }
 
-registerReplay("allTupleAdapterFor", (host, args) =>
-  allTupleAdapterFor(host, args[0] as string, args[1] as IrType),
-);
+// Registered by registerJournalReplays (emitter.ts), not at load: this module is in an import cycle, and the
+// compiler admits a cycle only when every member's top level is declarations (SC1016 when it compiles itself).
+export function registerLibDispatchReplays(): void {
+  registerReplay("allTupleAdapterFor", (host, args) =>
+    allTupleAdapterFor(host, args[0] as string, args[1] as IrType),
+  );
+}
 
 /** Promise.all's tuple form (promise.allTuple): the combinator over the
  * entries stores each fulfilled entry promise, and a settlement adapter on

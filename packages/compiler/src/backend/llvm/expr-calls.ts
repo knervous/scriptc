@@ -1929,4 +1929,8 @@ export function typedRefRecipe(host: LlvmEmitterContext, t: IrType): string {
   return recipe;
 }
 
-registerContentReplay("typedRefRecipe", (host, args) => typedRefRecipe(host, args[0] as IrType));
+// Registered by registerJournalReplays (emitter.ts), not at load: this module is in an import cycle, and the
+// compiler admits a cycle only when every member's top level is declarations (SC1016 when it compiles itself).
+export function registerExprCallsReplays(): void {
+  registerContentReplay("typedRefRecipe", (host, args) => typedRefRecipe(host, args[0] as IrType));
+}

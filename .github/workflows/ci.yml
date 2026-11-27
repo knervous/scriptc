@@ -244,6 +244,71 @@ jobs:
       - name: TypeScript 7 full parity sweep
         run: pnpm test:ts7
 
+  # The scriptw npm package: built from a clean checkout, assembled into its tarball, installed into an empty
+  # directory and checked against Node (smoke.mjs), then its --browser page programs loaded in headless Chromium
+  # through the exported loader (browser.mjs). The tarball is the artifact scriptw_install runs on Windows and macOS.
+  scriptw_package:
+    name: scriptw package (Linux build, smoke, browser)
+    runs-on: ubuntu-24.04
+    timeout-minutes: 20
+    steps:
+      - uses: actions/checkout@v4
+      - uses: pnpm/action-setup@v4
+        with:
+          version: 11.1.3
+      - uses: actions/setup-node@v4
+        with:
+          node-version-file: .node-version
+          cache: pnpm
+      - run: pnpm install --frozen-lockfile
+      - run: pnpm build
+      - name: Assemble the tarball
+        run: node npm/wasmgc/scripts/assemble.mjs --out="$RUNNER_TEMP/scriptw-stage"
+      - name: Native companion selection
+        run: node --test npm/wasmgc/test/native.test.mjs
+      - name: Install and run against Node
+        run: node npm/wasmgc/test/smoke.mjs "$RUNNER_TEMP"/scriptw-stage/scriptw-*.tgz
+      - name: Page programs in headless Chromium
+        # Playwright is a test tool, not a dependency of the package: installed beside the run, pinned.
+        run: |
+          mkdir -p "$RUNNER_TEMP/playwright"
+          npm install --prefix "$RUNNER_TEMP/playwright" --no-audit --no-fund playwright@1.63.0
+          "$RUNNER_TEMP/playwright/node_modules/.bin/playwright" install --with-deps chromium
+          NODE_PATH="$RUNNER_TEMP/playwright/node_modules" node npm/wasmgc/test/browser.mjs "$RUNNER_TEMP"/scriptw-stage/scriptw-*.tgz
+      - uses: actions/upload-artifact@v4
+        with:
+          name: scriptw-tarball
+          path: ${{ runner.temp }}/scriptw-stage/scriptw-*.tgz
+          retention-days: 3
+
+  # The Linux tarball installed and run on Windows and macOS: TypeScript 7's checker is a per-platform executable that
+  # npm selects at install, so these runs check that it resolves outside Linux.
+  scriptw_install:
+    needs: scriptw_package
+    name: scriptw install (${{ matrix.os }})
+    runs-on: ${{ matrix.os }}
+    timeout-minutes: 15
+    strategy:
+      fail-fast: false
+      matrix:
+        os: [windows-latest, macos-15]
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          sparse-checkout: |
+            npm/wasmgc/test
+            .node-version
+      - uses: actions/setup-node@v4
+        with:
+          node-version-file: .node-version
+      - uses: actions/download-artifact@v4
+        with:
+          name: scriptw-tarball
+          path: ${{ runner.temp }}/scriptw-tarball
+      - name: Install and run against Node
+        shell: bash
+        run: node npm/wasmgc/test/smoke.mjs "$RUNNER_TEMP"/scriptw-tarball/scriptw-*.tgz
+
   llvm_artifacts_linux_x64:
     name: test (Linux x64 LLVM artifacts, no clang)
     runs-on: ubuntu-24.04
@@ -554,9 +619,11 @@ jobs:
           echo "LLVM_DIR=$llvm\lib\cmake\llvm" >> $env:GITHUB_ENV
           echo "$llvm\bin" >> $env:GITHUB_PATH
       - run: pnpm install --frozen-lockfile
+      # The helper's comptime evaluator compiles QuickJS with `zig cc` (native/llvm-codegen/comptime/build.mjs), so Zig
+      # comes before the helper build.
+      - uses: ./.github/actions/zig
       - name: Build Windows helper
         run: pnpm --filter @scriptc/llvm-win32-x64-msvc build:native
-      - uses: ./.github/actions/zig
       - name: Build Windows runtime pack
         run: pnpm --filter @scriptc/runtime-win32-x64-msvc build:native
       - run: pnpm build
@@ -598,7 +665,7 @@ jobs:
   # Retain the pre-matrix "test" check for branch protection and badges. It
   # passes only when every matrix shard and independent integration job does.
   test:
-    needs: [tests, effects, bootstrap, linux_host_clang, ts7_parity, llvm_artifacts_linux_x64, llvm_artifacts_macos_arm64, llvm_artifacts_macos_x64, windows_cli, llvm_artifacts_windows_x64, mobile_runtime_packs]
+    needs: [tests, effects, bootstrap, linux_host_clang, ts7_parity, llvm_artifacts_linux_x64, llvm_artifacts_macos_arm64, llvm_artifacts_macos_x64, windows_cli, llvm_artifacts_windows_x64, mobile_runtime_packs, scriptw_package, scriptw_install]
     # A superseded run must release its concurrency slot immediately.
     if: ${{ !cancelled() }}
     runs-on: ubuntu-latest
@@ -616,3 +683,5 @@ jobs:
           test "${{ needs.windows_cli.result }}" = success
           test "${{ needs.llvm_artifacts_windows_x64.result }}" = success
           test "${{ needs.mobile_runtime_packs.result }}" = success
+          test "${{ needs.scriptw_package.result }}" = success
+          test "${{ needs.scriptw_install.result }}" = success

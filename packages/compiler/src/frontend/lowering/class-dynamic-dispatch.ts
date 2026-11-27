@@ -1367,7 +1367,9 @@ export class ClassDynamicDispatch {
         const base = info.base;
         const baseHelper = base ? this.computedClassHelpers.get(JSON.stringify([dispatch.fn.name, base.def.name])) : undefined;
         const ownNames = new Set(info.fieldOrder.map((f) => f.name));
-        const inherited = (name: string): boolean => !!base && !!baseHelper && base.fields.has(name) && !ownNames.has(name) &&
+        // A name missing from this class's own field table (a base field the subclass's table does not carry, such as an
+        // Error subclass's `message`) is not a plain inherited field: its arm stays in this helper.
+        const inherited = (name: string): boolean => !!base && !!baseHelper && base.fields.has(name) && info.fields.has(name) && !ownNames.has(name) &&
           typeEquals(base.fields.get(name)!, info.fields.get(name)!) && !!info.def.tracksOwnFields === !!base.def.tracksOwnFields &&
           !findMethodOn(lowerer, info, `get:${name}`) && !findMethodOn(lowerer, info, `set:${name}`) && !findMethodOn(lowerer, info, name) &&
           !["constructor", "stack", "message", "name"].includes(name) && !name.startsWith("sym:") && !name.startsWith("%") &&

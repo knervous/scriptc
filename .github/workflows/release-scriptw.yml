@@ -1,0 +1,100 @@
+name: Release scriptw
+
+# Publishes the scriptw npm package (npm/wasmgc) with npm trusted publishing: npm exchanges this workflow's GitHub OIDC
+# token for a short-lived publish credential, so the repository holds no npm token. Started by a `scriptw-v<version>`
+# tag or by hand. npm/wasmgc/RELEASING.md describes the one-time setup on npmjs.com.
+on:
+  push:
+    tags:
+      - "scriptw-v*"
+  workflow_dispatch:
+
+concurrency:
+  group: release-scriptw
+  cancel-in-progress: false
+
+jobs:
+  # Only the repository npm/wasmgc/identity.json names publishes: the trusted publisher on npmjs.com is pinned to it,
+  # and package.json's repository (which npm's provenance check compares) is filled from it. In any other repository,
+  # or without the file, the release is skipped.
+  gate:
+    name: Check the publishing repository and version
+    runs-on: ubuntu-24.04
+    timeout-minutes: 5
+    permissions:
+      contents: read
+    outputs:
+      publish: ${{ steps.check.outputs.publish }}
+      version: ${{ steps.check.outputs.version }}
+    steps:
+      - uses: actions/checkout@v4
+      - id: check
+        run: |
+          node --input-type=module -e '
+            import fs from "node:fs";
+            const out = (k, v) => fs.appendFileSync(process.env.GITHUB_OUTPUT, `${k}=${v}\n`);
+            const file = "npm/wasmgc/identity.json";
+            const identity = fs.existsSync(file) ? JSON.parse(fs.readFileSync(file, "utf8")) : null;
+            const version = JSON.parse(fs.readFileSync("npm/wasmgc/package.json", "utf8")).version;
+            out("version", version);
+            if (identity === null || identity.repository !== process.env.GITHUB_REPOSITORY) {
+              console.log(`skipping: ${process.env.GITHUB_REPOSITORY} is not the publishing repository`);
+              out("publish", "false");
+              process.exit(0);
+            }
+            const ref = process.env.GITHUB_REF;
+            if (ref.startsWith("refs/tags/") && ref !== `refs/tags/scriptw-v${version}`) {
+              console.error(`${ref} does not name npm/wasmgc/package.json version ${version}`);
+              process.exit(1);
+            }
+            out("publish", "true");
+          '
+
+  publish:
+    needs: gate
+    if: needs.gate.outputs.publish == 'true'
+    name: Build, test and publish scriptw ${{ needs.gate.outputs.version }}
+    runs-on: ubuntu-24.04
+    timeout-minutes: 30
+    # Trusted publishing works only from a GitHub-hosted runner, and needs id-token: write.
+    permissions:
+      contents: read
+      id-token: write
+    steps:
+      - uses: actions/checkout@v4
+      - uses: pnpm/action-setup@v4
+        with:
+          version: 11.1.3
+      - uses: actions/setup-node@v4
+        with:
+          node-version-file: .node-version
+          registry-url: https://registry.npmjs.org
+          cache: pnpm
+      # Trusted publishing needs npm 11.5.1 or later.
+      - run: npm install --global npm@11.6.2
+      - run: pnpm install --frozen-lockfile
+      - run: pnpm build
+      - name: Assemble the tarball
+        run: node npm/wasmgc/scripts/assemble.mjs --out="$RUNNER_TEMP/scriptw-stage"
+      - name: Install and run against Node
+        run: node npm/wasmgc/test/smoke.mjs "$RUNNER_TEMP/scriptw-stage/scriptw-${{ needs.gate.outputs.version }}.tgz"
+      - name: Page programs in headless Chromium
+        run: |
+          mkdir -p "$RUNNER_TEMP/playwright"
+          npm install --prefix "$RUNNER_TEMP/playwright" --no-audit --no-fund playwright@1.63.0
+          "$RUNNER_TEMP/playwright/node_modules/.bin/playwright" install --with-deps chromium
+          NODE_PATH="$RUNNER_TEMP/playwright/node_modules" node npm/wasmgc/test/browser.mjs "$RUNNER_TEMP/scriptw-stage/scriptw-${{ needs.gate.outputs.version }}.tgz"
+      - name: Check the packed manifest
+        run: |
+          tar -xzf "$RUNNER_TEMP/scriptw-stage/scriptw-${{ needs.gate.outputs.version }}.tgz" -C "$RUNNER_TEMP" package/package.json package/build-info.json
+          node --input-type=module -e '
+            import fs from "node:fs";
+            const pkg = JSON.parse(fs.readFileSync(process.env.RUNNER_TEMP + "/package/package.json", "utf8"));
+            const info = JSON.parse(fs.readFileSync(process.env.RUNNER_TEMP + "/package/build-info.json", "utf8"));
+            const want = `git+https://github.com/${process.env.GITHUB_REPOSITORY}.git`;
+            if (pkg.repository?.url !== want) throw new Error(`repository.url is ${pkg.repository?.url}, not ${want}`);
+            if (info.commit !== process.env.GITHUB_SHA) throw new Error(`build-info commit ${info.commit} is not ${process.env.GITHUB_SHA}`);
+            console.log(`${pkg.name}@${pkg.version}, commit ${info.commit}`);
+          '
+      - name: Publish
+        run: npm publish "$RUNNER_TEMP/scriptw-stage/scriptw-${{ needs.gate.outputs.version }}.tgz" --provenance --access public

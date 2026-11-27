@@ -2,7 +2,7 @@
 
 This tree is a derivative of scriptc (https://github.com/vercel-labs/scriptc), licensed under the Apache License, Version 2.0 (LICENSE). It is compared here with upstream commit `97248e92994ff55f7009e0057700241b9109a35e`. The LLVM backend (`packages/compiler/src/backend/llvm`), the IR (`packages/compiler/src/ir`), the runtime (`packages/runtime` and the runtime and LLVM packs) and `native/llvm-codegen` track upstream at that commit, with the changes listed below. The frontend (`packages/compiler/src/frontend`), the compiler's unit and integration tests, the test corpus and fixtures, the compatibility inventory and the documentation are this fork's own and follow an earlier upstream state, so upstream's newer tests and documentation are not included.
 
-As section 4(b) of the license requires, the files below carry changes. 1117 files are modified from that upstream commit and 2917 files are new; 23327 upstream files are not part of this tree (see "Removed files"). Each modified source file of the compiler, the runtime and the repository tooling also says so in its first comment line.
+As section 4(b) of the license requires, the files below carry changes. 1116 files are modified from that upstream commit and 2940 files are new; 23328 upstream files are not part of this tree (see "Removed files"). Each modified source file of the compiler, the runtime and the repository tooling also says so in its first comment line.
 
 ## Modified files
 
@@ -12,7 +12,6 @@ As section 4(b) of the license requires, the files below carry changes. 1117 fil
 - `.github/actions/native-packages/action.yml`
 - `.github/actions/zig/action.yml`
 - `.github/workflows/ci.yml`
-- `.github/workflows/release.yml`
 - `.gitignore`
 - `.node-version`
 - `AGENTS.md`
@@ -1127,6 +1126,7 @@ As section 4(b) of the license requires, the files below carry changes. 1117 fil
 ## Added files
 
 - `.github/workflows/host-sets.yml`
+- `.github/workflows/release-scriptw.yml`
 - `docs/public/Geist-Regular.ttf`
 - `docs/public/GeistPixel-Square.ttf`
 - `docs/src/app/og/og-image.tsx`
@@ -2258,15 +2258,35 @@ As section 4(b) of the license requires, the files below carry changes. 1117 fil
 - `native/host/vendor/vello_shaders/src/lib.rs`
 - `native/host/vendor/vello_shaders/src/types.rs`
 - `npm/wasmgc/.gitignore`
+- `npm/wasmgc/CHANGELOG.md`
+- `npm/wasmgc/CONTRIBUTING.md`
 - `npm/wasmgc/README.md`
 - `npm/wasmgc/bin/cli.mjs`
 - `npm/wasmgc/bin/native.mjs`
+- `npm/wasmgc/lib/compile.mjs`
+- `npm/wasmgc/lib/host.d.ts`
+- `npm/wasmgc/lib/host.mjs`
+- `npm/wasmgc/lib/index.d.ts`
+- `npm/wasmgc/lib/index.mjs`
+- `npm/wasmgc/lib/runtime-check.mjs`
 - `npm/wasmgc/package.json`
 - `npm/wasmgc/scripts/assemble.mjs`
+- `npm/wasmgc/test/browser.mjs`
+- `npm/wasmgc/test/hosted/host-math.d.ts`
+- `npm/wasmgc/test/hosted/run.mjs`
+- `npm/wasmgc/test/hosted/scaled.ts`
 - `npm/wasmgc/test/native.test.mjs`
+- `npm/wasmgc/test/pages/clock.expect.json`
+- `npm/wasmgc/test/pages/clock.ts`
+- `npm/wasmgc/test/pages/host-clock.d.ts`
+- `npm/wasmgc/test/pages/todo.expect.json`
+- `npm/wasmgc/test/pages/todo.ts`
 - `npm/wasmgc/test/samples/async-errors.ts`
 - `npm/wasmgc/test/samples/classes.ts`
+- `npm/wasmgc/test/samples/generics.ts`
 - `npm/wasmgc/test/samples/hello.ts`
+- `npm/wasmgc/test/samples/uncaught.expect.json`
+- `npm/wasmgc/test/samples/uncaught.ts`
 - `npm/wasmgc/test/smoke.mjs`
 - `npm/wasmgc/tsc-ts/compile.mjs`
 - `npm/wasmgc/tsc-ts/prepare.mjs`
@@ -2387,6 +2407,7 @@ As section 4(b) of the license requires, the files below carry changes. 1117 fil
 - `packages/compiler/src/release-fences.ts`
 - `packages/compiler/src/source-paths.ts`
 - `packages/compiler/test/browser-date-host-receiver.test.ts`
+- `packages/compiler/test/error-accessor-dispatch.test.ts`
 - `packages/compiler/test/fixtures/fix-1127-strict-frontend/family-off/main.ts`
 - `packages/compiler/test/fixtures/fix-1127-strict-frontend/family-off/tsconfig.json`
 - `packages/compiler/test/fixtures/fix-1127-strict-frontend/implicit-any/main.ts`
@@ -2490,6 +2511,7 @@ As section 4(b) of the license requires, the files below carry changes. 1117 fil
 - `tests/corpus/760-any-arithmetic.ts`
 - `tests/corpus/763-any-flow.ts`
 - `tests/corpus/968-jsval-lift.ts`
+- `tests/corpus/error-subclass-message-accessor-keyed.js`
 - `tests/corpus/inc-dec-non-null-operand.ts`
 - `tests/corpus/map-long-string-keys.ts`
 - `tests/corpus/typed-array-missing-index-read.ts`
@@ -4046,7 +4068,7 @@ As section 4(b) of the license requires, the files below carry changes. 1117 fil
 
 ## Removed files
 
-These 23327 files are in upstream commit `97248e92994ff55f7009e0057700241b9109a35e` and not in this tree. Most were added upstream after the state this fork's frontend and tests follow; the rest were removed by the fork. By directory:
+These 23328 files are in upstream commit `97248e92994ff55f7009e0057700241b9109a35e` and not in this tree. Most were added upstream after the state this fork's frontend and tests follow; the rest were removed by the fork. By directory:
 
 <table>
 <tr><th>Directory</th><th>Files</th></tr>
@@ -4064,11 +4086,11 @@ These 23327 files are in upstream commit `97248e92994ff55f7009e0057700241b9109a3
 <tr><td><code>scripts/</code></td><td>68</td></tr>
 <tr><td><code>tests/corpus-node-islands-order/</code></td><td>37</td></tr>
 <tr><td><code>tests/library-mode/</code></td><td>23</td></tr>
-<tr><td>27 other directories</td><td>174</td></tr>
+<tr><td>27 other directories</td><td>175</td></tr>
 </table>
 
 <details>
-<summary>All 23327 removed paths</summary>
+<summary>All 23328 removed paths</summary>
 
 - `.agents/skills/scriptc-dev-loop/SKILL.md`
 - `.agents/skills/technical-writer/SKILL.md`
@@ -4098,6 +4120,7 @@ These 23327 files are in upstream commit `97248e92994ff55f7009e0057700241b9109a3
 - `.github/workflows/prune-caches.yml`
 - `.github/workflows/release-build.yml`
 - `.github/workflows/release-dry-run.yml`
+- `.github/workflows/release.yml`
 - `.oxfmtrc.jsonc`
 - `.oxlintrc.jsonc`
 - `a.out`

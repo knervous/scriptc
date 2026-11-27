@@ -1,6 +1,7 @@
 #!/usr/bin/env node
 // The command line: compile TypeScript or JavaScript to a WasmGC module, or compile and run one under this Node.
 import fs from "node:fs";
+import module from "node:module";
 import os from "node:os";
 import path from "node:path";
 import { spawnSync } from "node:child_process";
@@ -13,6 +14,8 @@ import {
   parseNativeTarget,
   requiredCompanions,
 } from "./native.mjs";
+import { compile, formatDiagnostic } from "../lib/compile.mjs";
+import { unsupportedRuntimeMessage } from "../lib/runtime-check.mjs";
 
 const USAGE = `usage:
   scriptw build <entry.ts> [-o <out>] [--target wasmgc | native | native:<platform>] [--release]
@@ -23,24 +26,44 @@ const USAGE = `usage:
 --target wasmgc (the default): build writes <out.wasm> and its host sidecar <out.wasm.host.json>.
 --target native: a native executable for this machine. native:<platform> cross-builds for one of
   ${Object.keys(NATIVE_PLATFORMS).join(", ")}; android-arm64 writes <out>/libmain.so.
---browser: a page program (DOM, timers, host: modules); natively it links the host island and a host.
+--browser: a page program (DOM, timers, host: modules) for a web page to load with scriptw/host; natively it
+  links the host island and a host. run --browser runs one under Node, which has no DOM.
 --host auto (the default): the host pack's smallest set holding the services the program reaches (window,
   gpu, audio, net, rtc; every service when it reads globals by a computed name). --host <set> names one: full
   (generic), ui, headless, offline. --host quickjs links the engine island instead.
 --host-features <list>: with auto, services to add (audio) or remove (-rtc), comma-separated.
 --explain-host: print the chosen set and why. --host-lib <archive>: your own scr_host_ops() instead of the pack.
-run compiles to a temporary directory (or loads a built module) and runs it here.`;
+run compiles to a temporary directory (or loads a built module) and runs it here.
+scriptw --version prints the package and compiler versions and the source commit.`;
+
+// Node's on-disk compile cache (its default directory under the OS temp directory): the compiler is several hundred
+// modules, and a cached start skips compiling them again. NODE_DISABLE_COMPILE_CACHE=1 turns it off.
+module.enableCompileCache?.();
 
 const argv = process.argv.slice(2);
 const command = argv.shift();
 if (command === "--version" || command === "-v") {
-  const pkg = JSON.parse(fs.readFileSync(new URL("../package.json", import.meta.url), "utf8"));
-  console.log(pkg.version);
+  const read = (rel) => { try { return JSON.parse(fs.readFileSync(new URL(rel, import.meta.url), "utf8")); } catch { return null; } };
+  const pkg = read("../package.json");
+  // assemble.mjs stamps build-info.json into the package.
+  const info = read("../build-info.json");
+  const compilerVersion = info?.compiler ?? read("../packages/compiler/package.json")?.version ?? "unknown";
+  console.log(`scriptw ${pkg.version}`);
+  console.log(`compiler ${compilerVersion}`);
+  if (info?.typescript) console.log(`typescript ${info.typescript}`);
+  console.log(`commit ${info?.commit ?? "unknown"}`);
   process.exit(0);
 }
 if (command !== "build" && command !== "run") {
   console.error(USAGE);
   process.exit(command === undefined || command === "--help" || command === "-h" ? 0 : 2);
+}
+
+// The modules need WasmGC and JS String Builtins (Node 24); an older engine would fail at the first instantiation.
+const unsupported = unsupportedRuntimeMessage();
+if (unsupported !== null) {
+  console.error(`scriptw: ${unsupported.replace(/^scriptw /, "")}`);
+  process.exit(1);
 }
 
 let entry, out, release = false, browser = false, host, hostLib, hostFeatures, explainHost = false;
@@ -82,14 +105,12 @@ if (!fs.existsSync(entry)) { console.error(`scriptw: ${entry} does not exist`); 
 const compilerDist = new URL("../packages/compiler/dist/", import.meta.url);
 
 async function build(source, outPath) {
-  const { compile } = await import(new URL("index.js", compilerDist));
-  fs.mkdirSync(path.dirname(outPath), { recursive: true });
-  const r = await compile(source, { outDir: path.dirname(outPath), outPath, outputKind: "wasmgc", release });
+  const r = await compile(source, { outPath, release, browser });
   if (!r.ok) {
-    for (const d of r.diagnostics) console.error(d.file ? `${d.file}${d.line ? `:${d.line}` : ""}: ${d.message}` : d.message);
+    for (const d of r.diagnostics) console.error(formatDiagnostic(d));
     process.exit(1);
   }
-  return outPath;
+  return r.wasmPath;
 }
 
 async function run(wasmPath) {
@@ -105,8 +126,13 @@ async function run(wasmPath) {
   try {
     const done = m.main();
     if (done && typeof done.then === "function") await done.then(undefined, (e) => { uncaught ??= e; });
-    await new Promise((r) => setTimeout(r, 0));
-    while (uncaught === null && m.pendingTimers() > 0) await new Promise((r) => setTimeout(r, 2));
+    // Settle as Node's loop would: wait while referenced timers remain, then two quiet turns, which let an unhandled
+    // rejection's report (a zero-delay timer scheduled from a microtask drain) fire.
+    for (let quiet = 0; uncaught === null && quiet < 2;) {
+      const pending = m.pendingTimers() > 0;
+      await new Promise((r) => setTimeout(r, pending ? 2 : 0));
+      quiet = pending || m.pendingTimers() > 0 ? 0 : quiet + 1;
+    }
   } catch (e) {
     uncaught ??= e;
   } finally {
@@ -114,10 +140,27 @@ async function run(wasmPath) {
   }
   if (uncaught !== null) {
     failed = true;
-    const shown = uncaught instanceof WebAssembly.Exception ? "Uncaught exception thrown by the program" : uncaught?.stack ?? String(uncaught);
-    process.stderr.write(shown + "\n");
+    process.stderr.write(uncaughtText(m, uncaught) + "\n");
   }
   process.exitCode = failed ? 1 : process.exitCode ?? 0;
+}
+
+/** An exception that escaped the program, as text: a compiled exception's own text (the module's exnText export), else
+ * a JavaScript error's stack. */
+function uncaughtText(m, e) {
+  const ex = m.instance.exports;
+  if (e instanceof WebAssembly.Exception) {
+    if (ex.exn && ex.exnText && e.is(ex.exn)) {
+      try { return `Uncaught ${String(ex.exnText(e.getArg(ex.exn, 0)))}`; } catch { /* the generic text below */ }
+    }
+    return "Uncaught exception thrown by the program";
+  }
+  try {
+    return String(e?.stack ?? e);
+  } catch {
+    // A compiled value (a rejection reason that is a GC struct) has no JavaScript string conversion.
+    try { return `Uncaught ${String(ex.exnText(e))}`; } catch { return "Uncaught exception thrown by the program"; }
+  }
 }
 
 /** A native build: the compiler's executable lane with the target's companions (native.mjs). */
