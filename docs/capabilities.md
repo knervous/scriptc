@@ -86,7 +86,7 @@ Each capability in turn:
 
 **Atomics (the threads proposal's atomic instructions).**
 - *Where, conditional:* `Atomics.load`, `store`, `add`, `sub`, `and`, `or`, `xor`, `exchange`, `compareExchange` and `notify` on compiled integer typed arrays lower to wasm atomic instructions on the module's memory (`bytes.ts` `atomics`).
-- *Shared memory:* the memory is shared only when a link imports a shared memory (`wasmLink.memory.shared`). Otherwise atomic instructions run on unshared memory, which the threads proposal allows, and `notify` returns 0.
+- *Shared memory:* the memory is shared only when a link imports a shared memory (`wasmLink.memory.shared`). Otherwise atomic instructions run on unshared memory, which the threads proposal allows, and `notify` returns 0. A module on a shared link memory records `threads=shared`. Without a linked allocator, its typed-array allocator keeps its heap top and a spin lock in the memory (words 128 and 132), so every instance on that memory, one per worker, allocates from one heap.
 - *`Atomics.wait`:* refused at compile time on the browser target, because the UI thread must not block.
 - *Without it:* compile failure, but every GC engine validates atomic instructions on unshared memory. The probe runs the `atomics` module in Chromium without cross-origin isolation.
 - *Fallback:* none needed. The instructions need no SharedArrayBuffer or isolation unless the memory is shared.
@@ -176,12 +176,12 @@ Every way a compiled program, its host or the bridge coordinates across threads:
 |---|---|---|---|
 | The batched bridge flush | WasmGC | `host-stream` `flush` | It is single-threaded: a synchronous import call, replayed before return. |
 | Typed-array `Atomics.*` | WasmGC | `bytes.ts` | Runs on unshared memory, where `notify` wakes no one. `wait` is refused on the browser target. |
-| Shared linear memory | WasmGC link | `wasmLink.memory.shared` with a memory supplied by the environment | Opt-in; default modules are unshared. |
+| Shared linear memory | WasmGC link | `wasmLink.memory.shared` with a memory supplied by the environment; one instance per worker, typed arrays crossing link exports as (address, length) spans of that memory (`benchmarks/intrinsics/blur`) | Opt-in; default modules are unshared. |
 | wasi-threads workers (`thread-spawn`, a Worker per thread on the same binary and memory) | WasmGC link with a threaded wasm32-wasip1-threads module | `wasiThreadsEnvironment` | No. Without isolation the environment can't make the shared memory, and `requireDeploymentCapabilities` refuses with a COOP/COEP message. |
 | SPSC worker ring (slots in shared memory; producer on the UI thread, a consumer thread on a futex wait, page awaiting with `Atomics.waitAsync` on a completion epoch) | WasmGC link | the link's example kernel and client | The protocol has a direct path: the same tasks run on the UI thread give identical results, and that equality is asserted. It isn't packaged as a fallback. |
 | Shared payload with single-owner publication (atomic owner word) | WasmGC link | the same | Works on one thread. Measured there, it is a publication protocol, not a speedup. |
 | Promising-call queue (JSPI) | WasmGC link | `instantiateLinked` `admit` | Single-threaded: a per-instance serial queue, not a cross-thread one. |
-| Runtime thread instances (`-DSCR_THREAD_INSTANCES`: thread-local runtime state, one complete instance per embedder thread) | Native library | `abi.instance_per_thread` profiles, `native/library.ts` | Off by default; ordinary executables have one instance. |
+| Runtime thread instances (`-DSCR_THREAD_INSTANCES`: thread-local runtime state, one complete instance per embedder thread) | Native library | `abi.instance_per_thread` profiles, `native/library.ts`; `mutable-bytes` export parameters let every thread's instance view one host buffer in place | Off by default; ordinary executables have one instance. |
 | Worker executables (`-DSCR_WORKERS`: Node `worker_threads` as native threads) | Native executable | `executable-features.ts` (`workers` when the program uses workers) | Conditional on the program. Exclusive with thread instances. |
 | The remote inbox (`scr_remote_post`, `scr_remote_hold`, `scr_remote_set_wake`, `scr_instance_remote`) | Native | `scr_ffi_queue.c` | Linked into every native executable. A foreign thread posts a task to an instance's loop, which wakes through a pipe or an embedder waker. Single-threaded programs simply never post. |
 | `Atomics.waitAsync` on native | Native | `scr_atomics_wait.c` | Uses the remote inbox to resolve on the owning thread, holding the loop open. |
@@ -426,6 +426,8 @@ What a program observes stays the same:
 
 The equivalence between the direct path and the worker path is already asserted, and the fallback makes that direct path the protocol's own consumer.
 
+**Measured.** `benchmarks/intrinsics/blur` runs one job system on every lane: WasmGC `threads=shared` with one instance per worker on one shared memory, under Node's `worker_threads` and in a cross-origin-isolated Chromium page with module Workers; a native thread-instanced library with one pthread per instance; and JavaScript workers. Each gives the same image as one thread. The table is in its `RESULTS.md` (Threads).
+
 What differs is time. The owner's thread does the work, so the UI is not freed. Worker-only lifecycle steps become no-ops: there is no thread to start or exit, no stack to reap, and the stuck-worker deadline and abandon budget can't arise. The fallback needs no allocator-ownership rule either, because only one thread allocates.
 
 **Flushing** needs no fallback. The batched bridge already flushes synchronously on the calling thread (§1.2). A future off-thread replay, a worker that owns the DOM channel, would be a `shared`-only mode with the synchronous flush as its fallback.
@@ -575,7 +577,7 @@ The Playwright install in this environment has Chromium only. Firefox, WebKit an
 - A suspending FFI import with a target lacking JSPI, or with `-jspi`, is a build error (SC3002) naming the targets.
 - The CLI has `--capabilities`, `--targets` and `--explain-capabilities`. `scriptw build` reports every file it wrote.
 - `relaxed-simd` in the list turns `experimentalRelaxedSimd` on. A target without relaxed SIMD (Safari) gets a variant without it.
-- `threads=shared` records the shared-memory and cross-origin-isolation requirements; `threads=auto` records the mode only. JSPI is not part of the key: a module that uses it records `jspi` among its requirements.
+- `threads=shared` records the shared-memory and cross-origin-isolation requirements; `threads=auto` records the mode only. A link build on a shared memory (`wasmLink.memory.shared`) resolves to `threads=shared` unless it asked for `auto`. JSPI is not part of the key: a module that uses it records `jspi` among its requirements.
 
 ### 5.6 The loader
 

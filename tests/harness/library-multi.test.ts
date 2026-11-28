@@ -585,6 +585,43 @@ describe.each(EMISSIONS)("thread-instanced archive, %s emission", (emission) => 
   });
 });
 
+/* A library is native LLVM code whatever compiled before it in the
+ * process: the Atomics surface lowers to the runtime's real atomics (the
+ * LLVM lane), never to a refusal. A fresh process left the lane unset. */
+test("M6: a library build lowers Atomics for the LLVM lane", async () => {
+  const outDir = join(cacheDir, "atomics-lane");
+  mkdirSync(outDir, { recursive: true });
+  writeFileSync(join(outDir, "lib.ts"), [
+    "const cells = new Int32Array(2);",
+    "export function claim(n: number): number { for (let i = 0; i < n; i++) Atomics.add(cells, 0, 1); return Atomics.load(cells, 0); }", ""].join("\n"));
+  writeFileSync(join(outDir, "profile.json"), JSON.stringify({
+    profile_format: 1, name: "atomics-lane", entry: "lib.ts", emission: "llvm",
+    abi: { prefix: "al_", init_symbol: "al_init", sink_register_symbol: "al_set_panic_sink", collect_symbol: "al_collect", result_reset_symbol: null },
+    exports: [{ export: "claim", symbol: "al_claim", params: ["f64"], returns: "f64" }],
+  }));
+  const result = await compileLibrary({ profilePath: join(outDir, "profile.json"), outDir, sanitize });
+  expect(result.ok ? [] : result.diagnostics.map((d) => `${d.code}: ${d.message}`)).toEqual([]);
+});
+
+/* mutable-bytes (borrowed host memory) in a thread-instanced archive:
+ * four embedder threads, four instances, ONE host buffer viewed in place.
+ * Claims through Atomics on one shared cell all land, each thread's
+ * stamp reaches the host, and every instance reads the others' writes. */
+const threadViewsDir = join(repoRoot, "tests/library-mode/thread-views");
+localizationTest("M6: mutable-bytes views one host buffer from every thread's instance", async () => {
+  const outDir = join(cacheDir, "thread-views");
+  mkdirSync(outDir, { recursive: true });
+  const profile = JSON.parse(readFileSync(join(threadViewsDir, "profile_t.json"), "utf8")) as { entry: string };
+  profile.entry = join(threadViewsDir, profile.entry);
+  writeFileSync(join(outDir, "profile.json"), JSON.stringify(profile, null, 2));
+  const result = await compileLibrary({ profilePath: join(outDir, "profile.json"), outDir, sanitize });
+  if (!result.ok) throw new Error(result.diagnostics.map((d) => `${d.code}: ${d.message}`).join("\n"));
+  const probe = buildThreadProbe(join(threadViewsDir, "probe.c"), [result.archivePath], "thread-views");
+  const run = spawnSync(probe, { encoding: "utf8", timeout: 60_000 });
+  expect(run.status).toBe(0);
+  expect(normalizeProbeOut(run.stdout)).toBe("claims 400000 even 200000\nt0: slice 1 sum 10000\nt1: slice 2 sum 10000\nt2: slice 3 sum 10000\nt3: slice 4 sum 10000\n");
+});
+
 /* The inspect-TLS probe's dead-strip technique (function/data sections +
  * gc-sections over deliberately-unresolved runtime references) is an
  * ELF/Mach-O link idiom; win32 hosts cover the seam through M6's archive

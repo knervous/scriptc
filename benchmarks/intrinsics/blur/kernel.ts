@@ -35,8 +35,10 @@ export function runJobs(src: Uint8Array, dst: Uint8Array, tmp: Uint16Array, coun
   return done;
 }
 
-export function testGray(): Uint8Array {
-  const img = new Uint8Array(W * H);
+export function testGray(): Uint8Array { return fillGray(new Uint8Array(W * H)); }
+
+/** Writes the test image into img (W * H bytes) and returns it. */
+export function fillGray(img: Uint8Array): Uint8Array {
   let s = 12345;
   for (let i = 0; i < img.length; i++) { s = (Math.imul(s, 1664525) + 1013904223) | 0; img[i] = ((i % W) ^ (i / W)) & 0xff ^ (s >>> 28); }
   return img;

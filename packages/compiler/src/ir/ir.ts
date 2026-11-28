@@ -1718,6 +1718,7 @@ export interface IrLibExport {
     | "string"
     | "cstring"
     | "bytes"
+    | "mutable-bytes"
     | "u8"
     | "u32"
     | "i32"

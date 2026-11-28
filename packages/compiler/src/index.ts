@@ -1434,6 +1434,11 @@ async function emitSemanticLibraryHit(
 
 export async function compileLibrary(opts: CompileLibraryOptions): Promise<CompileLibraryResult> {
   clearCompileSessionCaches();
+  // A library is always native LLVM code: lower for that lane (native threads exist there, so the Atomics surface
+  // lowers to real atomics), whatever an earlier compile in this process left set.
+  setBrowserTarget(false);
+  setLlvmLane(true);
+  setWasmGcLane(false);
   const frontendInputs = new FrontendInputTracker();
   try {
     return await frontendInputs.run(() => compileLibraryTracked(opts, frontendInputs));

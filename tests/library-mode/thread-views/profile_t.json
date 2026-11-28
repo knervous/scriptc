@@ -1,0 +1,20 @@
+{
+  "profile_format": 1,
+  "name": "conformance-thread-views",
+  "entry": "lib.ts",
+  "emission": "llvm",
+  "abi": {
+    "prefix": "tv_",
+    "init_symbol": "tv_init",
+    "sink_register_symbol": "tv_set_panic_sink",
+    "collect_symbol": "tv_collect",
+    "result_reset_symbol": null,
+    "localize_runtime": false,
+    "instance_per_thread": true
+  },
+  "exports": [
+    { "export": "count", "symbol": "tv_count", "params": ["mutable-bytes", "f64"], "returns": "f64" },
+    { "export": "stamp", "symbol": "tv_stamp", "params": ["mutable-bytes", "f64"], "returns": "void" },
+    { "export": "sum", "symbol": "tv_sum", "params": ["mutable-bytes"], "returns": "f64" }
+  ]
+}

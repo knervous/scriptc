@@ -1,7 +1,8 @@
 // A tiled image blur, as a job system runs it: a 1024x768 image in 32-row bands, blurred 8 times. Workers claim bands
-// from an atomic WorkCounter (the atomics intrinsic library). Here one worker runs on this thread (threads=off): the
-// compiled lanes have one thread, and lanes.mjs runs the same kernel with four worker threads over shared memory and
-// through the task ring's owner-thread drain, which must give the same image. Original code, Apache-2.0.
+// from an atomic WorkCounter (the atomics intrinsic library). Here one worker runs on this thread (threads=off).
+// lanes.mjs runs the same kernel on worker threads over shared memory (JavaScript, WasmGC threads=shared and native
+// thread instances) and through the task ring's owner-thread drain, which must all give the same image. Original
+// code, Apache-2.0.
 import { WorkCounter } from "../../../packages/intrinsics/atomics.ts";
 import { runJobs, testGray, W, H, BANDS } from "./kernel.ts";
 import { fnv1a } from "../common/input.ts";

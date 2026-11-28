@@ -9,6 +9,8 @@ const ORDER = ["hash", "qoi", "lz4", "bitset", "physics", "snapshot", "particles
 const receipts = ORDER.map((a) => path.join(here, "receipts", `${a}.json`)).filter((f) => fs.existsSync(f)).map((f) => JSON.parse(fs.readFileSync(f, "utf8")));
 const LANES = ["js", "js+fallback", "wasmgc-base", "wasmgc", "native-base", "native"];
 const fmt = (v) => (v === undefined ? "" : v >= 100 ? v.toFixed(0) : v.toFixed(1));
+const isThreadLane = (n) => n.endsWith("(median)") || n === "js 4 workers" || n === "js threads=off (task ring)" || n.startsWith("wasmgc threads=shared") || n.startsWith("native threads");
+const cell0 = (r, name) => { const l = r.lanes[name], js = (r.lanes["js (median)"] ?? r.lanes["js"])?.times?.time; return l?.times ? `${fmt(l.times.time)} ms (${(l.times.time / js).toFixed(2)}×) ${l.match ? "✓" : "✗"}` : "n/a"; };
 const lines = [];
 const first = receipts[0];
 lines.push("# Results", "");
@@ -24,8 +26,36 @@ for (const r of receipts) {
     const t = l.times.time;
     return `${fmt(t)} (${(t / js).toFixed(2)}×) ${l.match ? "✓" : "✗"}`;
   };
-  const extra = Object.keys(r.lanes).filter((n) => !LANES.includes(n)).map((n) => `${n}: ${cell(n)}`).join("<br>");
+  const extra = Object.keys(r.lanes).filter((n) => !LANES.includes(n) && !isThreadLane(n)).map((n) => `${n}: ${cell(n)}`).join("<br>");
   lines.push(`| ${r.app} | ${LANES.map(cell).join(" | ")} | ${extra} |`);
+}
+// The thread lanes (blur/lanes.mjs): every column a ratio to the single-threaded JS reference (`js (median)`: the js
+// lane's program, run like the thread lanes), absolute ms first.
+const threaded = receipts.filter((r) => Object.keys(r.lanes).some(isThreadLane));
+if (threaded.length) {
+  const COLS = [["js (median)", "JS"], ["js+fallback (median)", "JS (main.ts)"], ["js 4 workers", "JS 4 workers"], ["wasmgc", "WasmGC threads=off"],
+    ...[1, 2, 4].map((n) => [`wasmgc threads=shared ${n}`, `WasmGC shared ${n}`]), ["native", "native"],
+    ...[1, 2, 4].map((n) => [`native threads ${n}`, `native threads ${n}`])];
+  const BROWSER = [1, 2, 4].map((n) => `wasmgc threads=shared chromium ${n}`);
+  lines.push("", "## Threads", "");
+  lines.push(`Machine: ${first.cpus} cores (${first.cpu}). Every lane here is the median of its recorded runs (\`runs\` in the receipt), and each ratio is over the JS column: \`baseline.ts\` under Node, run the same way. The JS 4 workers, WasmGC and native lanes run the kernel of \`main.ts\` (the JS (main.ts) column: bands claimed from a WorkCounter) on one shared image, except WasmGC threads=off and native, which are the main table's single runs of main.ts; the WasmGC shared lanes run under Node's worker_threads, and the Chromium row runs the same module in headless Chromium, cross-origin isolated, one module Worker per thread.`, "");
+  lines.push("| App | " + COLS.map(([, h]) => h).join(" | ") + " |", "|---|" + COLS.map(() => "---|").join(""));
+  for (const r of threaded) {
+    const js = (r.lanes["js (median)"] ?? r.lanes["js"])?.times?.time;
+    const cell = (name) => { const l = r.lanes[name]; if (!l) return ""; if (l.error) return "n/a"; const t = l.times.time; return `${fmt(t)} (${(t / js).toFixed(2)}×) ${l.match ? "✓" : "✗"}`; };
+    lines.push(`| ${r.app} | ${COLS.map(([n]) => cell(n)).join(" | ")} |`);
+    if (BROWSER.some((n) => r.lanes[n])) {
+      const at = COLS.findIndex(([n]) => n === "wasmgc threads=shared 1");
+      lines.push(`| ${r.app}, Chromium | ${COLS.map(([n], i) => (i >= at && i < at + 3 ? cell(BROWSER[i - at]) : i === 0 ? cell("js (median)") : "")).join(" | ")} |`);
+    }
+  }
+  lines.push("");
+  for (const r of threaded) {
+    const keys = [...new Set(Object.values(r.lanes).map((l) => l.capabilities).filter(Boolean))];
+    const ring = r.lanes["js threads=off (task ring)"];
+    lines.push(`- **${r.app}**: the WasmGC shared build records \`${keys.join("`, `")}\`.${ring?.times ? ` The task ring's owner-thread drain (threads=off): ${cell0(r, "js threads=off (task ring)")}.` : ""}`);
+  }
+  lines.push("");
 }
 lines.push("", "## Per kernel", "");
 for (const r of receipts) {

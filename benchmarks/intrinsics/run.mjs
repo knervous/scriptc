@@ -12,7 +12,8 @@
 //   native-base  baseline.ts compiled natively (LLVM)
 //   native       main.ts compiled natively
 // A program prints result lines (checksums) and `time...` lines (ms, measured inside the program around the work
-// only). Every lane must print the same result lines. An app may add lanes in lanes.mjs (the blur app's threads).
+// only). Every lane must print the same result lines. An app may add lanes in lanes.mjs (the blur app's threads: see
+// blur/lanes.mjs; a lane there may record its runs and the build's resolved capabilities).
 // Native lanes need the LLVM helper and runtime pack built for this machine (AGENTS.md, build:native).
 import { spawnSync } from "node:child_process";
 import fs from "node:fs";
@@ -85,7 +86,7 @@ for (const app of apps.length ? apps : APPS) {
     lanes["native"] = await nativeLane(main, work);
   }
   const extra = path.join(dir, "lanes.mjs");
-  if (fs.existsSync(extra)) Object.assign(lanes, await (await import(pathToFileURL(extra).href)).default({ repo, dir }));
+  if (fs.existsSync(extra)) Object.assign(lanes, await (await import(pathToFileURL(extra).href)).default({ repo, dir, noNative }));
   const ref = split(lanes["js"].stdout).results;
   const receipt = { app, node: process.version, platform: `${process.platform}-${process.arch}`, cpus: os.cpus().length, cpu: os.cpus()[0]?.model, date: new Date().toISOString(), results: ref, lanes: {} };
   for (const [name, lane] of Object.entries(lanes)) {
@@ -95,7 +96,8 @@ for (const app of apps.length ? apps : APPS) {
       match: JSON.stringify(results) === JSON.stringify(ref),
       ...(JSON.stringify(results) === JSON.stringify(ref) ? {} : { results }),
       times, ...(lane.bytes ? { bytes: lane.bytes } : {}), ...(lane.compileMs ? { compileMs: Math.round(lane.compileMs) } : {}),
-      ...(lane.note ? { note: lane.note } : {}),
+      ...(lane.note ? { note: lane.note } : {}), ...(lane.runs ? { runs: lane.runs } : {}),
+      ...(lane.capabilities ? { capabilities: lane.capabilities, explainCapabilities: lane.explainCapabilities } : {}),
     };
   }
   fs.writeFileSync(path.join(here, "receipts", `${app}.json`), JSON.stringify(receipt, null, 2) + "\n");

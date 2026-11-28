@@ -1,3 +1,4 @@
+// This file was modified from scriptc (Apache-2.0); see MODIFICATIONS.md.
 import type { IrExpr, IrFunction, IrModule, IrStmt } from "./ir.js";
 import {
   eachNodeOfKinds,
@@ -23,11 +24,12 @@ type Literal = (IrExpr & { kind: "numLit" }) | (IrExpr & { kind: "boolLit" });
  * the store carry the frontend's initialization flag (`initFlag`) or a TDZ
  * sentinel, and those globals are left alone. The store stays, so module
  * namespace views and debuggers still find the value in the global. Library
- * builds keep their globals: a host may observe them across the boundary.
- * `nodes`, an index of `mod`, gives the reads and writes without walking
- * the bodies. */
+ * builds fold too: a host reaches a library only through its exports, which
+ * run after the init entry has stored every such global (the profile's
+ * contract), and the stores stay. `nodes`, an index of `mod`, gives the
+ * reads and writes without walking the bodies. */
 export function foldConstantGlobals(mod: IrModule, nodes?: IrNodeIndex): IrModule {
-  if (mod.lib || !mod.globals?.length) return mod;
+  if (!mod.globals?.length) return mod;
   const candidates = new Set<string>();
   for (const g of mod.globals)
     if (

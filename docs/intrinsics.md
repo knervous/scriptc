@@ -151,7 +151,7 @@ The split exists because the compiler cannot compile `Math` used as a value, so 
 Every operation is the matching `Atomics` call. WasmGC compiles them to the threads proposal's atomic instructions on module memory, and native code to the runtime's atomics.
 
 - **threads=shared:** the cells live in a `SharedArrayBuffer` and coordinate workers.
-- **threads=off:** the same code runs on one thread with the same results. `wait` returns `"not-equal"` or `"timed-out"` instead of blocking, and `notify` wakes nobody and returns 0. The job system in `benchmarks/intrinsics/atomics-blur` runs its jobs through `createTaskRing`'s owner-thread drain in this mode, and its output matches the threaded run.
+- **threads=off:** the same code runs on one thread with the same results. `wait` returns `"not-equal"` or `"timed-out"` instead of blocking, and `notify` wakes nobody and returns 0. The job system in `benchmarks/intrinsics/blur` runs its jobs through `createTaskRing`'s owner-thread drain in this mode, and its output matches the threaded run.
 
 `Atomics.wait` is refused on the browser target, because a page's thread must not block. A page waits from JavaScript with `Atomics.waitAsync`.
 

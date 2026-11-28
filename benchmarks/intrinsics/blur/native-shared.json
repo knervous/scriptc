@@ -1,0 +1,21 @@
+{
+  "profile_format": 1,
+  "name": "blur-threads",
+  "entry": "shared.ts",
+  "emission": "llvm",
+  "abi": {
+    "prefix": "blur_",
+    "init_symbol": "blur_init",
+    "sink_register_symbol": "blur_set_panic_sink",
+    "collect_symbol": "blur_collect",
+    "result_reset_symbol": null,
+    "localize_runtime": false,
+    "instance_per_thread": true
+  },
+  "exports": [
+    { "export": "fill", "symbol": "blur_fill", "params": ["mutable-bytes"], "returns": "void" },
+    { "export": "reset", "symbol": "blur_reset", "params": ["mutable-bytes"], "returns": "void" },
+    { "export": "work", "symbol": "blur_work", "params": ["mutable-bytes", "mutable-bytes", "mutable-bytes", "mutable-bytes"], "returns": "f64" },
+    { "export": "checksum", "symbol": "blur_checksum", "params": ["mutable-bytes"], "returns": "f64" }
+  ]
+}

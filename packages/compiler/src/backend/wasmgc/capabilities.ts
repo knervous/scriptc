@@ -265,9 +265,12 @@ export function resolvedRecord(mode: CapabilityMode, uses: CapabilityUses, varia
     ...(uses.intrinsics?.length ? { intrinsics: [...uses.intrinsics] } : {}) };
 }
 
-/** The mode a module is built under: a program importing the strict-math library is math=strict whatever was asked. */
+/** The mode a module is built under: a program importing the strict-math library is math=strict whatever was asked,
+ * and a module on a shared link memory (wasmLink.memory.shared) is threads=shared unless it asked for auto. */
 export function effectiveMode(mode: CapabilityMode, uses: CapabilityUses): CapabilityMode {
-  return uses.intrinsics?.includes("math") && mode.math !== "strict" ? { ...mode, math: "strict" } : { ...mode };
+  const out = uses.intrinsics?.includes("math") && mode.math !== "strict" ? { ...mode, math: "strict" as const } : { ...mode };
+  if (uses.sharedMemory && out.threads === "off") out.threads = "shared";
+  return out;
 }
 
 /** How each intrinsic library the program imports is provided (--explain-capabilities; docs/intrinsics.md). */

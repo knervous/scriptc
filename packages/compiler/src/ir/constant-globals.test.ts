@@ -93,3 +93,19 @@ test("immutable globals stored once with a literal read as that literal", () => 
   expect(folded.functions[0]).toBe(mod.functions[0]);
   expect(mod.functions[1]!.body[0]).not.toBe(body);
 });
+
+test("a library module folds its constant globals too", () => {
+  const mod: IrModule = {
+    irVersion: 17,
+    sourceFile: "constant-globals.ts",
+    entry: "%init",
+    functions: [fn("%init", [assign("%g.W", num(1024))]), fn("width", [ret(ref("%g.W"))])],
+    classes: [],
+    records: [],
+    unions: [],
+    globals: [global("%g.W")],
+    lib: { exports: [{ symbol: "w_width", fnName: "width", params: [], returns: "f64" }], initSymbol: "w_init", sinkRegisterSymbol: "w_sink", collectSymbol: "w_collect" } as unknown as NonNullable<IrModule["lib"]>,
+  };
+  const body = foldConstantGlobals(mod).functions.find((f) => f.name === "width")!.body[0]!;
+  expect(body.kind === "return" && body.value?.kind === "numLit" ? body.value.value : null).toBe(1024);
+});

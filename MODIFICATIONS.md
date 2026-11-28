@@ -2,7 +2,7 @@
 
 This tree is a derivative of scriptc (https://github.com/vercel-labs/scriptc), licensed under the Apache License, Version 2.0 (LICENSE). It is compared here with upstream commit `97248e92994ff55f7009e0057700241b9109a35e`. The LLVM backend (`packages/compiler/src/backend/llvm`), the IR (`packages/compiler/src/ir`), the runtime (`packages/runtime` and the runtime and LLVM packs) and `native/llvm-codegen` track upstream at that commit, with the changes listed below. The frontend (`packages/compiler/src/frontend`), the compiler's unit and integration tests, the test corpus and fixtures, the compatibility inventory and the documentation are this fork's own and follow an earlier upstream state, so upstream's newer tests and documentation are not included.
 
-As section 4(b) of the license requires, the files below carry changes. 1134 files are modified from that upstream commit and 3461 files are new; 23267 upstream files are not part of this tree (see "Removed files"). Each modified source file of the compiler, the runtime and the repository tooling also says so in its first comment line.
+As section 4(b) of the license requires, the files below carry changes. 1136 files are modified from that upstream commit and 3475 files are new; 23267 upstream files are not part of this tree (see "Removed files"). Each modified source file of the compiler, the runtime and the repository tooling also says so in its first comment line.
 
 ## Modified files
 
@@ -447,6 +447,8 @@ As section 4(b) of the license requires, the files below carry changes. 1134 fil
 - `packages/compiler/src/ir/char-unit-locals.test.ts`
 - `packages/compiler/src/ir/codec.generated.ts`
 - `packages/compiler/src/ir/codec.test.ts`
+- `packages/compiler/src/ir/constant-globals.test.ts`
+- `packages/compiler/src/ir/constant-globals.ts`
 - `packages/compiler/src/ir/fields.generated.ts`
 - `packages/compiler/src/ir/function-references.test.ts`
 - `packages/compiler/src/ir/function-references.ts`
@@ -1216,10 +1218,20 @@ As section 4(b) of the license requires, the files below carry changes. 1134 fil
 - `benchmarks/intrinsics/bitset/baseline.ts`
 - `benchmarks/intrinsics/bitset/main.ts`
 - `benchmarks/intrinsics/blur/baseline.ts`
+- `benchmarks/intrinsics/blur/browser-run.mjs`
 - `benchmarks/intrinsics/blur/kernel.ts`
 - `benchmarks/intrinsics/blur/lanes.mjs`
 - `benchmarks/intrinsics/blur/main.ts`
+- `benchmarks/intrinsics/blur/native-host.c`
+- `benchmarks/intrinsics/blur/native-shared.json`
+- `benchmarks/intrinsics/blur/shared-layout.mjs`
+- `benchmarks/intrinsics/blur/shared-run.mjs`
+- `benchmarks/intrinsics/blur/shared.ts`
 - `benchmarks/intrinsics/blur/threads.ts`
+- `benchmarks/intrinsics/blur/web/index.html`
+- `benchmarks/intrinsics/blur/web/page.mjs`
+- `benchmarks/intrinsics/blur/web/worker.mjs`
+- `benchmarks/intrinsics/blur/workers.ts`
 - `benchmarks/intrinsics/common/input.ts`
 - `benchmarks/intrinsics/f16-mesh/baseline.ts`
 - `benchmarks/intrinsics/f16-mesh/lanes.mjs`
@@ -2473,6 +2485,7 @@ As section 4(b) of the license requires, the files below carry changes. 1134 fil
 - `packages/compiler/src/backend/wasmgc/async-frame-liveness.test.ts`
 - `packages/compiler/src/backend/wasmgc/async-hoist.ts`
 - `packages/compiler/src/backend/wasmgc/bytes-token.test.ts`
+- `packages/compiler/src/backend/wasmgc/bytes.test.ts`
 - `packages/compiler/src/backend/wasmgc/bytes.ts`
 - `packages/compiler/src/backend/wasmgc/capabilities.test.ts`
 - `packages/compiler/src/backend/wasmgc/capabilities.ts`
@@ -3201,6 +3214,9 @@ As section 4(b) of the license requires, the files below carry changes. 1134 fil
 - `tests/harness/self-hosting-llvm-embedding.ts`
 - `tests/harness/vercel-e2e.test.ts`
 - `tests/harness/web-globals.test.ts`
+- `tests/library-mode/thread-views/lib.ts`
+- `tests/library-mode/thread-views/probe.c`
+- `tests/library-mode/thread-views/profile_t.json`
 - `tests/provenance.mjs`
 - `tests/test262/compile-worker.mts`
 - `tests/wasmgc-browser/.gitignore`

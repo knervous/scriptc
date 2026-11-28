@@ -259,8 +259,13 @@ import { resolveLibraryFences, type LibraryFenceDecl, type ResolvedLibraryFence 
  * FFI edge contract on both sides: inbound host calls range-check in the
  * marshalled wrapper (values past ±(2^53−1) cannot ride f64 exactly — the
  * SC4012 host-contract trap), and internal call sites must PROVE the
- * argument whole-in-range at compile time (library/int-infer.ts). */
-export const LIB_PARAM_CLASSES = ["f64", "bool", "string", "bytes", "u8", "u32", "i32", "i64", "u64"] as const;
+ * argument whole-in-range at compile time (library/int-infer.ts).
+ * mutable-bytes is (pointer, length) like bytes, but the Uint8Array views
+ * the host's memory in place instead of a copy: writes reach the host, and
+ * another thread's instance may view the same memory (Atomics on views of
+ * it). The host keeps the memory alive for the call; a view retained past
+ * the call must not outlive it. */
+export const LIB_PARAM_CLASSES = ["f64", "bool", "string", "bytes", "mutable-bytes", "u8", "u32", "i32", "i64", "u64"] as const;
 /** Marshalling classes legal in RETURN position: the value classes, void,
  * and ask 4's i64/u64 — an integer RETURN compiles only when every value
  * reaching it is PROVEN whole and in range (prove-or-refuse; the wrapper's

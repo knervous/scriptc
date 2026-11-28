@@ -1,6 +1,6 @@
 ## Reading the results
 
-- **Correctness held everywhere.** Each app's six lanes, plus the extra ones, printed the same checksums, sizes and hashes: physics' state hashes, the codecs' round trips and the blur's image under four threads, one thread and the task ring.
+- **Correctness held everywhere.** Each app's six lanes, plus the extra ones, printed the same checksums, sizes and hashes: physics' state hashes, the codecs' round trips and the blur's image on every thread lane (JavaScript, WasmGC under Node and in Chromium, native) and through the task ring.
 - **int (hash, bitset, lz4, qoi).**
   - On WasmGC the library pays off where the baseline's JavaScript idiom compiles badly (per-kernel tables):
     - xxHash32's rotates: 317.9 ms as shift pairs, 89.4 ms as `i32.rotl`;
@@ -24,15 +24,18 @@
   - The software path in plain JavaScript is 10×, and WasmGC's conversion in wasm is 8.8×. It works on the double's bits with `i64.reinterpret`; a first version through a Float64Array scratch word took 1072 ms.
   - Natively, the runtime's C conversion is 2.7×; F16C and NEON instructions are a later item.
   - The baseline has no compiled lanes: neither backend lowers `Float16Array` or `Math.f16round` (SC2020). This gap is why the library exists.
-- **atomics (blur).**
-  - Four worker threads over shared memory, claiming bands from a `WorkCounter`, ran at 0.31× of the one-thread JavaScript lane. That lane was slow in this receipt (258 ms; 141 ms in an earlier run), so the speedup against `js+fallback` (147 ms), 0.54×, is the steadier figure.
-  - The task ring's owner-thread drain (threads=off) gives the same image at 0.65×.
-  - The compiled lanes run the claim loop on one thread. Atomic adds on unshared memory cost nothing measurable (native 90.5 against 76.7 ms, near the run-to-run noise).
-  - The WasmGC blur is slow in both versions (3×), from typed-array element access in the inner loop, not from the atomics.
+- **atomics (blur).** The Threads table has the thread lanes, each the median of three runs on this 4-core machine, against single-threaded JavaScript run the same way (137 ms for both `baseline.ts` and `main.ts`).
+  - JavaScript with four worker threads over `SharedArrayBuffer`s ran at 0.39× (53 ms).
+  - The task ring's owner-thread drain (threads=off) gives the same image at 1.25×.
+  - WasmGC threads=shared: one instance of `shared.ts` per worker, every instance importing one shared `WebAssembly.Memory` that holds the image, the scratch rows and the counter cell, which the host passes to the link exports as byte spans. Under Node it scales 562, 286 and 149 ms for 1, 2 and 4 workers (1.9× and 3.8×). In headless Chromium 158, cross-origin isolated with one module Worker per thread, it is 432, 219 and 120 ms.
+  - Four WasmGC workers only reach single-threaded JavaScript (1.08× under Node, 0.87× in Chromium), because the WasmGC kernel is about 4× slower than V8's JavaScript on one thread. The cost is in the kernel's typed-array element access (the single-thread finding), not in the atomics or the threads: the threads=off build is about as slow (658 ms).
+  - Native threads: `shared.ts` built as a thread-instanced library (`abi.instance_per_thread`), with a small pthreads host (`native-host.c`) that keeps the buffers in its own memory and passes them as `mutable-bytes`. One thread runs at the native executable's speed (66 against 69 ms), and 2 and 4 threads at 34 and 22 ms (0.25× and 0.16× of JavaScript, 3.0× over one thread at four).
+  - Three compiler gaps stood in the way and are fixed, each with its test. A link build on a shared memory recorded `threads=off`; it now records `threads=shared`, and so does `--explain-capabilities`. Instances on one shared memory each kept their own allocator heap top, so they could hand out the same blocks. And a library build left its module constants as globals inside every loop, which made the native kernel 3× slower as a library (212 ms) than as an executable (72 ms).
+  - The native lane is a library, not `workers.ts` compiled: the native frontend does not lower `worker_threads` yet (SC2020 on `new Worker`).
 - **Sizes.** The libraries add little to a module: the hash app is 6.5 KiB of WasmGC with the int library against 7.8 KiB for its baseline, because lowered calls emit no bodies. Native binaries are dominated by the runtime (about 440 KiB).
 
 ## What was not measured
 
-- The WasmGC threads=shared lane: a WasmGC module with shared memory needs a wasm link (`wasmLink.memory.shared`) and worker instances, and the blur app does not build that. Its WasmGC lane is threads=off.
-- Browsers: every WasmGC lane ran under Node 24's V8, and no page lane ran (no app needs the DOM).
-- Other machines: these are single runs on one 4-core x64 Linux container, with timing noise of about ±10% (the `js` lanes vary most between runs).
+- Thread lanes for the other apps. None of them splits without changing its output: xxHash32 and LZ4 over independent chunks or blocks give different hashes and streams than over the whole input, so their checksums could not match the single-threaded lanes.
+- Browsers: apart from the blur's Chromium row, every WasmGC lane ran under Node 24's V8.
+- Other machines: these are runs on one 4-core x64 Linux container, single runs except in the Threads table, with timing noise of about ±10% (the `js` lanes vary most between runs: the blur's single run took 161 ms, and its three runs 128 to 140).

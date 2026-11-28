@@ -114,9 +114,15 @@ export function bytesRuntime(ctx: BytesContext) {
       m.addMemoryImport("0", imported.module, imported.name);
     } else if (ctx.fixedPages !== undefined) m.setMemory(ctx.fixedPages, ctx.fixedPages, "memory");
     else m.setMemory(1, 65536, "memory");
-    m.addGlobal("$heap.top", i32, true, m.i32.const(HEAP_START));
+    if (!sharedHeap) m.addGlobal("$heap.top", i32, true, m.i32.const(HEAP_START));
   };
   const foreignAlloc = ctx.link?.allocator;
+  /** A shared link memory without a linked allocator: every instance on the memory (one per worker) runs this
+   * allocator, so its state lives in the memory, not in instance globals. The heap top is the word at HEAP_TOP (0
+   * until the first allocation: HEAP_START), and a spin lock at HEAP_LOCK (i32 compare-exchange) guards alloc and
+   * free. */
+  const sharedHeap = !!ctx.link?.memory?.shared && !foreignAlloc;
+  const HEAP_TOP = 128, HEAP_LOCK = 132;
 
   /** alloc(bytes) → zeroed, 16-byte-aligned payload address. */
   const alloc = () => defineHelper("$mem.alloc", () => {
@@ -130,22 +136,30 @@ export function bytesRuntime(ctx: BytesContext) {
         m.local.get(1, i32)], i32));
       return;
     }
-    const n = () => m.local.get(0, i32), cls = () => m.local.get(1, i32), block = () => m.local.get(2, i32), top = () => m.global.get("$heap.top", i32);
+    const n = () => m.local.get(0, i32), cls = () => m.local.get(1, i32), block = () => m.local.get(2, i32);
+    const top = () => sharedHeap ? m.i32.load(HEAP_TOP, 4, m.i32.const(0)) : m.global.get("$heap.top", i32);
+    const setTop = (v: number) => sharedHeap ? m.i32.store(HEAP_TOP, 4, m.i32.const(0), v) : m.global.set("$heap.top", v);
+    const unlock = sharedHeap ? [m.i32.atomic.store(HEAP_LOCK, m.i32.const(0), m.i32.const(0))] : [];
     m.addFunction("$mem.alloc", binaryen.createType([i32]), i32, [i32, i32], m.block(null, [
       // class = ceil(log2(n + 16)), at least 32-byte blocks
       m.local.set(1, m.i32.sub(m.i32.const(32), m.i32.clz(m.i32.add(n(), m.i32.const(15))))),
       m.if(m.i32.lt_u(cls(), m.i32.const(5)), m.local.set(1, m.i32.const(5))),
+      ...(sharedHeap ? [
+        m.loop("$heap.lock", m.br("$heap.lock", m.i32.atomic.rmw.cmpxchg(HEAP_LOCK, m.i32.const(0), m.i32.const(0), m.i32.const(1)))),
+        m.if(m.i32.eqz(top()), setTop(m.i32.const(HEAP_START))),
+      ] : []),
       m.local.set(2, m.i32.load(0, 4, m.i32.shl(cls(), m.i32.const(2)))),
       m.if(block(),
         m.i32.store(0, 4, m.i32.shl(cls(), m.i32.const(2)), m.i32.load(4, 4, block())),
         m.block(null, [
           m.local.set(2, top()),
-          m.global.set("$heap.top", m.i32.add(top(), m.i32.shl(m.i32.const(1), cls()))),
+          setTop(m.i32.add(top(), m.i32.shl(m.i32.const(1), cls()))),
           m.if(m.i32.gt_u(top(), m.i32.shl(m.memory.size(), m.i32.const(16))),
             m.if(m.i32.eq(m.memory.grow(m.i32.shr_u(m.i32.add(m.i32.sub(top(), m.i32.shl(m.memory.size(), m.i32.const(16))), m.i32.const(65535)), m.i32.const(16))), m.i32.const(-1)),
               m.unreachable())),
         ])),
       m.i32.store(0, 4, block(), cls()),
+      ...unlock,
       m.memory.fill(m.i32.add(block(), m.i32.const(16)), m.i32.const(0), n()),
       m.i32.add(block(), m.i32.const(16)),
     ], i32));
@@ -160,8 +174,10 @@ export function bytesRuntime(ctx: BytesContext) {
     }
     const block = () => m.i32.sub(m.local.get(0, i32), m.i32.const(16)), head = () => m.i32.shl(m.i32.load(0, 4, block()), m.i32.const(2));
     m.addFunction("$mem.free", binaryen.createType([i32]), binaryen.none, [], m.block(null, [
+      ...(sharedHeap ? [m.loop("$heap.lock", m.br("$heap.lock", m.i32.atomic.rmw.cmpxchg(HEAP_LOCK, m.i32.const(0), m.i32.const(0), m.i32.const(1))))] : []),
       m.i32.store(4, 4, block(), m.i32.load(0, 4, head())),
       m.i32.store(0, 4, head(), block()),
+      ...(sharedHeap ? [m.i32.atomic.store(HEAP_LOCK, m.i32.const(0), m.i32.const(0))] : []),
     ]));
     m.addFunctionExport("$mem.free", "bytesFree");
   });

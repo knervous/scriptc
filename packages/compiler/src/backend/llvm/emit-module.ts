@@ -1022,6 +1022,9 @@ export function emitModuleParts(emitter: LlEmitter): string[] {
     if (emitter.mod.lib.exports.some((e) => e.params.includes("bytes"))) {
       emitter.declare(`declare ptr @scr_library_bytes_in(ptr, ${emitter.sizeType}, ptr)`);
     }
+    if (emitter.mod.lib.exports.some((e) => e.params.includes("mutable-bytes"))) {
+      emitter.declare(`declare ptr @scr_bytes_from_external(ptr, ${emitter.sizeType})`);
+    }
     if (emitter.mod.lib.exports.some((e) => e.params.includes("i64"))) {
       emitter.declare(`declare double @scr_library_i64_in(i64, ptr)`);
     }
@@ -2933,6 +2936,12 @@ export function emitLibDefs(
           body.push(
             `  %c${i} = call ptr @scr_library_bytes_in(ptr %a${i}_ptr, ${emitter.sizeType} %a${i}_len, ptr @sc_lib_bytes_trap_${e.symbol})`,
           );
+          args.push(`ptr %c${i}`);
+          break;
+        case "mutable-bytes":
+          // A Uint8Array over the host's memory in place (scr_bytes_from_external: never freed by the runtime).
+          params.push(`ptr %a${i}_ptr`, `${emitter.sizeType} %a${i}_len`);
+          body.push(`  %c${i} = call ptr @scr_bytes_from_external(ptr %a${i}_ptr, ${emitter.sizeType} %a${i}_len)`);
           args.push(`ptr %c${i}`);
           break;
         case "cstring":

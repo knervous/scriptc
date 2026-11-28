@@ -14,7 +14,19 @@ Times are milliseconds measured inside each program around the work only (no sta
 | snapshot | 18.0 (1.00×) ✓ | 21.5 (1.19×) ✓ | 21.4 (1.19×) ✓ | 29.9 (1.66×) ✓ | 5.2 (0.29×) ✓ | 13.3 (0.74×) ✓ |  |
 | particles | 49.3 (1.00×) ✓ | 35.8 (0.73×) ✓ | 82.6 (1.68×) ✓ | 98.7 (2.00×) ✓ | 12.4 (0.25×) ✓ | 21.1 (0.43×) ✓ |  |
 | f16-mesh | 39.2 (1.00×) ✓ | 407 (10.39×) ✓ | n/a | 344 (8.78×) ✓ | n/a | 106 (2.70×) ✓ | js+fallback (engine): 66.3 (1.69×) ✓ |
-| blur | 258 (1.00×) ✓ | 147 (0.57×) ✓ | 776 (3.01×) ✓ | 809 (3.14×) ✓ | 76.7 (0.30×) ✓ | 90.5 (0.35×) ✓ | js threads=shared: 79.0 (0.31×) ✓<br>js threads=off (task ring): 167 (0.65×) ✓ |
+| blur | 161 (1.00×) ✓ | 144 (0.89×) ✓ | 683 (4.24×) ✓ | 658 (4.08×) ✓ | 64.1 (0.40×) ✓ | 69.0 (0.43×) ✓ |  |
+
+## Threads
+
+Machine: 4 cores (Intel(R) Xeon(R) Processor @ 2.10GHz). Every lane here is the median of its recorded runs (`runs` in the receipt), and each ratio is over the JS column: `baseline.ts` under Node, run the same way. The JS 4 workers, WasmGC and native lanes run the kernel of `main.ts` (the JS (main.ts) column: bands claimed from a WorkCounter) on one shared image, except WasmGC threads=off and native, which are the main table's single runs of main.ts; the WasmGC shared lanes run under Node's worker_threads, and the Chromium row runs the same module in headless Chromium, cross-origin isolated, one module Worker per thread.
+
+| App | JS | JS (main.ts) | JS 4 workers | WasmGC threads=off | WasmGC shared 1 | WasmGC shared 2 | WasmGC shared 4 | native | native threads 1 | native threads 2 | native threads 4 |
+|---|---|---|---|---|---|---|---|---|---|---|---|
+| blur | 137 (1.00×) ✓ | 137 (1.00×) ✓ | 53.2 (0.39×) ✓ | 658 (4.79×) ✓ | 562 (4.09×) ✓ | 286 (2.08×) ✓ | 149 (1.08×) ✓ | 69.0 (0.50×) ✓ | 65.8 (0.48×) ✓ | 33.8 (0.25×) ✓ | 22.2 (0.16×) ✓ |
+| blur, Chromium | 137 (1.00×) ✓ |  |  |  | 432 (3.14×) ✓ | 219 (1.59×) ✓ | 120 (0.87×) ✓ |  |  |  |  |
+
+- **blur**: the WasmGC shared build records `wgc-cap/1;eh=exnref;views=resizable;relaxed=0;threads=shared`. The task ring's owner-thread drain (threads=off): 171 ms (1.25×) ✓.
+
 
 ## Per kernel
 
@@ -71,7 +83,7 @@ Times are milliseconds measured inside each program around the work only (no sta
 | snapshot | 6.8 KiB | 8.2 KiB | 435.2 KiB | 433.7 KiB |
 | particles | 3.8 KiB | 4.2 KiB | 356.3 KiB | 406.5 KiB |
 | f16-mesh | n/a | 8.6 KiB | n/a | 435.8 KiB |
-| blur | 2.6 KiB | 3.3 KiB | 390.8 KiB | 402.2 KiB |
+| blur | 2.6 KiB | 3.3 KiB | 390.9 KiB | 402.2 KiB |
 
 ## Lanes that did not run
 

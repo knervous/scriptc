@@ -27,6 +27,7 @@ function libClassFits(cls: string, t: IrType): boolean {
     case "string":
       return t.kind === "string";
     case "bytes":
+    case "mutable-bytes":
       return t.kind === "bytes" && t.elem === "u8";
     default: // f64 and the u8/u32/i32 plumbing classes
       return t.kind === "f64";

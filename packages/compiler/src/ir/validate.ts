@@ -389,7 +389,7 @@ export function validateModule(mod: IrModule): IrValidationError[] {
           ? t.kind === "bool"
           : cls === "string" || cls === "cstring"
             ? t.kind === "string"
-            : cls === "bytes"
+            : cls === "bytes" || cls === "mutable-bytes"
               ? t.kind === "bytes" && t.elem === "u8"
               : t.kind === "f64"; // f64 + the integer plumbing classes
       e.params.forEach((cls, i) => {

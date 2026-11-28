@@ -103,3 +103,18 @@ test("a module importing the strict-math library is built math=strict and record
   expect(explain).toMatch(/math: strict \(the program imports the strict-math library\); relaxed SIMD off; NaNs stored to memory canonical/);
   expect(explain).toMatch(/intrinsics: int: i32\/i64 instructions/);
 });
+
+test("a module on a shared link memory is built threads=shared and records it", () => {
+  const uses: CapabilityUses = { ...NONE, memory: true, sharedMemory: true, intrinsics: ["atomics"] };
+  const record = resolvedRecord(BASELINE_MODE, uses, "preferred");
+  expect(record.key).toBe("wgc-cap/1;eh=exnref;views=resizable;relaxed=0;threads=shared");
+  expect(record.mode.threads).toBe("shared");
+  expect(record.requires).toEqual(expect.arrayContaining(["shared-memory", "cross-origin-isolation"]));
+  expect(decodeCapabilitySection(encodeCapabilitySection(record))?.mode.threads).toBe("shared");
+  const explain = planVariants({ preset: "auto" }, BASELINE_MODE, uses, []).explain.join("\n");
+  expect(explain).toMatch(/preferred: wgc-cap\/1;eh=exnref;views=resizable;relaxed=0;threads=shared/);
+  // threads=auto keeps its mode: the host picks per deployment.
+  expect(resolvedRecord({ ...BASELINE_MODE, threads: "auto" }, uses, "preferred").mode.threads).toBe("auto");
+  // An unshared memory stays threads=off.
+  expect(resolvedRecord(BASELINE_MODE, { ...uses, sharedMemory: false }, "preferred").mode.threads).toBe("off");
+});
