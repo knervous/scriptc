@@ -125,6 +125,16 @@ function withNotice(file, bare) {
   return Buffer.from(shebang + commentFor(file) + text.slice(shebang.length));
 }
 
+// A link git checked out as a plain file (core.symlinks false, the default on Windows) holds its target as text.
+function readLink(full) {
+  try {
+    return fs.readlinkSync(full);
+  } catch (e) {
+    if (e.code === "EINVAL" || e.code === "UNKNOWN") return fs.readFileSync(full, "utf8");
+    throw e;
+  }
+}
+
 const upstream = readManifest();
 const modified = [], added = [], noticeChanges = [];
 const present = new Set();
@@ -132,7 +142,7 @@ for (const { file, mode } of trackedFiles()) {
   present.add(file);
   const full = path.join(root, file);
   const link = mode === "120000";
-  const bytes = link ? Buffer.from(fs.readlinkSync(full)) : fs.readFileSync(full);
+  const bytes = link ? Buffer.from(readLink(full)) : fs.readFileSync(full);
   const { bare, noticed } = link ? { bare: bytes, noticed: false } : stripNotice(file, bytes);
   const theirs = upstream.files.get(file);
   const isModified = theirs !== undefined && theirs.object !== blobId(bare);
