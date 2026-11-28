@@ -33,7 +33,8 @@ $ npx scriptw run app.wasm
 - `scriptw run <module.wasm>` runs a built module, or the first variant of its set that this Node runs.
 - `--release` compiles a release build.
 - `--capabilities <list>`, `--targets <list>` and `--explain-capabilities` choose and explain the capability modes (see [Capabilities](#capabilities)).
-- `--browser` compiles a page program: the DOM, timers and typed `host:` modules are in scope. Load it in a page with `scriptw/host` (below).
+- `--browser` compiles a page program: the DOM, timers and typed `host:` modules are in scope. Load it in a page with `scriptw/host` (below). Its dynamic values use the native WasmGC object model, which UI libraries and frameworks need.
+- `--conditions <list>` adds package export conditions, such as `dom-stream`. The `wasmgc` condition is always on: a package that maps it to TypeScript source (`"wasmgc": "./src/index.ts"`, as `@scriptw/lui` does) is compiled into the module from that source.
 - `scriptw --version` prints the package version, the compiler version and the source commit.
 
 ## Running a module in a web page
@@ -122,7 +123,7 @@ const result = await compile("src/app.ts", { outPath: "dist/app.wasm", browser: 
 if (!result.ok) for (const d of result.diagnostics) console.error(formatDiagnostic(d));
 ```
 
-`compile` takes `capabilities` and `targets` as the CLI does. It resolves to `{ ok: true, wasmPath, hostSidecarPath, capabilitiesPath, capabilities, variants, variantsPath?, explainCapabilities }` or `{ ok: false, diagnostics }`, where each diagnostic has a `message` and, when known, a `code`, `file`, `line` and `hint`. It runs under Node only; type declarations ship for both entry points.
+`compile` takes `capabilities`, `targets` and `conditions` as the CLI does, and `dynModel: "engine"` with `browser` for the smallest page module (dynamic values as engine values behind host calls; UI libraries need the default, `"native"`). It resolves to `{ ok: true, wasmPath, hostSidecarPath, capabilitiesPath, capabilities, variants, variantsPath?, explainCapabilities }` or `{ ok: false, diagnostics }`, where each diagnostic has a `message` and, when known, a `code`, `file`, `line` and `hint`. It runs under Node only; type declarations ship for both entry points.
 
 ## Capabilities
 
@@ -194,7 +195,7 @@ The same table program (js-framework-benchmark's operations) was measured on fou
 | Svelte 5 | per-call, published | 2.48 | 2.55 | 2.46 | 8.60 | 3.05 | 2.66 | 2.94 | 1.78 |
 
 - **SolidJS** fits best: fine-grained updates, templates the bridge clones in one command, and a runtime small enough to type. It is also the fastest in absolute terms, as JavaScript and compiled.
-- **LUI** (`@scriptw/lui`) is written for this compiler and needs no port; its compiled ratios are close to Solid's.
+- **LUI** (`@scriptw/lui` on npm) is written for this compiler and needs no port; its compiled ratios are close to Solid's. `scriptw build --browser` compiles it from the installed package, and `--conditions dom-stream` puts it on the DOM stream.
 - **React** runs from a strict TypeScript port of its client packages (`packages/react-ts`).
 - **Svelte 5** compiles from its published runtime, untyped, so it pays dynamic dispatch throughout.
 

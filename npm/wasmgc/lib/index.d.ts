@@ -12,6 +12,12 @@ export interface CompileOptions {
   capabilities?: string;
   /** The engines to support. Default `chrome>=137,firefox>=134,safari>=26.2,node>=24.15`. */
   targets?: string | string[];
+  /** Package export and import conditions to add, such as `dom-stream`. `wasmgc` is always on: a package that maps it
+   * to TypeScript source (`"wasmgc": "./src/index.ts"`) is compiled into the module from that source. */
+  conditions?: string[];
+  /** With `browser`: how dynamic values are represented. `native` (the default) compiles them as WasmGC values, which
+   * UI libraries and frameworks need; `engine` keeps them as engine values behind host calls, for the smallest module. */
+  dynModel?: "native" | "engine";
 }
 
 export type Requirement =

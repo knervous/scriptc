@@ -21,6 +21,13 @@ export async function compile(entry, options = {}) {
     outputKind: "wasmgc",
     release: options.release === true,
     ...(options.browser === true ? { browser: true } : {}),
+    // A page program's dynamic values use the native WasmGC object model, the one UI packages written for WasmGC
+    // (@scriptw/lui) and the framework builds compile with; `dynModel: "engine"` keeps them as engine values behind host
+    // calls, for the smallest module. It has no effect without `browser`.
+    ...(options.browser === true ? { dynModel: options.dynModel ?? "native" } : {}),
+    // The `wasmgc` condition lets a package ship TypeScript source for compiled builds beside its JavaScript
+    // (`"wasmgc": "./src/index.ts"`): that source is compiled into the module rather than run as npm JavaScript.
+    conditions: ["wasmgc", ...(options.conditions ?? []).filter((c) => c !== "wasmgc")],
     // The package builds auto capabilities against the default (or given) targets: a compat variant only when a target
     // needs one and the program uses the feature that differs.
     capabilities: options.capabilities ?? "auto",

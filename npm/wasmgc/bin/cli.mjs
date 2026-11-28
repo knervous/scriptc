@@ -19,11 +19,13 @@ import { unsupportedRuntimeMessage } from "../lib/runtime-check.mjs";
 
 const USAGE = `usage:
   scriptw build <entry.ts> [-o <out>] [--target wasmgc | native | native:<platform>] [--release]
-                [--browser] [--capabilities <list>] [--targets <list>] [--explain-capabilities]
+                [--browser] [--conditions <list>] [--capabilities <list>] [--targets <list>] [--explain-capabilities]
                 [--host auto|<set>|quickjs] [--host-features <list>] [--explain-host] [--host-lib <archive>]
   scriptw run <entry.ts | module.wasm> [--target wasmgc | native] [--release] [--browser] ...
 
 --target wasmgc (the default): build writes <out.wasm> and its host sidecar <out.wasm.host.json>.
+--conditions <list> (wasmgc): package export conditions to add to wasmgc, types, import and default,
+  comma-separated (for example dom-stream).
 --capabilities <list> (wasmgc): auto (the default), baseline or compat, and/or eh=exnref|legacy,
   views=resizable|fixed[:<MiB>], [-]relaxed-simd, threads=off|shared|auto, [-]jspi. auto builds one compat
   variant (<out>.compat.wasm, listed in <out.wasm>.variants.json) only when a target needs it.
@@ -72,7 +74,7 @@ if (unsupported !== null) {
 }
 
 let entry, out, release = false, browser = false, host, hostLib, hostFeatures, explainHost = false;
-let capabilities, targets, explainCapabilities = false;
+let capabilities, targets, conditions, explainCapabilities = false;
 let target = "wasmgc";
 for (let i = 0; i < argv.length; i++) {
   const a = argv[i];
@@ -99,7 +101,11 @@ for (let i = 0; i < argv.length; i++) {
     }
     hostFeatures = list.split(",");
   } else if (a === "--explain-host") explainHost = true;
-  else if (a === "--capabilities" || a === "--targets") {
+  else if (a === "--conditions") {
+    const list = argv[++i];
+    if (list === undefined || !/^[A-Za-z0-9_.-]+(,[A-Za-z0-9_.-]+)*$/.test(list)) { console.error("scriptw: --conditions takes a comma-separated list of condition names"); process.exit(2); }
+    conditions = list.split(",");
+  } else if (a === "--capabilities" || a === "--targets") {
     const list = argv[++i];
     if (list === undefined || list.startsWith("--")) { console.error(`scriptw: ${a} takes a comma-separated list`); process.exit(2); }
     if (a === "--capabilities") capabilities = list; else targets = list;
@@ -116,7 +122,7 @@ if (!fs.existsSync(entry)) { console.error(`scriptw: ${entry} does not exist`); 
 const compilerDist = new URL("../packages/compiler/dist/", import.meta.url);
 
 async function build(source, outPath) {
-  const r = await compile(source, { outPath, release, browser, ...(capabilities === undefined ? {} : { capabilities }), ...(targets === undefined ? {} : { targets }) });
+  const r = await compile(source, { outPath, release, browser, ...(conditions === undefined ? {} : { conditions }), ...(capabilities === undefined ? {} : { capabilities }), ...(targets === undefined ? {} : { targets }) });
   if (!r.ok) {
     for (const d of r.diagnostics) console.error(formatDiagnostic(d));
     process.exit(1);
