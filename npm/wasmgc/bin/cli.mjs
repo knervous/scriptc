@@ -19,11 +19,16 @@ import { unsupportedRuntimeMessage } from "../lib/runtime-check.mjs";
 
 const USAGE = `usage:
   scriptw build <entry.ts> [-o <out>] [--target wasmgc | native | native:<platform>] [--release]
-                [--browser] [--host auto|<set>|quickjs] [--host-features <list>] [--explain-host]
-                [--host-lib <archive>]
+                [--browser] [--capabilities <list>] [--targets <list>] [--explain-capabilities]
+                [--host auto|<set>|quickjs] [--host-features <list>] [--explain-host] [--host-lib <archive>]
   scriptw run <entry.ts | module.wasm> [--target wasmgc | native] [--release] [--browser] ...
 
 --target wasmgc (the default): build writes <out.wasm> and its host sidecar <out.wasm.host.json>.
+--capabilities <list> (wasmgc): auto (the default), baseline or compat, and/or eh=exnref|legacy,
+  views=resizable|fixed[:<MiB>], [-]relaxed-simd, threads=off|shared|auto, [-]jspi. auto builds one compat
+  variant (<out>.compat.wasm, listed in <out.wasm>.variants.json) only when a target needs it.
+--targets <list> (wasmgc): the engines to support, default chrome>=137,firefox>=134,safari>=26.2,node>=24.15.
+--explain-capabilities: print the resolved capabilities and why.
 --target native: a native executable for this machine. native:<platform> cross-builds for one of
   ${Object.keys(NATIVE_PLATFORMS).join(", ")}; android-arm64 writes <out>/libmain.so.
 --browser: a page program (DOM, timers, host: modules) for a web page to load with scriptw/host; natively it
@@ -67,6 +72,7 @@ if (unsupported !== null) {
 }
 
 let entry, out, release = false, browser = false, host, hostLib, hostFeatures, explainHost = false;
+let capabilities, targets, explainCapabilities = false;
 let target = "wasmgc";
 for (let i = 0; i < argv.length; i++) {
   const a = argv[i];
@@ -93,6 +99,11 @@ for (let i = 0; i < argv.length; i++) {
     }
     hostFeatures = list.split(",");
   } else if (a === "--explain-host") explainHost = true;
+  else if (a === "--capabilities" || a === "--targets") {
+    const list = argv[++i];
+    if (list === undefined || list.startsWith("--")) { console.error(`scriptw: ${a} takes a comma-separated list`); process.exit(2); }
+    if (a === "--capabilities") capabilities = list; else targets = list;
+  } else if (a === "--explain-capabilities") explainCapabilities = true;
   else if (a === "--host-lib") hostLib = path.resolve(argv[++i]);
   else if (a.startsWith("-")) { console.error(`scriptw: unknown option ${a}\n${USAGE}`); process.exit(2); }
   else if (entry === undefined) entry = a;
@@ -105,16 +116,35 @@ if (!fs.existsSync(entry)) { console.error(`scriptw: ${entry} does not exist`); 
 const compilerDist = new URL("../packages/compiler/dist/", import.meta.url);
 
 async function build(source, outPath) {
-  const r = await compile(source, { outPath, release, browser });
+  const r = await compile(source, { outPath, release, browser, ...(capabilities === undefined ? {} : { capabilities }), ...(targets === undefined ? {} : { targets }) });
   if (!r.ok) {
     for (const d of r.diagnostics) console.error(formatDiagnostic(d));
     process.exit(1);
   }
-  return r.wasmPath;
+  if (explainCapabilities) for (const line of r.explainCapabilities) console.error(`scriptw: capabilities: ${line}`);
+  return r;
 }
 
+/** Node 24 and 25 carry WebAssembly.Memory.prototype.toResizableBuffer behind a V8 flag (shipped in Node 26), which
+ * NODE_OPTIONS refuses and v8.setFlagsFromString applies only to new contexts: a module that needs it reruns this
+ * command in a Node started with the flag. */
+const RAB_FLAG = "--experimental-wasm-rab-integration";
+const rabFlagAvailable = () => { const major = Number(process.versions.node.split(".")[0]); return major === 24 || major === 25; };
+
 async function run(wasmPath) {
-  const { instantiateWasmGc } = await import(new URL("backend/wasmgc/host.js", compilerDist));
+  const host = await import(new URL("backend/wasmgc/host.js", compilerDist));
+  const { instantiateWasmGc, chooseVariant, requiredCapabilities, detectCapabilities } = host;
+  const caps = detectCapabilities();
+  const required = requiredCapabilities(new Uint8Array(fs.readFileSync(wasmPath)));
+  if (required?.requires.includes("resizable-memory-buffer") && !caps["resizable-memory-buffer"] && rabFlagAvailable()
+    && !process.execArgv.includes(RAB_FLAG) && process.env.SCRIPTW_RAB_RERUN !== "1") {
+    const r = spawnSync(process.execPath, [RAB_FLAG, ...process.execArgv, process.argv[1], "run", wasmPath], { stdio: "inherit", env: { ...process.env, SCRIPTW_RAB_RERUN: "1" } });
+    process.exitCode = r.status ?? 1;
+    return;
+  }
+  // A variant set beside the module: the first variant this engine runs.
+  const setPath = `${wasmPath}.variants.json`;
+  if (fs.existsSync(setPath)) wasmPath = path.join(path.dirname(wasmPath), chooseVariant(JSON.parse(fs.readFileSync(setPath, "utf8")), caps).file);
   const bytes = fs.readFileSync(wasmPath);
   let uncaught = null;
   const m = await instantiateWasmGc(bytes, {
@@ -206,6 +236,10 @@ if (nativeTarget?.error) {
   console.error(`scriptw: ${nativeTarget.error}`);
   process.exit(2);
 }
+if (nativeTarget !== null && (capabilities !== undefined || targets !== undefined || explainCapabilities)) {
+  console.error("scriptw: --capabilities, --targets and --explain-capabilities apply to --target wasmgc");
+  process.exit(2);
+}
 if (nativeTarget === null && (host !== undefined || hostLib !== undefined || hostFeatures !== undefined || explainHost)) {
   console.error("scriptw: --host, --host-features, --explain-host and --host-lib apply to --target native");
   process.exit(2);
@@ -235,14 +269,14 @@ if (nativeTarget !== null) {
   }
 } else if (command === "build") {
   const target = path.resolve(out ?? entry.replace(/\.(m|c)?[jt]sx?$/, "") + ".wasm");
-  await build(entry, target);
-  console.error(`scriptw: wrote ${path.relative(process.cwd(), target) || target}`);
+  const built = await build(entry, target);
+  for (const v of built.variants) console.error(`scriptw: wrote ${path.relative(process.cwd(), v.wasmPath) || v.wasmPath}`);
 } else if (entry.endsWith(".wasm")) {
   await run(entry);
 } else {
   const dir = fs.mkdtempSync(path.join(os.tmpdir(), "wasmgc-run-"));
   try {
-    await run(await build(entry, path.join(dir, "main.wasm")));
+    await run((await build(entry, path.join(dir, "main.wasm"))).wasmPath);
   } finally {
     fs.rmSync(dir, { recursive: true, force: true });
   }

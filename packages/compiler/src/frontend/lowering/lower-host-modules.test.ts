@@ -54,3 +54,47 @@ test("a scheme hostModuleSchemes leaves out stays on the untyped page-module pat
   expect(other.ok).toBe(true);
   expect(other.typed).toBeNull();
 }, 240000);
+
+test("a callback parameter crosses as a host function that calls the compiled closure through a typed trampoline", async () => {
+  const dir = mkdtempSync(join(tmpdir(), "host-callback-test-"));
+  try {
+    writeFileSync(join(dir, "events.d.ts"), [
+      'declare module "host:events" {',
+      "  export function listen(channel: number, onEvent: (kind: number, flag: boolean, name: string) => number): void;",
+      "  export function notify(onDone: () => void): void;",
+      "}", ""].join("\n"));
+    writeFileSync(join(dir, "main.ts"), [
+      '/// <reference path="./events.d.ts" />',
+      'import { listen, notify } from "host:events";',
+      "let total = 0, done = 0, names = \"\";",
+      "const onEvent = (kind: number, flag: boolean, name: string): number => { total += flag ? kind : -kind; names += name; return total; };",
+      "listen(7, onEvent);",
+      "listen(8, onEvent);",
+      "notify(() => { done++; });",
+      "export function state(): string { return `${total} ${done} ${names}`; }", ""].join("\n"));
+    const out = join(dir, "main.wasm");
+    const r = await compile(join(dir, "main.ts"), { outDir: dir, outPath: out, outputKind: "wasmgc", browser: true, dynModel: "native", strictHostModules: true, wasmLink: { exports: ["state"] } });
+    expect(r.ok).toBe(true);
+    const typed = JSON.parse(readFileSync(`${out}.host-modules.json`, "utf8")) as { name: string; params: string[] }[];
+    expect(typed.find((d) => d.name === "listen")!.params).toEqual(["number", "callback:hostcb.nbs_n:number,boolean,string:number"]);
+    expect(typed.find((d) => d.name === "notify")!.params).toEqual(["callback:hostcb._v::void"]);
+    const { instantiateLinked } = await import("../../backend/wasmgc/host.js");
+    const seen: Function[] = [];
+    let onDone: Function | null = null;
+    const linked = await instantiateLinked(readFileSync(out), { "": {} }, {
+      "host:events": { listen: (_channel: number, f: Function) => { seen.push(f); }, notify: (f: Function) => { onDone = f; } },
+    });
+    await linked.modules[""]!.main();
+    // The same closure is the same host function, and its result comes back typed.
+    expect(seen.length).toBe(2);
+    expect(seen[0]).toBe(seen[1]);
+    expect(seen[0]!(5, true, "a")).toBe(5);
+    expect(seen[0]!(2, false, "b")).toBe(3);
+    // Arguments are converted to the declared kinds.
+    expect(seen[0]!("4", 1, 9)).toBe(7);
+    expect(onDone!()).toBeUndefined();
+    expect((linked.modules[""]!.exports.state as () => string)()).toBe("7 1 ab9");
+  } finally {
+    rmSync(dir, { recursive: true, force: true });
+  }
+}, 240000);

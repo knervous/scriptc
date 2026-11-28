@@ -4262,7 +4262,10 @@ export type IrExpr =
         /** The value is a capsule of a compiled class instance. */
         | "classCapsule"
         /** The value is a boxed function or class value (exact kind test). */
-        | "funcKind";
+        | "funcKind"
+        /** Native dyn only: the value is a compiled plain dynamic object (not a class instance, typed record, array or page
+         * object). Exact kind test. */
+        | "plainObject";
       bytesElem?: IrBytesElem;
       negated?: true;
       value: IrExpr;

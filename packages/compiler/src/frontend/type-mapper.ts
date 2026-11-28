@@ -3294,6 +3294,9 @@ function mapTypeInner(type: ts.Type, ctx: TypeMapperCtx): IrType | null {
         // A JS body returning a `never[]` element (an empty literal's) returns a real value.
         ? (sigDecl !== undefined && isJsSourceFile(sigDecl.getSourceFile()) && bodyReturnsValue(sigDecl) ? DYN : VOID) : mapType(retT, ctx);
     if (sigDecl && ts.isGetAccessorDeclaration(sigDecl) && isJsSourceFile(sigDecl.getSourceFile())) ret = DYN;
+    // A concise JS arrow returns its body's value even where inference says void (declaredReturnType's rule).
+    if (ret?.kind === "void" && sigDecl && ts.isArrowFunction(sigDecl) && isJsSourceFile(sigDecl.getSourceFile()) &&
+        !ts.isBlock(sigDecl.body) && !ts.isVoidExpression(sigDecl.body)) ret = DYN;
     if (sigDecl && isJsSourceFile(sigDecl.getSourceFile()) && ret?.kind === "array") ret = DYN;
     if (sigDecl && ts.isFunctionLike(sigDecl) && isJsSourceFile(sigDecl.getSourceFile()) && !sigDecl.type &&
         !/@returns?\b/.test(sigDecl.getSourceFile().text.slice(sigDecl.pos, sigDecl.getStart())) && ret?.kind === "record") ret = DYN;

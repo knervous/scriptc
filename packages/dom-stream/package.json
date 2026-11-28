@@ -1,0 +1,10 @@
+{
+  "name": "@scriptw/dom-stream",
+  "version": "0.0.0",
+  "private": true,
+  "type": "module",
+  "description": "A DOM bridge for WasmGC renderers: nodes are compiled objects with handles, and their mutations go to the page as one stream per commit",
+  "exports": {
+    "./host": "./src/dom-host.js"
+  }
+}

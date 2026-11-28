@@ -1,0 +1,684 @@
+{
+  "name": "dom",
+  "channel": 1,
+  "stream": "../../host-stream/src/stream",
+  "doc": "DOM mutations from compiled code, replayed by the page in order (src/dom-host.js). Nodes are handles into the page's node table; 0 is no node.",
+  "commands": [
+    {
+      "op": 16,
+      "name": "createElement",
+      "doc": "node = doc.createElement(tag)",
+      "args": [
+        {
+          "name": "node",
+          "type": "handle"
+        },
+        {
+          "name": "doc",
+          "type": "handle"
+        },
+        {
+          "name": "tag",
+          "type": "atom"
+        }
+      ]
+    },
+    {
+      "op": 17,
+      "name": "createElementNS",
+      "doc": "node = doc.createElementNS(ns, tag)",
+      "args": [
+        {
+          "name": "node",
+          "type": "handle"
+        },
+        {
+          "name": "doc",
+          "type": "handle"
+        },
+        {
+          "name": "ns",
+          "type": "atom"
+        },
+        {
+          "name": "tag",
+          "type": "atom"
+        }
+      ]
+    },
+    {
+      "op": 18,
+      "name": "createElementIs",
+      "doc": "node = doc.createElement(tag, { is })",
+      "args": [
+        {
+          "name": "node",
+          "type": "handle"
+        },
+        {
+          "name": "doc",
+          "type": "handle"
+        },
+        {
+          "name": "tag",
+          "type": "atom"
+        },
+        {
+          "name": "is",
+          "type": "str"
+        }
+      ]
+    },
+    {
+      "op": 19,
+      "name": "createText",
+      "doc": "node = doc.createTextNode(text)",
+      "args": [
+        {
+          "name": "node",
+          "type": "handle"
+        },
+        {
+          "name": "doc",
+          "type": "handle"
+        },
+        {
+          "name": "text",
+          "type": "str"
+        }
+      ]
+    },
+    {
+      "op": 20,
+      "name": "createComment",
+      "doc": "node = doc.createComment(text)",
+      "args": [
+        {
+          "name": "node",
+          "type": "handle"
+        },
+        {
+          "name": "doc",
+          "type": "handle"
+        },
+        {
+          "name": "text",
+          "type": "str"
+        }
+      ]
+    },
+    {
+      "op": 21,
+      "name": "appendChild",
+      "args": [
+        {
+          "name": "parent",
+          "type": "handle"
+        },
+        {
+          "name": "child",
+          "type": "handle"
+        }
+      ]
+    },
+    {
+      "op": 22,
+      "name": "insertBefore",
+      "args": [
+        {
+          "name": "parent",
+          "type": "handle"
+        },
+        {
+          "name": "child",
+          "type": "handle"
+        },
+        {
+          "name": "before",
+          "type": "handle"
+        }
+      ]
+    },
+    {
+      "op": 23,
+      "name": "removeChild",
+      "args": [
+        {
+          "name": "parent",
+          "type": "handle"
+        },
+        {
+          "name": "child",
+          "type": "handle"
+        }
+      ]
+    },
+    {
+      "op": 24,
+      "name": "setAttribute",
+      "args": [
+        {
+          "name": "node",
+          "type": "handle"
+        },
+        {
+          "name": "name",
+          "type": "atom"
+        },
+        {
+          "name": "value",
+          "type": "str"
+        }
+      ]
+    },
+    {
+      "op": 25,
+      "name": "setAttributeNS",
+      "args": [
+        {
+          "name": "node",
+          "type": "handle"
+        },
+        {
+          "name": "ns",
+          "type": "atom"
+        },
+        {
+          "name": "name",
+          "type": "atom"
+        },
+        {
+          "name": "value",
+          "type": "str"
+        }
+      ]
+    },
+    {
+      "op": 26,
+      "name": "removeAttribute",
+      "args": [
+        {
+          "name": "node",
+          "type": "handle"
+        },
+        {
+          "name": "name",
+          "type": "atom"
+        }
+      ]
+    },
+    {
+      "op": 27,
+      "name": "setNodeValue",
+      "doc": "a text or comment node's data",
+      "args": [
+        {
+          "name": "node",
+          "type": "handle"
+        },
+        {
+          "name": "text",
+          "type": "str"
+        }
+      ]
+    },
+    {
+      "op": 28,
+      "name": "setTextContent",
+      "args": [
+        {
+          "name": "node",
+          "type": "handle"
+        },
+        {
+          "name": "text",
+          "type": "str"
+        }
+      ]
+    },
+    {
+      "op": 29,
+      "name": "setStyle",
+      "doc": "style[name] = value, or style.setProperty for a custom property (a name starting with --)",
+      "args": [
+        {
+          "name": "node",
+          "type": "handle"
+        },
+        {
+          "name": "name",
+          "type": "atom"
+        },
+        {
+          "name": "value",
+          "type": "str"
+        }
+      ]
+    },
+    {
+      "op": 30,
+      "name": "setStyleProperty",
+      "doc": "style.setProperty(name, value, priority)",
+      "args": [
+        {
+          "name": "node",
+          "type": "handle"
+        },
+        {
+          "name": "name",
+          "type": "atom"
+        },
+        {
+          "name": "value",
+          "type": "str"
+        },
+        {
+          "name": "priority",
+          "type": "atom"
+        }
+      ]
+    },
+    {
+      "op": 31,
+      "name": "setPropString",
+      "doc": "node[name] = value",
+      "args": [
+        {
+          "name": "node",
+          "type": "handle"
+        },
+        {
+          "name": "name",
+          "type": "atom"
+        },
+        {
+          "name": "value",
+          "type": "str"
+        }
+      ]
+    },
+    {
+      "op": 32,
+      "name": "setPropNumber",
+      "doc": "node[name] = value",
+      "args": [
+        {
+          "name": "node",
+          "type": "handle"
+        },
+        {
+          "name": "name",
+          "type": "atom"
+        },
+        {
+          "name": "value",
+          "type": "f64"
+        }
+      ]
+    },
+    {
+      "op": 33,
+      "name": "setPropBool",
+      "doc": "node[name] = value",
+      "args": [
+        {
+          "name": "node",
+          "type": "handle"
+        },
+        {
+          "name": "name",
+          "type": "atom"
+        },
+        {
+          "name": "value",
+          "type": "bool"
+        }
+      ]
+    },
+    {
+      "op": 34,
+      "name": "setPropNull",
+      "doc": "node[name] = null",
+      "args": [
+        {
+          "name": "node",
+          "type": "handle"
+        },
+        {
+          "name": "name",
+          "type": "atom"
+        }
+      ]
+    },
+    {
+      "op": 35,
+      "name": "setInnerHTML",
+      "args": [
+        {
+          "name": "node",
+          "type": "handle"
+        },
+        {
+          "name": "html",
+          "type": "str"
+        }
+      ]
+    },
+    {
+      "op": 36,
+      "name": "trapClick",
+      "doc": "node.onclick = a no-op (Safari delegates clicks only to elements with a handler)",
+      "args": [
+        {
+          "name": "node",
+          "type": "handle"
+        }
+      ]
+    },
+    {
+      "op": 37,
+      "name": "free",
+      "doc": "the node table forgets the node (it may live on in the page)",
+      "args": [
+        {
+          "name": "node",
+          "type": "handle"
+        }
+      ]
+    },
+    {
+      "op": 38,
+      "name": "beginCommit",
+      "doc": "a renderer's commit begins: the page notes the focus and selection, as React's prepareForCommit does",
+      "args": [
+        {
+          "name": "root",
+          "type": "handle"
+        }
+      ]
+    },
+    {
+      "op": 39,
+      "name": "endCommit",
+      "doc": "the commit's mutations are done: the page restores focus and selection, as React's resetAfterCommit does",
+      "args": [
+        {
+          "name": "root",
+          "type": "handle"
+        }
+      ]
+    },
+    {
+      "op": 40,
+      "name": "clearContainer",
+      "doc": "React's clearContainer: a document's or element's children go, except a document's head and body are kept and emptied",
+      "args": [
+        {
+          "name": "node",
+          "type": "handle"
+        }
+      ]
+    },
+    {
+      "op": 41,
+      "name": "listenRoot",
+      "doc": "the page forwards every delegated event under this root (src/dom-host.js lists them)",
+      "args": [
+        {
+          "name": "root",
+          "type": "handle"
+        }
+      ]
+    },
+    {
+      "op": 42,
+      "name": "removeStyle",
+      "doc": "style[name] = '' (style.removeProperty for a custom property)",
+      "args": [
+        {
+          "name": "node",
+          "type": "handle"
+        },
+        {
+          "name": "name",
+          "type": "atom"
+        }
+      ]
+    },
+    {
+      "op": 43,
+      "name": "listen",
+      "doc": "node.addEventListener(type, the page's forwarder for the node's listener, options): flags LISTEN_CAPTURE, LISTEN_PASSIVE, LISTEN_ACTIVE (src/dom.ts)",
+      "args": [
+        {
+          "name": "node",
+          "type": "handle"
+        },
+        {
+          "name": "listener",
+          "type": "i32"
+        },
+        {
+          "name": "type",
+          "type": "atom"
+        },
+        {
+          "name": "flags",
+          "type": "i32"
+        }
+      ]
+    },
+    {
+      "op": 44,
+      "name": "unlisten",
+      "doc": "the node's forwarder for listener is removed",
+      "args": [
+        {
+          "name": "node",
+          "type": "handle"
+        },
+        {
+          "name": "listener",
+          "type": "i32"
+        }
+      ]
+    },
+    {
+      "op": 45,
+      "name": "cloneTemplate",
+      "doc": "A clone of template `template` (host:dom template). Its nodes, in document order, take these handles: the clone's root first (a fragment when the template has several top-level nodes), then every node below it.",
+      "args": [
+        {
+          "name": "template",
+          "type": "i32"
+        },
+        {
+          "name": "nodes",
+          "type": "handles"
+        }
+      ]
+    },
+    {
+      "op": 46,
+      "name": "delegate",
+      "doc": "One listener for `type` on `root`: each event that reaches it is sent to the compiled side once (host:dom delegated) with `delegation`, the compiled side's index for this listener, and the nearest node of the table at or above the event's target.",
+      "args": [
+        {
+          "name": "root",
+          "type": "handle"
+        },
+        {
+          "name": "delegation",
+          "type": "i32"
+        },
+        {
+          "name": "type",
+          "type": "atom"
+        }
+      ]
+    },
+    {
+      "op": 47,
+      "name": "createFragment",
+      "doc": "node = doc.createDocumentFragment()",
+      "args": [
+        {
+          "name": "node",
+          "type": "handle"
+        },
+        {
+          "name": "doc",
+          "type": "handle"
+        }
+      ]
+    }
+  ],
+  "records": [
+    {
+      "name": "event",
+      "doc": "The event being dispatched: what React reads of a native event, written by the page before it calls the listener.",
+      "fields": [
+        {
+          "name": "type",
+          "type": "i32",
+          "doc": "index into dom-host.js EVENT_NAMES"
+        },
+        {
+          "name": "target",
+          "type": "handle",
+          "doc": "the nearest node of the table at or above the event's target"
+        },
+        {
+          "name": "related",
+          "type": "handle",
+          "doc": "the same for relatedTarget"
+        },
+        {
+          "name": "flags",
+          "type": "i32",
+          "doc": "EVENT_FLAG bits"
+        },
+        {
+          "name": "phase",
+          "type": "i32"
+        },
+        {
+          "name": "button",
+          "type": "i32"
+        },
+        {
+          "name": "buttons",
+          "type": "i32"
+        },
+        {
+          "name": "detail",
+          "type": "i32"
+        },
+        {
+          "name": "timeStamp",
+          "type": "f64"
+        },
+        {
+          "name": "screenX",
+          "type": "f64"
+        },
+        {
+          "name": "screenY",
+          "type": "f64"
+        },
+        {
+          "name": "clientX",
+          "type": "f64"
+        },
+        {
+          "name": "clientY",
+          "type": "f64"
+        },
+        {
+          "name": "pageX",
+          "type": "f64"
+        },
+        {
+          "name": "pageY",
+          "type": "f64"
+        },
+        {
+          "name": "movementX",
+          "type": "f64"
+        },
+        {
+          "name": "movementY",
+          "type": "f64"
+        },
+        {
+          "name": "deltaX",
+          "type": "f64"
+        },
+        {
+          "name": "deltaY",
+          "type": "f64"
+        },
+        {
+          "name": "deltaZ",
+          "type": "f64"
+        },
+        {
+          "name": "deltaMode",
+          "type": "i32"
+        },
+        {
+          "name": "keyCode",
+          "type": "i32"
+        },
+        {
+          "name": "charCode",
+          "type": "i32"
+        },
+        {
+          "name": "which",
+          "type": "i32"
+        },
+        {
+          "name": "location",
+          "type": "i32"
+        },
+        {
+          "name": "pointerId",
+          "type": "i32"
+        },
+        {
+          "name": "width",
+          "type": "f64"
+        },
+        {
+          "name": "height",
+          "type": "f64"
+        },
+        {
+          "name": "pressure",
+          "type": "f64"
+        },
+        {
+          "name": "tangentialPressure",
+          "type": "f64"
+        },
+        {
+          "name": "tiltX",
+          "type": "f64"
+        },
+        {
+          "name": "tiltY",
+          "type": "f64"
+        },
+        {
+          "name": "twist",
+          "type": "f64"
+        },
+        {
+          "name": "elapsedTime",
+          "type": "f64"
+        }
+      ]
+    }
+  ]
+}

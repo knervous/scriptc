@@ -169,6 +169,8 @@ export const CLOSURE_CODE = 0, CLOSURE_ENV = 1, CLOSURE_INVOKE = 2, CLOSURE_PROP
  * local class's captured binding boxes. */
 export const CLASSOBJ_CID = 6, CLASSOBJ_PROTO = 7, CLASSOBJ_CAPS = 8;
 export const closureMeta = (nativeDyn: boolean): number => nativeDyn ? 5 : 2;
+/** Native dyn: a closure's identity root when it is a signature adapter (the function it adapts), else null. */
+export const CLOSURE_ORIGIN = 6;
 /** $fnmeta fields, and FNMETA_FLAGS bits. */
 export const FNMETA_NAME = 0, FNMETA_LENGTH = 1, FNMETA_FLAGS = 2;
 export const FN_OWNS_PROTOTYPE = 1, FN_FORWARD = 2;
@@ -288,7 +290,8 @@ export class GcTypes {
   private hasSubclass(name: string): boolean { for (const d of this.classDefs.values()) if (d.base === name) return true; return false; }
   /** Whether a class with subclasses gets a final instantiable subtype (see klass). */
   private splitsClass(name: string): boolean { return !this.sharedRuntime && (name === "%Error" || this.hasSubclass(name)); }
-  private isTupleShape(id: string): boolean { return this.tupleIds.has(id); }
+  /** A tuple shape: an array to JS, no $typedrec subtype and no type index. */
+  isTupleShape(id: string): boolean { return this.tupleIds.has(id); }
   /** A native-dyn browser record (not a tuple) keeps its page-object field first. */
   private recordJsFirst(id: string): boolean { return this.nativeDyn && this.browser && !this.tupleIds.has(id); }
   /** Native host (hostHandles): classes and native-dyn browser records carry a lazily assigned identity id (an i32, 0 = unassigned)
@@ -1131,6 +1134,8 @@ export class GcTypes {
         { type: binaryen.structref, packedType: binaryen.notPacked, mutable: false },
         ...(this.nativeDyn ? [invokeField(b), propsField(b), jsField] : []),
         imm(b.getTempRefType(this.htIndex(b, this.slots.get("fnmeta")!), true)),
+        // Native dyn: the function a signature adapter stands for (IR `adapts`), null for any other closure (CLOSURE_ORIGIN).
+        ...(this.nativeDyn ? [imm(binaryen.anyref)] : []),
       ]);
       b.setSubType(i, this.htIndex(b, this.slots.get("fnbase")!));
     });

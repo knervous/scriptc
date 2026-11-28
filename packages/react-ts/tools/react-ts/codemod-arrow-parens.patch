@@ -1,0 +1,13 @@
+diff --git a/src/runner/process-batch.ts b/src/runner/process-batch.ts
+index 3c6130c..e973c36 100644
+--- a/src/runner/process-batch.ts
++++ b/src/runner/process-batch.ts
+@@ -24,6 +24,8 @@ export const recastOptions: Options = {
+   quote: "single",
+   trailingComma: true,
+   objectCurlySpacing: false,
++  // A single typed arrow parameter must keep its parentheses: `(cb: T) => x` printed as `cb: T => x` re-parses as something else.
++  arrowParensAlways: true,
+ };
+ 
+ /**

@@ -1,0 +1,11 @@
+{
+  "name": "@scriptw/host-stream",
+  "version": "0.0.0",
+  "private": true,
+  "type": "module",
+  "description": "Batched host APIs for WasmGC programs: a command stream in module memory, replayed by the host once per flush, with records and events from one schema",
+  "exports": {
+    "./host": "./src/host.js",
+    "./gen": "./src/gen.mjs"
+  }
+}

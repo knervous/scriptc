@@ -1,0 +1,59 @@
+{
+ "compilerOptions": {
+  "target": "es2022",
+  "module": "esnext",
+  "moduleResolution": "bundler",
+  "strict": true,
+  "noEmit": true,
+  "lib": [
+   "es2022",
+   "dom",
+   "dom.iterable"
+  ],
+  "skipLibCheck": true,
+  "jsx": "preserve",
+  "paths": {
+   "shared/*": [
+    "./shared/*"
+   ],
+   "react-reconciler/*": [
+    "./react-reconciler/*"
+   ],
+   "react-dom-bindings/*": [
+    "./react-dom-bindings/*"
+   ],
+   "react-dom/*": [
+    "./react-dom/*"
+   ],
+   "react/*": [
+    "./react/*"
+   ],
+   "scheduler": [
+    "./scheduler/index.ts"
+   ],
+   "scheduler/*": [
+    "./scheduler/*"
+   ],
+   "react": [
+    "./react/index.ts"
+   ],
+   "react-dom": [
+    "./react-dom/index.ts"
+   ],
+   "react-client/*": [
+    "./react-client/*"
+   ],
+   "dom-stream/*": [
+    "../dom-stream/src/*"
+   ]
+  },
+  "types": []
+ },
+ "files": [
+  "react-dom/client.ts",
+  "react-dom/index.ts",
+  "react/index.ts",
+  "react/jsx-runtime.ts",
+  "react-ts-globals.ts"
+ ]
+}

@@ -18,6 +18,27 @@ export function registerWorkspacePackage(name: string, realDir: string): void {
 
 export function clearWorkspacePackages(): void {
   workspacePackageDirs.clear();
+  conditionSourceDirs.clear();
+}
+
+/* Installed packages whose TypeScript source a compile condition names
+ * (resolve.ts, conditionSourceModule): their files live inside node_modules
+ * and are program modules all the same, as the entry package's own are.
+ * Installed package directory (its node_modules path) → package name. */
+const conditionSourceDirs = new Map<string, string>();
+
+export function registerConditionSourcePackage(name: string, dir: string): void {
+  conditionSourceDirs.set(dir.split("\\").join("/"), name);
+}
+
+/** Whether `path` is one of a registered condition-source package's own
+ * files (not a file of a package installed under it). */
+export function isConditionSourcePath(path: string): boolean {
+  const norm = path.split("\\").join("/");
+  for (const dir of conditionSourceDirs.keys()) {
+    if (norm.startsWith(dir) && norm[dir.length] === "/" && !norm.slice(dir.length + 1).split("/").includes("node_modules")) return true;
+  }
+  return false;
 }
 
 /** True when `name` is a registered workspace package — the NAME-keyed

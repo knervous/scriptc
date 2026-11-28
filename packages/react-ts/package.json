@@ -1,0 +1,8 @@
+{
+  "name": "@scriptw/react-ts",
+  "version": "0.0.0",
+  "private": true,
+  "type": "module",
+  "license": "MIT",
+  "description": "React 19.2.8's client packages converted from Flow to strict TypeScript, for typed WasmGC builds (PROVENANCE.md)"
+}

@@ -28,6 +28,9 @@ export interface BytesLink {
 
 export interface BytesContext {
   link?: BytesLink;
+  /** A fixed memory of this many 64 KiB pages (capability views=fixed): declared at its maximum, it never grows, so
+   * byte views handed to JavaScript never detach. Absent: one page, growing on demand to 4 GiB. */
+  fixedPages?: number;
   anyConvertExtern(v: number): number;
   /** JS's undefined in an f64 slot (an out-of-range or non-index read). */
   undefNaN(): number;
@@ -96,7 +99,8 @@ export function bytesRuntime(ctx: BytesContext) {
       // declared maximum; byte views over it never detach.
       (m.setMemory as unknown as (...a: unknown[]) => void)(1, 65536, null, [], !!imported.shared, false, "0");
       m.addMemoryImport("0", imported.module, imported.name);
-    } else m.setMemory(1, 65536, "memory");
+    } else if (ctx.fixedPages !== undefined) m.setMemory(ctx.fixedPages, ctx.fixedPages, "memory");
+    else m.setMemory(1, 65536, "memory");
     m.addGlobal("$heap.top", i32, true, m.i32.const(HEAP_START));
   };
   const foreignAlloc = ctx.link?.allocator;

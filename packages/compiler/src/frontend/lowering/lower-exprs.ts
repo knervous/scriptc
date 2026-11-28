@@ -4205,7 +4205,9 @@ function nullishBranches(
         // PROVES under that polarity hold while it lowers (`type ===
         // 'string' && val.length > 0`, the ms entry shape).
         const runtimeOptionalLocal = isAnd ? runtimeOptionalLocalOf(lowerer, e.left) : null;
-        const right = lowerer.narrowingAliases(aliasTypeofNarrows(lowerer, e.left, isAnd), () => {
+        // The right operand may never run: in JavaScript one with no static lowering fences at its own evaluation
+        // (lowerSkippableOperand), as it does in value position.
+        const right = lowerSkippableOperand(lowerer, e.right, BOOL, () => lowerer.narrowingAliases(aliasTypeofNarrows(lowerer, e.left, isAnd), () => {
           if (runtimeOptionalLocal === null) return lowerer.lowerCondition(e.right);
           lowerer.runtimeOptionalLocals.delete(lowerer.runtimeOptionalRootOf(runtimeOptionalLocal));
           try {
@@ -4213,7 +4215,7 @@ function nullishBranches(
           } finally {
             lowerer.runtimeOptionalLocals.add(lowerer.runtimeOptionalRootOf(runtimeOptionalLocal));
           }
-        });
+        }));
         if (left.kind === "boolLit") return right;
         return {
           kind: "logical",
@@ -7917,6 +7919,9 @@ export function lowerTemplate(lowerer: Lowerer, expr: ts.TemplateExpression): Ir
     const target = lowerer.mapTypeOf(targetTs) ?? dynFallbackType(lowerer, expr.type, targetTs);
     if (!target) lowerer.badType(expr.type, targetTs);
     if (target.kind === "dyn") return inner; // `as unknown`: erasure
+    // A JSDoc cast to void (`/** @type {T} */ (result)` in a generic instantiated with T = void) validates nothing: the
+    // value is only ever discarded, as a void function's return value is.
+    if (target.kind === "void" && isJsSourceFile(expr.getSourceFile())) return inner;
     // A page-value target (`u as any` where the target maps to a page value):
     // nothing to validate, the value changes representation only.
     if (target.kind === "jsval") return lowerer.coerceToExpected(inner, JSVAL);

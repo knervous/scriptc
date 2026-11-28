@@ -6,7 +6,7 @@ import * as ts from "../ts7/adapter.js";
 import type { SrcLoc } from "../../ir/ir.js";
 import type { Lowerer } from "./lowerer.js";
 import { locOf } from "../program.js";
-import { BYTES_U8, JSVAL, STRING, type IrExpr, type IrFunction, type IrStmt, type IrType } from "../../ir/ir.js";
+import { BYTES_U8, JSVAL, STRING, VOID, type IrExpr, type IrFunction, type IrStmt, type IrType } from "../../ir/ir.js";
 import { newFnCtx } from "./lowerer.js";
 
 const declarations = new WeakMap<object, Map<string, ts.ModuleDeclaration>>();
@@ -107,7 +107,8 @@ function refuse(lowerer: Lowerer, node: ts.Node, message: string): void {
 /** The IR type a host-module parameter or result of declared type `t` crosses as, or null outside the ABI. */
 function abiType(lowerer: Lowerer, node: ts.Node, result: boolean): IrType | null {
   const declared = lowerer.typeOf(node);
-  const mapped = lowerer.mapTypeOf(declared);
+  const callback = result ? null : callbackType(lowerer, declared, node);
+  const mapped = callback ?? lowerer.mapTypeOf(declared);
   if (mapped === null) return null;
   // A page object crosses only by its interface or class (a DOM or host handle); an anonymous object shape is a dictionary, not a handle.
   const symbolName = declared.getSymbol?.()?.name;
@@ -117,9 +118,32 @@ function abiType(lowerer: Lowerer, node: ts.Node, result: boolean): IrType | nul
   // A Uint8Array crosses as a page view over module memory, valid for the call (a host that keeps it copies it); as a result it is copied into
   // compiled storage at once, and a Promise of one is settled with the host's array and copied in on await.
   if (mapped.kind === "bytes" && mapped.elem === "u8") return mapped;
+  // A callback the host calls back synchronously: a function whose parameters are scalars and whose result is a scalar or void. It
+  // crosses as a host function that calls the compiled function through an exported trampoline (no dynamic values on the way).
+  if (!result && mapped.kind === "func" && !mapped.rest && mapped.params.every(scalar) && (mapped.ret.kind === "void" || scalar(mapped.ret))) return mapped;
   if (result && mapped.kind === "void") return mapped;
   if (result && mapped.kind === "promise" && (mapped.inner.kind === "void" || scalar(mapped.inner) || (mapped.inner.kind === "bytes" && mapped.inner.elem === "u8"))) return mapped;
   return null;
+}
+
+/** A parameter of plain function type (one call signature with no type parameters, optional or rest parameters, and no properties) as
+ * the compiled function type it names; abiType then admits it when its parameters and result are scalars. Null for any other shape. */
+function callbackType(lowerer: Lowerer, t: ts.Type, node: ts.Node): (IrType & { kind: "func" }) | null {
+  if (!(t.flags & ts.TypeFlags.Object)) return null;
+  const sigs = lowerer.checker.getCallSignatures(t);
+  if (sigs.length !== 1 || sigs[0]!.getTypeParameters().length !== 0 || lowerer.checker.getConstructSignatures(t).length !== 0 ||
+      lowerer.checker.getPropertiesOfType(t).length !== 0) return null;
+  const params: IrType[] = [];
+  for (const p of sigs[0]!.getParameters()) {
+    const decl = lowerer.checker.valueDeclarationOf(p);
+    if (decl === undefined || !ts.isParameter(decl) || decl.questionToken !== undefined || decl.dotDotDotToken !== undefined || decl.initializer !== undefined) return null;
+    const pt = lowerer.mapTypeOf(lowerer.checker.getTypeOfSymbolAtLocation(p, node));
+    if (pt === null) return null;
+    params.push(pt);
+  }
+  const retType = lowerer.checker.getReturnTypeOfSignature(sigs[0]!);
+  const ret = retType.flags & ts.TypeFlags.Void ? VOID : lowerer.mapTypeOf(retType);
+  return ret === null ? null : { kind: "func", params, ret };
 }
 
 /** `fn(args)` where `fn` is a function imported from a typed host module: one wasm import call. */
@@ -138,7 +162,7 @@ export function lowerHostModuleCall(lowerer: Lowerer, call: ts.CallExpression): 
   const args: IrExpr[] = [];
   decl.parameters.forEach((p, i) => {
     const t = abiType(lowerer, p.name, false);
-    if (t === null) lowerer.unsupported("SC1090", p, `the parameter type of the host function ${where} (host module parameters are number, boolean, string, or a page object)`);
+    if (t === null) lowerer.unsupported("SC1090", p, `the parameter type of the host function ${where} (host module parameters are number, boolean, string, a page object, Uint8Array, or a callback over those)`);
     args.push(lowerer.lowerExprExpecting(call.arguments[i]!, t!));
   });
   const resultNode = decl.type;
@@ -191,7 +215,7 @@ export function lowerHostModuleValue(lowerer: Lowerer, ident: ts.Identifier): Ir
   }
   const params: IrType[] = decl.parameters.map((p) => {
     const t = abiType(lowerer, p.name, false);
-    if (t === null) lowerer.unsupported("SC1090", p, `the parameter type of the host function ${where} (host module parameters are number, boolean, string, or a page object)`);
+    if (t === null) lowerer.unsupported("SC1090", p, `the parameter type of the host function ${where} (host module parameters are number, boolean, string, a page object, Uint8Array, or a callback over those)`);
     return t!;
   });
   if (decl.type === undefined) lowerer.unsupported("SC1090", decl, `the host function ${where} needs a declared result type`);

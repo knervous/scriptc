@@ -89,3 +89,40 @@ test("compile conditions pick a package imports branch, for the resolver and the
     await rm(dir, { recursive: true, force: true });
   }
 });
+
+test("an installed package whose compile-condition entry is TypeScript source is a project module", async () => {
+  const { setCompileConditions } = await import("./resolve.js");
+  const dir = realpathSync(await mkdtemp(join(tmpdir(), "scriptc-resolve-condition-source-")));
+  try {
+    const pkg = async (name: string, exports: unknown) => {
+      const root = join(dir, "node_modules", name);
+      await mkdir(join(root, "src"), { recursive: true });
+      await mkdir(join(root, "dist"));
+      await Promise.all([
+        writeFile(join(root, "src/index.ts"), "export const value: number = 1;\n"),
+        writeFile(join(root, "dist/index.js"), "export const value = 1;\n"),
+        writeFile(join(root, "dist/index.d.ts"), "export declare const value: number;\n"),
+        writeFile(join(root, "package.json"), JSON.stringify({ name, type: "module", exports })),
+      ]);
+    };
+    await Promise.all([
+      writeFile(join(dir, "main.ts"), 'import { value } from "condsrc";\nconsole.log(value);\n'),
+      pkg("condsrc", { ".": { types: "./src/index.ts", wasmgc: "./src/index.ts", default: "./dist/index.js" } }),
+      // The checker's "types" branch answers declarations: the two worlds would load different modules.
+      pkg("conddts", { ".": { types: "./dist/index.d.ts", wasmgc: "./src/index.ts", default: "./dist/index.js" } }),
+    ]);
+    const main = join(dir, "main.ts");
+    const source = join(dir, "node_modules/condsrc/src/index.ts");
+
+    clearResolveCaches();
+    expect(resolveProjectModule(main, "condsrc")).toBeNull();
+    setCompileConditions(["wasmgc"]);
+    clearResolveCaches();
+    expect(resolveProjectModule(main, "condsrc")).toBe(source);
+    expect(resolveProjectModule(main, "conddts")).toBeNull();
+  } finally {
+    setCompileConditions([]);
+    clearResolveCaches();
+    await rm(dir, { recursive: true, force: true });
+  }
+});

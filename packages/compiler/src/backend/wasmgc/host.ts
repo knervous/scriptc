@@ -4,9 +4,18 @@
  * a migration target: the emitter records which ones a program uses. */
 
 import { memorySpan, moduleAddress } from "./address.js";
+import { CAPABILITY_SECTION, decodeCapabilitySection, detectCapabilities, fixedMiB, missingRequirements, readCustomSections, refusalText, supportText, VARIANTS_SCHEMA, type EngineCapabilities, type ResolvedCapabilities, type VariantSet } from "./capabilities.js";
 import { DATE_HOST_MEMBERS, DATE_LOCALE_METHODS, DATE_UTC_ARITIES } from "../../ir/date-host.js";
 
 export interface WasmGcHostOptions {
+  /** auto (the default): a capability the engine lacks but the host can supply (the JS String Builtins and imported
+   * string constants) is supplied from plain JavaScript, and listed in the instance's `capabilities.fallbacks`.
+   * strict: refuse instead. Any namespace asking strict makes the instance strict. */
+  capabilities?: "auto" | "strict";
+  /** How strings are served: auto (the engine's builtins and constants where it has them, plain JavaScript where it
+   * does not), engine (the engine's only; refuse otherwise), constants (the engine's builtins, the constants as an
+   * ordinary import module), polyfill (no engine string support at all). */
+  strings?: "auto" | "engine" | "constants" | "polyfill";
   /** JSPI: the most promising calls admitted at once (running or queued)
    * across the whole instance; a call beyond it rejects at once with a busy
    * error. Default 64; the smallest value any namespace gives wins. */
@@ -39,6 +48,8 @@ const engine = (globalThis as unknown as { WebAssembly: WasmEngine }).WebAssembl
 
 export interface WasmGcInstance {
   instance: { exports: Record<string, unknown> };
+  /** What the module needed, what the engine offered, and the fallbacks taken. */
+  capabilities: WasmGcInstanceCapabilities;
   /** A module with top-level await returns its evaluation promise. */
   main(): void | Promise<void>;
   /** Referenced timers still scheduled: a harness waits on this as Node's loop would. */
@@ -82,6 +93,8 @@ export interface WasmGcHostState {
   reportUnhandled?: () => void;
   /** The module's linear memory (typed-array storage) and its free export. */
   memory?: { buffer: ArrayBuffer };
+  /** The memory never grows (capability views=fixed): its buffer never detaches, and byte views use it directly. */
+  fixedMemory?: boolean;
   bytesFree?: (base: number) => void;
   timerFire?: (slot: number, repeat: number) => void;
   moduleDone?: (rejected: number, value: unknown) => void;
@@ -276,6 +289,8 @@ export function wasmGcHostImports(opts: WasmGcHostOptions = {}, state: WasmGcHos
     const mem = state.memory as unknown as { buffer: ArrayBuffer; toResizableBuffer?: () => ArrayBuffer };
     // A shared memory's buffer never detaches; a newer one covers growth.
     if (isShared(mem.buffer)) return rbuf && rbuf.byteLength >= end ? rbuf : (rbuf = mem.buffer);
+    // A fixed memory never grows: its own buffer never detaches.
+    if (state.fixedMemory) return mem.buffer;
     // Instantiation refused hosts without toResizableBuffer (see instantiateLinked).
     if (!rbuf) rbuf = mem.toResizableBuffer!();
     return rbuf;
@@ -2365,13 +2380,22 @@ async function hostStringModel(): Promise<HostStringModel> {
 
 export async function instantiateWasmGc(binary: Uint8Array, opts: WasmGcHostOptions = {}): Promise<WasmGcInstance> {
   const linked = await instantiateLinked(binary, { "": opts });
-  return { ...linked.modules[""]!, instance: linked.instance };
+  return { ...linked.modules[""]!, instance: linked.instance, capabilities: linked.capabilities };
+}
+
+/** What an instance needed, what the engine offered, and each fallback the host took (`strings:constants`,
+ * `strings:polyfill`). `required` is null for a module built before capabilities were recorded. */
+export interface WasmGcInstanceCapabilities {
+  required: ResolvedCapabilities | null;
+  provided: EngineCapabilities;
+  fallbacks: string[];
 }
 
 export interface WasmGcLinkedInstance {
   instance: { exports: Record<string, unknown> };
+  capabilities: WasmGcInstanceCapabilities;
   /** Each compiled module by its link namespace ("" for an unlinked module). */
-  modules: Record<string, Omit<WasmGcInstance, "instance"> & { exports: Record<string, unknown> }>;
+  modules: Record<string, Omit<WasmGcInstance, "instance" | "capabilities"> & { exports: Record<string, unknown> }>;
 }
 
 /**
@@ -2407,7 +2431,33 @@ export async function instantiateLinked(binary: Uint8Array | object, namespaces:
   const suppliedStrings = imports["'"] !== undefined;
   const stringConstants = suppliedStrings ? {} : { importedStringConstants: "'" };
   const bytes = binary instanceof Uint8Array ? binary : null;
-  let module = bytes ? await engine.compile(bytes, linkedCompileOptions(suppliedStrings)) : binary;
+  const allOpts = Object.values(namespaces);
+  const strict = allOpts.some(o => o.capabilities === "strict");
+  const stringsMode = allOpts.find(o => o.strings !== undefined)?.strings ?? (strict ? "engine" : "auto");
+  const compileOptions = stringsMode === "polyfill" ? {} : stringsMode === "constants" ? { builtins: ["js-string"] } : linkedCompileOptions(suppliedStrings);
+  let module: object;
+  try {
+    module = bytes ? await engine.compile(bytes, compileOptions) : binary;
+  } catch (e) {
+    // A module this engine cannot compile: name the capability it lacks, when the module records what it requires.
+    const record = bytes ? decodeCapabilitySection(readCustomSections(bytes, CAPABILITY_SECTION)[0] ?? new Uint8Array()) : null;
+    const missing = record ? missingRequirements(record.requires) : [];
+    if (missing.length) throw new Error(`this module requires ${refusalText(missing)}; this engine lacks it`, { cause: e });
+    throw e;
+  }
+  const required = ((): ResolvedCapabilities | null => {
+    const section = engine.Module.customSections?.(module, CAPABILITY_SECTION)?.[0];
+    return section ? decodeCapabilitySection(section) : null;
+  })();
+  const provided = detectCapabilities();
+  const fallbacks: string[] = [];
+  if (required) {
+    // A memory the environment supplies shared never detaches: no resizable buffers needed.
+    const suppliedSharedMemory = Object.values(imports).some(n => Object.values(n).some(v => isShared((v as { buffer?: unknown } | null)?.buffer)));
+    const missing = missingRequirements(required.requires.filter(r => !(suppliedSharedMemory && r === "resizable-memory-buffer")), provided);
+    if (missing.length) throw new Error(`this module requires ${refusalText(missing)}; this engine lacks it`);
+  }
+  const fixedMemory = required !== null && fixedMiB(required.mode.views) !== null;
   let hostStrings: HostStringModel | null = null;
   if (NATIVE_SIM && ((engine as any).Module.exports(module) as { name: string }[]).some(e => e.name === "hostStringType")) {
     if (!bytes) throw new Error("the native string model recompiles its binary: pass the bytes, not a module");
@@ -2416,12 +2466,27 @@ export async function instantiateLinked(binary: Uint8Array | object, namespaces:
   }
   const all: Record<string, Record<string, unknown>> = { ...imports };
   if (hostStrings) all["wasm:js-string"] = hostStrings.builtins;
+  // Strings the engine did not supply itself are still listed as imports: serve them from plain JavaScript.
+  {
+    const listed = engine.Module.imports(module);
+    const constants = listed.filter(i => i.module === "'");
+    if (constants.length && all["'"] === undefined) {
+      if (stringsMode === "engine") throw new Error(`this module requires ${refusalText(["imported-string-constants"])}; this engine lacks it (strict capabilities refuse the plain-JavaScript fallback)`);
+      all["'"] = Object.fromEntries(constants.map(i => [i.name, i.name]));
+      fallbacks.push("strings:constants");
+    }
+    if (listed.some(i => i.module === "wasm:js-string") && all["wasm:js-string"] === undefined) {
+      if (stringsMode === "engine") throw new Error(`this module requires ${refusalText(["js-string-builtins"])}; this engine lacks it (strict capabilities refuse the plain-JavaScript fallback)`);
+      all["wasm:js-string"] = jsStringPolyfill;
+      fallbacks.push("strings:polyfill");
+    }
+  }
   // Host modules supplied through the options (`modules`, keyed by specifier) serve typed host-module imports too.
   for (const opts of Object.values(namespaces)) for (const [spec, supplied] of Object.entries(opts.modules ?? {})) if (all[spec] === undefined && typeof supplied === "object" && supplied !== null) all[spec] = supplied;
   const states = new Map<string, WasmGcHostState>();
   const hostModuleOf = (ns: string) => (ns ? `${ns}:host` : "host");
   for (const [ns, opts] of Object.entries(namespaces)) {
-    const state: WasmGcHostState = {};
+    const state: WasmGcHostState = fixedMemory ? { fixedMemory: true } : {};
     states.set(ns, state);
     // Overrides go onto the host object itself: its own operations read later entries from it.
     all[hostModuleOf(ns)] = Object.assign((wasmGcHostImports(opts, state) as Record<string, Record<string, unknown>>)["host"]!, opts.hostOverrides);
@@ -2498,13 +2563,15 @@ export async function instantiateLinked(binary: Uint8Array | object, namespaces:
   }
   // Declared capability: byte views handed to the page alias module memory and
   // must survive memory.grow, which needs WebAssembly.Memory.prototype
-  // .toResizableBuffer (Chrome 136+, Node 26). Without it a retained view
-  // would silently detach, so the configuration is refused up front.
-  // A shared memory supplied by the environment never detaches: no requirement.
+  // .toResizableBuffer. Without it a retained view would silently detach, so
+  // the configuration is refused up front. A shared memory supplied by the
+  // environment never detaches, and neither does a fixed memory
+  // (views=fixed): no requirement. (A module recording its capabilities was
+  // checked above; this covers older modules.)
   const memoryProto = (engine as unknown as { Memory?: { prototype?: object } }).Memory?.prototype as { toResizableBuffer?: unknown } | undefined;
   const suppliedShared = Object.values(imports).some(ns => Object.values(ns).some(v => isShared((v as { buffer?: unknown } | null)?.buffer)));
-  if (!suppliedShared && moduleImports.some(i => i.name === "bytes.toJs") && typeof memoryProto?.toResizableBuffer !== "function")
-    throw new Error("this module hands byte views to the page, which requires WebAssembly.Memory.prototype.toResizableBuffer (Chrome 136+, Node 26); this host lacks it");
+  if (!suppliedShared && !fixedMemory && moduleImports.some(i => i.name === "bytes.toJs") && typeof memoryProto?.toResizableBuffer !== "function")
+    throw new Error(`this module hands byte views to the page, which requires WebAssembly.Memory.prototype.toResizableBuffer (${supportText("resizable-memory-buffer")}); this host lacks it. Under Node 24 or 25 run with --experimental-wasm-rab-integration, or build with --capabilities views=fixed:<MiB>`);
   // JSPI (review §21.4): every function the module imports from "jspi" is a
   // suspending import (it may return a Promise; the wasm stack suspends until
   // it settles); every `$promising.<name>` export is a promising entry.
@@ -2512,7 +2579,7 @@ export async function instantiateLinked(binary: Uint8Array | object, namespaces:
   const jspiImports = engine.Module.imports(module).filter(i => i.module === "jspi");
   if (jspiImports.length) {
     if (typeof W.Suspending !== "function" || typeof W.promising !== "function")
-      throw new Error("this module suspends on host promises, which requires JSPI (WebAssembly.Suspending / WebAssembly.promising, Chrome 137+); this host lacks it");
+      throw new Error(`this module suspends on host promises, which requires JSPI (WebAssembly.Suspending / WebAssembly.promising: ${supportText("jspi")}); this host lacks it`);
     const given = imports["jspi"] ?? {};
     const wrapped: Record<string, unknown> = {};
     for (const { name } of jspiImports) {
@@ -2534,13 +2601,36 @@ export async function instantiateLinked(binary: Uint8Array | object, namespaces:
       if (typeof f !== "function") throw new Error(`the host module settle export ${prefix}${name} is missing`);
       return f as (...a: unknown[]) => void;
     };
+    // A callback parameter (`callback:<export>:<param kinds>:<result kind>`): the compiled closure arrives as a reference and the host gets a
+    // function that calls it through the trampoline export, its arguments converted to the declared kinds. One function per closure, so a
+    // host that compares callbacks by identity (a listener set) sees the same function for the same closure.
+    const callbacks = new Map<string, WeakMap<object, Function>>();
+    const callbackOf = (p: string, ref: object): Function => {
+      let byRef = callbacks.get(p);
+      if (byRef === undefined) { byRef = new WeakMap(); callbacks.set(p, byRef); }
+      const known = byRef.get(ref);
+      if (known !== undefined) return known;
+      const [, exp, kindList, ret] = p.split(":") as [string, string, string, string];
+      const kinds = kindList === "" ? [] : kindList.split(",");
+      const trampoline = exportOf(exp) as unknown as (...a: unknown[]) => unknown;
+      const conv = kinds.map((k) => k === "boolean" ? (x: unknown) => (x ? 1 : 0) : k === "number" ? (x: unknown) => Number(x) : k === "string" ? (x: unknown) => String(x) : (x: unknown) => x);
+      const fn = ret === "boolean"
+        ? (...xs: unknown[]) => trampoline(ref, ...conv.map((c, i) => c(xs[i]))) !== 0
+        : ret === "void" ? (...xs: unknown[]) => { trampoline(ref, ...conv.map((c, i) => c(xs[i]))); }
+        : (...xs: unknown[]) => trampoline(ref, ...conv.map((c, i) => c(xs[i])));
+      byRef.set(ref, fn);
+      return fn;
+    };
     for (const decl of record.modules) {
       const supplied = all[decl.module];
       const impl = supplied?.[decl.name];
       if (typeof impl !== "function") throw new Error(`this module imports ${decl.module}.${decl.name}; supply a function for it in the imports under "${decl.module}"`);
       let adapted = adaptedModules.get(decl.module);
       if (adapted === undefined) { adapted = { ...supplied! }; adaptedModules.set(decl.module, adapted); all[decl.module] = adapted; }
-      const convertIn = (args: unknown[]): unknown[] => args.map((a, i) => decl.params[i] === "boolean" ? a !== 0 : a);
+      const convertIn = (args: unknown[]): unknown[] => args.map((a, i) => {
+        const p = decl.params[i]!;
+        return p === "boolean" ? a !== 0 : p.startsWith("callback:") ? callbackOf(p, a as object) : a;
+      });
       const promised = /^promise<(.+)>$/.exec(decl.result);
       if (promised === null) {
         const convertOut = decl.result === "boolean" ? (r: unknown) => (r ? 1 : 0) : decl.result === "void" ? () => undefined : (r: unknown) => r;
@@ -2647,7 +2737,84 @@ export async function instantiateLinked(binary: Uint8Array | object, namespaces:
     const bad = link();
     if (bad) throw new Error(`shared runtime: module "${ns}" expects atom ${bad - 1} to be its own, but the shared atom table already holds another name there: link every module before any module runs, and rebuild it against its owner's current link manifest`);
   }
-  return { instance, modules };
+  return { instance, modules, capabilities: { required, provided, fallbacks } };
+}
+
+const stringTrap = (message: string): never => { throw new (engine as unknown as { RuntimeError: new (m: string) => Error }).RuntimeError(message); };
+const asString = (s: unknown): string => typeof s === "string" ? s : stringTrap("illegal cast");
+/** `wasm:js-string` in plain JavaScript (the JS String Builtins proposal's semantics, traps included), for an engine
+ * without the builtins: the functions the emitter imports, and the rest of the non-array set. */
+export const jsStringPolyfill: Readonly<Record<string, (...args: never[]) => unknown>> = Object.freeze({
+  cast: (s: unknown) => asString(s),
+  test: (s: unknown) => (typeof s === "string" ? 1 : 0),
+  length: (s: unknown) => asString(s).length,
+  charCodeAt: (s: unknown, i: number) => { const t = asString(s); return i >>> 0 >= t.length ? stringTrap("string offset out of bounds") : t.charCodeAt(i); },
+  codePointAt: (s: unknown, i: number) => { const t = asString(s); return i >>> 0 >= t.length ? stringTrap("string offset out of bounds") : t.codePointAt(i)!; },
+  concat: (a: unknown, b: unknown) => asString(a) + asString(b),
+  substring: (s: unknown, start: number, end: number) => {
+    const t = asString(s); start >>>= 0; end >>>= 0;
+    return start > t.length || start > end ? "" : t.substring(start, Math.min(end, t.length));
+  },
+  equals: (a: unknown, b: unknown) => {
+    if (a !== null && typeof a !== "string") stringTrap("illegal cast");
+    if (b !== null && typeof b !== "string") stringTrap("illegal cast");
+    return a === b ? 1 : 0;
+  },
+  compare: (a: unknown, b: unknown) => { const x = asString(a), y = asString(b); return x < y ? -1 : x > y ? 1 : 0; },
+  fromCharCode: (c: number) => String.fromCharCode(c & 0xffff),
+  fromCodePoint: (c: number) => (c >>> 0 > 0x10ffff ? stringTrap("invalid code point") : String.fromCodePoint(c >>> 0)),
+});
+
+/** The capabilities a module records (its scriptc.capabilities section): from a compiled module or raw bytes; null
+ * for a module built before capabilities were recorded. */
+export function requiredCapabilities(module: object | Uint8Array): ResolvedCapabilities | null {
+  if (module instanceof Uint8Array) return decodeCapabilitySection(readCustomSections(module, CAPABILITY_SECTION)[0] ?? new Uint8Array());
+  const section = engine.Module.customSections?.(module, CAPABILITY_SECTION)?.[0];
+  return section ? decodeCapabilitySection(section) : null;
+}
+export { detectCapabilities } from "./capabilities.js";
+export { createTaskRing, runTaskConsumer, taskRingBytes, STATUS_CANCELLED, STATUS_STALE, STATUS_FAILED, RING_FULL, RING_STOPPED, RING_BAD_PUBLISH } from "./task-ring.js";
+export type { TaskRing, TaskRingOptions, TaskRingLayout, TaskRunner } from "./task-ring.js";
+
+/** The first variant of a set this engine runs (every hard requirement met), or a refusal naming each variant's gap. */
+export function chooseVariant(set: VariantSet, caps: EngineCapabilities = detectCapabilities()): VariantSet["variants"][number] {
+  const gaps: string[] = [];
+  for (const v of set.variants) {
+    const missing = missingRequirements(v.requires, caps);
+    if (!missing.length) return v;
+    gaps.push(`${v.file} requires ${refusalText(missing)}`);
+  }
+  throw new Error(`no variant of this module runs on this engine: ${gaps.join("; ")}`);
+}
+
+export interface LoadWasmGcOptions extends WasmGcHostOptions {
+  /** Reads a URL's bytes (default: fetch). A loader under Node supplies one for file: URLs. */
+  read?: (url: URL) => Promise<Uint8Array | ArrayBuffer>;
+}
+
+/** Loads a module by URL: `<module>.wasm.variants.json` (a variant set: the first variant this engine runs, chosen by
+ * probe, is the only one downloaded), or a `.wasm` (its variant set beside it when there is one). The instance also
+ * reports the file it loaded. */
+export async function loadWasmGc(source: string | URL, opts: LoadWasmGcOptions = {}): Promise<WasmGcInstance & { variant: string }> {
+  const base = (globalThis as { location?: { href?: string } }).location?.href;
+  const url = typeof source === "string" ? new URL(source, base) : source;
+  const read = opts.read ?? (async (u: URL) => {
+    const f = (globalThis as unknown as { fetch: (u: URL) => Promise<{ ok: boolean; status: number; arrayBuffer(): Promise<ArrayBuffer> }> }).fetch;
+    const r = await f(u);
+    if (!r.ok) throw new Error(`${u.href}: HTTP ${r.status}`);
+    return r.arrayBuffer();
+  });
+  const bytesOf = async (u: URL) => { const b = await read(u); return b instanceof Uint8Array ? b : new Uint8Array(b); };
+  let set: VariantSet | null = null, setUrl = url;
+  if (url.pathname.endsWith(".variants.json")) set = JSON.parse(new TextDecoder().decode(await bytesOf(url))) as VariantSet;
+  else {
+    setUrl = new URL(`${url.href}.variants.json`);
+    try { set = JSON.parse(new TextDecoder().decode(await bytesOf(setUrl))) as VariantSet; } catch { set = null; }
+  }
+  if (set !== null && set.schema !== VARIANTS_SCHEMA) throw new Error(`${setUrl.href}: not a variant set (${VARIANTS_SCHEMA})`);
+  const chosen = set ? new URL(chooseVariant(set).file, setUrl) : url;
+  const instance = await instantiateWasmGc(await bytesOf(chosen), opts);
+  return { ...instance, variant: chosen.pathname.split("/").pop()! };
 }
 
 /** Checked JS ingress for the first experimental closed-module ABI. Direct

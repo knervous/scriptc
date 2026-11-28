@@ -1,0 +1,20 @@
+{
+  "compilerOptions": {
+    "target": "es2022",
+    "module": "esnext",
+    "moduleResolution": "bundler",
+    "strict": true,
+    "noEmit": true,
+    "lib": ["es2022", "dom", "dom.iterable"],
+    "skipLibCheck": true,
+    "types": [],
+    "jsx": "react-jsx",
+    "jsxImportSource": "@scriptw/lui",
+    "paths": {
+      "#dom": ["./src/dom.ts"],
+      "@scriptw/lui/jsx-runtime": ["./src/jsx-runtime.ts"],
+      "@scriptw/lui/jsx-dev-runtime": ["./src/jsx-dev-runtime.ts"]
+    }
+  },
+  "include": ["src"]
+}

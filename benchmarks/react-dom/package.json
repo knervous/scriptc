@@ -1,0 +1,10 @@
+{
+  "name": "react-dom-bench",
+  "private": true,
+  "type": "module",
+  "description": "A js-framework-benchmark style React program, run on JavaScript React and as a WasmGC build",
+  "devDependencies": {
+    "react": "19.2.8",
+    "react-dom": "19.2.8"
+  }
+}

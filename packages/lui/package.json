@@ -1,0 +1,27 @@
+{
+  "name": "@scriptw/lui",
+  "version": "0.1.0",
+  "private": true,
+  "type": "module",
+  "license": "Apache-2.0",
+  "description": "Elm-style UI programs in TypeScript (a model, messages, a pure update, a view of virtual nodes) over a keyed DOM patcher, written to compile to WasmGC",
+  "keywords": ["ui", "elm", "vdom", "typescript", "wasmgc", "webassembly"],
+  "sideEffects": false,
+  "exports": {
+    ".": { "types": "./src/index.ts", "wasmgc": "./src/index.ts", "default": "./dist/index.js" },
+    "./jsx-runtime": { "types": "./src/jsx-runtime.ts", "wasmgc": "./src/jsx-runtime.ts", "default": "./dist/jsx-runtime.js" },
+    "./jsx-dev-runtime": { "types": "./src/jsx-dev-runtime.ts", "wasmgc": "./src/jsx-dev-runtime.ts", "default": "./dist/jsx-dev-runtime.js" },
+    "./dom-host": "./src/stream/dom-stream/src/dom-host.js",
+    "./package.json": "./package.json"
+  },
+  "imports": {
+    "#dom": {
+      "dom-stream": { "types": "./src/dom-stream.ts", "wasmgc": "./src/dom-stream.ts", "default": "./dist/dom-stream.js" },
+      "types": "./src/dom.ts",
+      "wasmgc": "./src/dom.ts",
+      "default": "./dist/dom.js"
+    }
+  },
+  "files": ["src", "dist", "docs", "README.md", "LICENSE", "NOTICE"],
+  "publishConfig": { "access": "public" }
+}

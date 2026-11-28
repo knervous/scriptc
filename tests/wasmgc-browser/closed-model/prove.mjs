@@ -49,9 +49,11 @@ const mergedOut=tmp+'/merged.wasm';execFileSync(merge,[linkedOut,'model',callerO
 const modelModule=new WebAssembly.Module(fs.readFileSync(linkedOut));const abi=new Uint8Array(WebAssembly.Module.customSections(modelModule,'scriptc.host-abi')[0]);
 const leb=n=>{const out=[];do{let b=n&127;n>>>=7;if(n)b|=128;out.push(b)}while(n);return out;};
 const sectionName=new TextEncoder().encode('scriptc.host-abi');const section=[...leb(sectionName.length),...sectionName,...abi];const mergedBytes=Buffer.concat([fs.readFileSync(mergedOut),Buffer.from([0,...leb(section.length),...section])]);
-const merged=await instantiateLinked(mergedBytes,{model:{}});merged.modules.model.main();assert.equal(merged.instance.exports.drive(),54);
+// The capability record too (merged across the inputs that carry one).
+const{withMergedCapabilities}=await import('../../../packages/compiler/dist/backend/wasmgc/capabilities.js');const mergedWithCaps=withMergedCapabilities(new Uint8Array(mergedBytes),[fs.readFileSync(linkedOut),fs.readFileSync(callerOut)].map(b=>new Uint8Array(b)));
+const merged=await instantiateLinked(mergedWithCaps,{model:{}});merged.modules.model.main();assert.equal(merged.instance.exports.drive(),54);
 report.checks.push({composition:'independent Wasm caller + closed model, merged',result:54,bytes:mergedBytes.length,hostAbiPreserved:true});
 const stage=path.resolve(here,'../../../../wgc-scratch/web/closed-sol');fs.mkdirSync(stage,{recursive:true});
-fs.copyFileSync(tmp+'/release.wasm',stage+'/model.wasm');fs.copyFileSync(tmp+'/release.wasm.closed.json',stage+'/model.closed.json');fs.writeFileSync(stage+'/merged.wasm',mergedBytes);
+fs.copyFileSync(tmp+'/release.wasm',stage+'/model.wasm');fs.copyFileSync(tmp+'/release.wasm.closed.json',stage+'/model.closed.json');fs.writeFileSync(stage+'/merged.wasm',mergedWithCaps);
 fs.copyFileSync(path.resolve(here,'../../../packages/compiler/dist/backend/wasmgc/host.js'),stage+'/host.js');fs.copyFileSync(here+'/index.html',stage+'/index.html');
 const dir=path.join(here,'receipts');fs.mkdirSync(dir,{recursive:true});const receipt=dir+`/closed-${Date.now().toString(36)}.json`;fs.writeFileSync(receipt,JSON.stringify(report,null,2)+'\n');console.log(JSON.stringify(report.checks,null,2));console.log(receipt);fs.rmSync(tmp,{recursive:true,force:true});

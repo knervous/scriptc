@@ -1541,11 +1541,14 @@ export class ClassDynamicDispatch {
     const bag: IrExpr = { kind: "call", callee: this.propertyBag!.name, args: [varRef("p.0", DYN, loc)], type: DYN, loc };
     const reflectionFallback = (target: IrExpr, property: IrExpr): IrExpr => ({ kind: "libCall", fn: computedWrite ? "dyn.reflectSet" : "dyn.reflectGet",
       args: [target, lowerer.coerceToExpected(property, DYN), ...(computedWrite ? [varRef("p.1", DYN, loc)] : []), varRef("p.reflectReceiver", DYN, loc)], type: computedWrite ? BOOL : DYN, loc });
-    const fallback: IrExpr = reflect ? reflectionFallback(bag, varRef(keyLocal, STRING, loc)) : computedProbe
-      ? { ...computedProbe, fn: probe === "in" ? "dyn.hasKey" : probe === "own" ? "dyn.hasOwn" : "dyn.propertyIsEnumerable", args: [bag, varRef(keyLocal, STRING, loc)] }
+    const fallbackOn = (target: IrExpr): IrExpr => reflect ? reflectionFallback(target, varRef(keyLocal, STRING, loc)) : computedProbe
+      ? { ...computedProbe, fn: probe === "in" ? "dyn.hasKey" : probe === "own" ? "dyn.hasOwn" : "dyn.propertyIsEnumerable", args: [target, varRef(keyLocal, STRING, loc)] }
       : computedRead
-      ? { ...computedRead, value: bag, key: varRef(keyLocal, STRING, loc) }
-      : { ...computedWrite!, fn: "dyn.keySet", args: [bag, varRef(keyLocal, STRING, loc), varRef("p.1", DYN, loc)] };
+      ? { ...computedRead, value: target, key: varRef(keyLocal, STRING, loc) }
+      : { ...computedWrite!, fn: "dyn.keySet", args: [target, varRef(keyLocal, STRING, loc), varRef("p.1", DYN, loc)] };
+    const fallback = fallbackOn(bag);
+    const finish = (value: IrExpr): IrStmt[] => reflect || !computedWrite ? [{ kind: "return", value, loc }]
+      : [{ kind: "exprStmt", expr: value, loc }, { kind: "return", value: null, loc }];
     const helper: IrFunction = {
       name: keyedHelperName(lowerer, "%dyn.class.computed", key), params, returnType: reflect && computedWrite || computedProbe ? BOOL : computedWrite ? VOID : DYN,
       locals: [...params.map((p) => ({ id: p.localId, name: p.name, type: p.type, mutable: false })), ...(dynamicKey ? [{ id: keyLocal, name: "key", type: STRING, mutable: false }] : [])],
@@ -1573,6 +1576,13 @@ export class ClassDynamicDispatch {
       { kind: "varDecl", localId: keyLocal, init: { kind: "libCall", fn: "dyn.toStringCoerce", args: [varRef("p.key", DYN, loc)], type: STRING, loc }, loc },
     );
     let branchIndex = dynamicKey ? 3 : 0;
+    // Native dyn: a plain dynamic object (the common receiver of a computed key: a props bag, a map-like record) matches no
+    // class branch and is its own property bag, so it takes the generic access before the class chain, not after it.
+    if (nativeDyn()) {
+      helper.body.splice(branchIndex, 0, { kind: "if", cond: { kind: "dynTest", test: "plainObject", value: varRef("p.0", DYN, loc), type: BOOL, loc },
+        then: finish(fallbackOn(varRef("p.0", DYN, loc))), else_: null, loc });
+      branchIndex++;
+    }
     // A compiled array is never a class instance, so the number arm precedes
     // the class branches; the index path hands every other receiver its
     // ToString key.

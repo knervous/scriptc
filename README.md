@@ -35,6 +35,8 @@ import { submit } from "host:gpu";
 
 Each exported function becomes a direct, typed call: a wasm import on the WasmGC target, and one call through the host island on the native lane. Parameters are numbers, booleans, strings, page objects or `Uint8Array`. A result can also be `void`, or a `Promise` of one of those types.
 
+On the WasmGC target a parameter can also be a callback whose parameters are numbers, booleans, strings or page objects and whose result is one of those or `void`. The host receives a plain function that calls the compiled function through an exported trampoline, one per signature, with no dynamic values on the way. The same compiled function is always the same host function.
+
 A module whose types the ABI cannot express falls back to the untyped page-module path. The `strictHostModules` option makes that a compile-time error instead.
 
 ## Native host island

@@ -1,0 +1,12 @@
+{
+  "async.wasm": "0 a10\n1 b20c30\n2 c30\n3 d40z50\n4 z50\n5 z50",
+  "atomics.wasm": "store 130 -1 40000 -2 4294967297 -3\nstore returns ToIntegerOrInfinity 3 0 0\nload -126 255 -25536 65534 1 4294967293\nadd -126 -> 1; 255 -> 1; 4294967293 -> 2\nsub -25536 -> -25537; 0 -> 65535\nand 12 -> 8; or 8 -> 13; xor 13 -> 2\nexchange 0 -> 44; 0 -> -7\ncmpxchg 255 -> 9; miss 9 -> 9\ncmpxchg i8 -5 -> 6; i32 -7 -> 70\nindex ToIndex 70 1\nnotify with no waiters 0 0\nout of range: RangeError: Invalid atomic access index\nnegative: RangeError\nsubarray 99 2",
+  "basics-legacy-eh.wasm": "caught big 135\nsum 135 7 5",
+  "basics.wasm": "caught big 135\nsum 135 7 5",
+  "byte-view-fixed.wasm": "len=4 first=42",
+  "byte-view.wasm": "len=4 first=42",
+  "generator.wasm": "v 0\nv 2\nv 4\nret done true",
+  "relaxed-simd.wasm": "3.5,-7,-0.5,-1 -2.5,9,2.5,-5\n1,0,-1,-2",
+  "simd.wasm": "3.5,-7,-0.5,-1 -2.5,9,2.5,-5\n1,0,-1,-2",
+  "strings.wasm": "result -548591401"
+}

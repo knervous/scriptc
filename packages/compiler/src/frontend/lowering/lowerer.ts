@@ -6964,6 +6964,11 @@ export class Lowerer {
   }
 
   coerceToExpected(expr: IrExpr, expected: IrType): IrExpr {
+    // A union of a class and its subclasses (or of several subclasses) into a slot of that base class: each arm upcasts.
+    if (expr.type.kind === "union" && expected.kind === "object") {
+      const helper = this.unionUpcastHelper(expr.type.unionId, expected.className, expr.loc);
+      if (helper !== null) return { kind: "call", callee: helper, args: [expr], type: expected, loc: expr.loc };
+    }
     if (expr.kind === "closure" && (expected.kind === "dyn" || expected.kind === "jsval")) {
       const ctor = this.primitiveCtorIdentity(expr);
       if (ctor) return this.coerceToExpected(ctor, expected);
@@ -8962,7 +8967,7 @@ export class Lowerer {
       body: [
         {
           kind: "return",
-          value: { kind: "closure", fnName: impl, captures: ["f.0"], type: toT, loc },
+          value: { kind: "closure", fnName: impl, captures: ["f.0"], adapts: true, type: toT, loc },
           loc,
         },
       ],
@@ -9500,6 +9505,38 @@ export class Lowerer {
     const fn = buildUnionNarrow(name, from, target, loc, (type) => this.fmt(type));
     if (!fn) throw new InternalCompilerError("lowerer bug: invalid checked union extraction");
     this.liftedFns.push(fn);
+    return name;
+  }
+
+  /** Interned `%union.upcast.<n>(u)`: a union whose every arm is the class `className` or one of its subclasses, as a
+   * `className` value (each arm's payload, upcast). Null when an arm is anything else (a unit, a primitive, an unrelated class). */
+  unionUpcastHelper(fromId: string, className: string, loc: SrcLoc): string | null {
+    const from = this.unions.get(fromId);
+    if (!from || from.arms.length === 0) return null;
+    // Unit arms (an element read's undefined) are the checked extraction's: a TypeError, as narrowedArmHelper's.
+    const upcasts = (arm: IrType) => arm.kind === "object" && (arm.className === className || this.isSubclassOf(arm.className, className));
+    if (!from.arms.every((arm) => upcasts(arm) || isUnitType(arm)) || !from.arms.some(upcasts)) return null;
+    const key = `${fromId}:${className}`;
+    const existing = this.narrowHelpers.get(`upcast:${key}`);
+    if (existing) return existing;
+    const name = keyedHelperName(this, "%union.upcast", key);
+    this.narrowHelpers.set(`upcast:${key}`, name);
+    const inputType: IrType = { kind: "union", unionId: from.id };
+    const input: IrExpr = { kind: "varRef", localId: "u.0", type: inputType, loc };
+    const target: IrType = { kind: "object", className };
+    const body: IrStmt[] = from.arms.map((arm, tag): IrStmt => ({
+      kind: "if", cond: { kind: "unionIsTag", unionId: from.id, tag, negated: false, value: input, type: BOOL, loc },
+      then: [upcasts(arm)
+        ? { kind: "return", value: this.upcastTo({ kind: "unionNarrow", unionId: from.id, tag, value: input, type: arm, loc }, className), loc }
+        : { kind: "throw", value: { kind: "libCall", fn: "error.new", type: { kind: "object", className: "%TypeError" }, loc,
+          args: [{ kind: "strLit", value: `${arm.kind === "undefinedT" ? "undefined" : "null"} is not representable in the target union (a value narrowed or asserted past it still held it)`, type: STRING, loc }] }, loc }],
+      else_: null, loc,
+    }));
+    body.push({ kind: "throw", value: { kind: "strLit", value: "scriptc: internal error: invalid union tag", type: STRING, loc }, loc });
+    this.liftedFns.push({
+      name, params: [{ localId: "u.0", name: "u", type: inputType }], returnType: target,
+      locals: [{ id: "u.0", name: "u", type: inputType, mutable: false }], body, loc,
+    });
     return name;
   }
 

@@ -1,0 +1,24 @@
+
+export const enableSuspenseCallback: boolean = false;
+export const enableScopeAPI: boolean = false;
+export const enableCreateEventHandleAPI: boolean = false;
+export const enablePostpone: boolean = false;
+export const enableViewTransition: boolean = false;
+export const enableGestureTransition: boolean = false;
+export const enableScrollEndPolyfill: boolean = false;
+export const enableSuspenseyImages: boolean = false;
+export const enableSrcObject: boolean = false;
+export const enableDefaultTransitionIndicator: boolean = false;
+export const enableTransitionTracing: boolean = false;
+export const enableLegacyHidden: boolean = false;
+export const passChildrenWhenCloningPersistedNodes: boolean = false;
+export const renameElementSymbol: boolean = true;
+export const disableClientCache: boolean = true;
+export const disableLegacyMode: boolean = true;
+export const disableCommentsAsDOMContainers: boolean = true;
+export const enableTrustedTypesIntegration: boolean = false;
+export const disableInputAttributeSyncing: boolean = false;
+export const enableProfilerTimer: boolean = false;
+export const enableProfilerCommitHooks: boolean = false;
+export const enableAsyncDebugInfo: boolean = true;
+export const enableUpdaterTracking: boolean = false;

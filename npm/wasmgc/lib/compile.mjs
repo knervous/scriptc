@@ -21,6 +21,10 @@ export async function compile(entry, options = {}) {
     outputKind: "wasmgc",
     release: options.release === true,
     ...(options.browser === true ? { browser: true } : {}),
+    // The package builds auto capabilities against the default (or given) targets: a compat variant only when a target
+    // needs one and the program uses the feature that differs.
+    capabilities: options.capabilities ?? "auto",
+    ...(options.targets === undefined ? {} : { targets: options.targets }),
   });
   if (!r.ok) {
     return {
@@ -38,7 +42,17 @@ export async function compile(entry, options = {}) {
       }),
     };
   }
-  return { ok: true, wasmPath: outPath, hostSidecarPath: `${outPath}.host.json` };
+  const a = r.artifact;
+  return {
+    ok: true,
+    wasmPath: outPath,
+    hostSidecarPath: `${outPath}.host.json`,
+    capabilitiesPath: `${outPath}.capabilities.json`,
+    capabilities: a.capabilities,
+    variants: (a.variants ?? []).map((v) => ({ wasmPath: v.path, key: v.key, requires: v.requires })),
+    ...(a.variants?.length > 1 ? { variantsPath: `${outPath}.variants.json` } : {}),
+    explainCapabilities: a.explainCapabilities ?? [],
+  };
 }
 
 /** The 1-based line of a source offset, when the source can be read. */

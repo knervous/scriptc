@@ -20,7 +20,7 @@ import { dirname, isAbsolute, join, resolve } from "node:path";
 import { isNpmStaticPackage, npmStaticPackageOfPath, npmStaticTransformPkgJson } from "./npm-static.js";
 import { provenanceEntryFor } from "./provenance-registry.js";
 import { trackedAccessibleEntries, trackedDirectoryExists, trackedExists, trackedExistsOnce, trackedFileExists, trackedReadFile, trackedRealpath } from "./input-tracker.js";
-import { isRelativeSpecifier, packageNameOfSpecifier } from "./workspace-registry.js";
+import { isRelativeSpecifier, packageNameOfSpecifier, registerConditionSourcePackage } from "./workspace-registry.js";
 
 function isFile(path: string): boolean {
   return trackedFileExists(path);
@@ -821,7 +821,7 @@ export function resolveBareModule(
    * unshadowed declaration pass for overload-overlay discovery;
    * "runtime-js" and "runtime-source" probe Node's import-condition entry
    * by executable file kind; default follows the active set. */
-  mode?: "js-only" | "types-only" | "runtime-js" | "runtime-source",
+  mode?: "js-only" | "types-only" | "runtime-js" | "runtime-source" | "condition-source",
   /** Select the actual module edge when compiling an opted-in package. */
   resolutionKind: "import" | "require" = "import",
 ): BareResolution | null {
@@ -832,13 +832,16 @@ export function resolveBareModule(
   // pass only, the "types" export condition dropped, the @types mangling
   // never consulted — mirroring the shadowed world the tsgo host serves.
   const runtimeImport = mode === "runtime-js" || mode === "runtime-source";
-  const npmStatic = mode === "js-only" || (!runtimeImport && mode !== "types-only" && isNpmStaticPackage(pkgName));
+  const conditionSource = mode === "condition-source";
+  const npmStatic = mode === "js-only" || (!runtimeImport && !conditionSource && mode !== "types-only" && isNpmStaticPackage(pkgName));
   const conditions = runtimeImport
     ? RUNTIME_IMPORT_CONDITIONS
+    : conditionSource
+      ? new Set([...extraConditions, "import", "default"])
     : npmStatic
       ? resolutionKind === "require" ? JS_REQUIRE_CONDITIONS : JS_ONLY_CONDITIONS
       : EXPORT_CONDITIONS;
-  const runtimeOnly = runtimeImport || npmStatic;
+  const runtimeOnly = runtimeImport || conditionSource || npmStatic;
 
   const inPackage = (nmPkgDir: string, name: string, pass: ResolutionPass): BareResolution | null => {
     // A workspace link: the answer's realpath escaped node_modules, so the
@@ -922,7 +925,7 @@ export function resolveBareModule(
   };
 
   if (mode === "types-only") return passOnce("types");
-  if (mode === "runtime-source") return passOnce("source");
+  if (mode === "runtime-source" || mode === "condition-source") return passOnce("source");
   if (mode === "runtime-js") return passOnce("js");
   return npmStatic ? passOnce("js") : (passOnce("types") ?? passOnce("js"));
 }
@@ -951,6 +954,8 @@ export function resolveWorkspaceSourceModule(
   ) {
     return null;
   }
+  const conditional = conditionSourceModule(fromFile, specifier);
+  if (conditional !== null) return conditional;
   const source = resolveBareModule(fromFile, specifier, "runtime-source");
   if (
     source?.workspaceDir === undefined ||
@@ -962,6 +967,30 @@ export function resolveWorkspaceSourceModule(
   return resolveBareModule(fromFile, specifier, "runtime-js") === null
     ? source
     : null;
+}
+
+/** An installed package that names TypeScript source as the entry of a
+ * compile condition (CompileBaseOptions.conditions: `"wasmgc":
+ * "./src/index.ts"` beside `"default": "./dist/index.js"`). The condition is
+ * the package's statement that compiled builds take its source, so the
+ * source is part of the program module graph, as a source-only workspace
+ * package's is, rather than npm surface whose JavaScript runs in the island.
+ * Only when the compile names conditions, the conditional answer is
+ * TypeScript source (not declarations), and the checker's resolution (which
+ * sees the same conditions plus "types") answers the same file: the two
+ * worlds must load one module. */
+function conditionSourceModule(fromFile: string, specifier: string): BareResolution | null {
+  if (extraConditions.length === 0) return null;
+  const source = resolveBareModule(fromFile, specifier, "condition-source");
+  if (source === null || !/\.(?:ts|tsx|mts|cts)$/.test(source.typesFile) || /\.d\.(?:ts|mts|cts)$/.test(source.typesFile)) {
+    return null;
+  }
+  const checked = resolveBareModule(fromFile, specifier, "types-only");
+  if (checked === null || checked.typesFile !== source.typesFile) return null;
+  const file = source.typesFile.split("\\").join("/");
+  const at = file.lastIndexOf(`/node_modules/${source.packageName}/`);
+  if (at >= 0) registerConditionSourcePackage(source.packageName, file.slice(0, at) + `/node_modules/${source.packageName}`);
+  return source;
 }
 
 /** Resolves a `/// <reference types="name" />`-style TYPE DIRECTIVE the way

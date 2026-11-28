@@ -1,0 +1,5 @@
+{
+  "extends": "./tsconfig.json",
+  "compilerOptions": { "paths": { "#dom": ["./src/dom-stream.ts"] } },
+  "include": ["src"]
+}

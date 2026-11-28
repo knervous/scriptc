@@ -162,6 +162,10 @@ importers:
         specifier: workspace:*
         version: link:../runtime-win32-x64-msvc
 
+  packages/dom-stream: {}
+
+  packages/host-stream: {}
+
   packages/llvm-darwin-arm64: {}
 
   packages/llvm-darwin-x64: {}

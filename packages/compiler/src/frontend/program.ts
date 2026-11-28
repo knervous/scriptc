@@ -54,7 +54,7 @@ import {
   tscPassthroughDiag,
   unsupportedDiag,
 } from "../diagnostics/diagnostic.js";
-import { compileConditions, isNodeModulesPath, nearestInvalidPackageJsonPath, nearestPackageType, nearestPkgJsonPath, projectDtsRuntimeSibling, resolveBareModule, resolveProjectModule, resolveTypeDirective, setProjectPathMappings, setProjectRealm } from "./resolve.js";
+import { compileConditions, isNodeModulesPath, nearestInvalidPackageJsonPath, nearestPackageType, nearestPkgJsonPath, projectDtsRuntimeSibling, resolveBareModule, resolveProjectModule, resolveTypeDirective, resolveWorkspaceSourceModule, setProjectPathMappings, setProjectRealm } from "./resolve.js";
 import { probeNodeImportRefusal, probeNodeRequireRefusal } from "./npm.js";
 import { isNpmStaticPackage, npmStaticActive, npmStaticFsShadow, npmStaticPackageOfPath, reportNpmStaticOffender, setNpmStaticDeclarationFunctions, setNpmStaticDeclarationOverloads, setNpmStaticPackages } from "./npm-static.js";
 import { hasPrunableSourcePackage, isPrunedNpmReexport, planNpmStaticReexports } from "./npm-static-prune.js";
@@ -82,6 +82,7 @@ import {
   isRelativeSpecifier,
   isWorkspacePackageName,
   npmPackageNameOf,
+  isConditionSourcePath,
   registerWorkspacePackage,
   workspacePackageOfPath,
 } from "./workspace-registry.js";
@@ -595,6 +596,8 @@ export function entryPackageFilePredicate(entryPath: string): (file: string) => 
     : entryFile.slice(0, installedAt) + "/node_modules/" + npmPackageNameOf(entryFile) + "/";
   return (file) => {
     const normalized = tsgoPath(file);
+    // An installed package a compile condition points at TypeScript source (resolve.ts, conditionSourceModule).
+    if (isConditionSourcePath(normalized)) return true;
     return normalized === entryFile || (
       prefix !== null && normalized.startsWith(prefix) &&
       !normalized.slice(prefix.length).split("/").includes("node_modules")
@@ -2490,6 +2493,8 @@ function preflight7(load: LoadResult): {
       probed.add(key);
       const r = resolveBareModule(fromFile, spec);
       if (r !== null && r.workspaceDir !== undefined) registerWorkspacePackage(r.packageName, r.workspaceDir);
+      // An installed package whose condition-selected entry is TypeScript source registers as program code here.
+      else resolveWorkspaceSourceModule(fromFile, spec);
     };
     for (const sf of program.getSourceFiles()) {
       if (sf.isDeclarationFile || sf.fileName.endsWith(".json")) continue;

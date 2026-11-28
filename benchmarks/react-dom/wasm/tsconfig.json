@@ -1,0 +1,49 @@
+{
+ "compilerOptions": {
+  "target": "es2022",
+  "module": "esnext",
+  "moduleResolution": "bundler",
+  "strict": true,
+  "noEmit": true,
+  "lib": [
+   "es2022",
+   "dom",
+   "dom.iterable"
+  ],
+  "skipLibCheck": true,
+  "types": [],
+  "paths": {
+   "shared/*": [
+    "../../../packages/react-ts/shared/*"
+   ],
+   "react-reconciler/*": [
+    "../../../packages/react-ts/react-reconciler/*"
+   ],
+   "react-dom-bindings/*": [
+    "../../../packages/react-ts/react-dom-bindings/*"
+   ],
+   "react-dom/*": [
+    "../../../packages/react-ts/react-dom/*"
+   ],
+   "react/*": [
+    "../../../packages/react-ts/react/*"
+   ],
+   "scheduler": [
+    "../../../packages/react-ts/scheduler/index.ts"
+   ],
+   "scheduler/*": [
+    "../../../packages/react-ts/scheduler/*"
+   ],
+   "react": [
+    "../../../packages/react-ts/react/index.ts"
+   ],
+   "react-dom": [
+    "../../../packages/react-ts/react-dom/index.ts"
+   ],
+   "dom-stream/*": [
+    "../../../packages/dom-stream/src/*"
+   ]
+  },
+  "allowImportingTsExtensions": true
+ }
+}

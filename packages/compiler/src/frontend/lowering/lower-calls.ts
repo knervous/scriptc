@@ -515,7 +515,9 @@ export interface GenericInstance {
         return { type: mapped, mode: "rest" };
       }
       if (declParam.initializer) return defaultParameterShape(lowerer, declParam, mapped);
-      if (declParam.questionToken && !lowerer.bareUndefinedArmedUnion(mapped)) {
+      // A checked-dynamic or island slot holds undefined itself (paramShape's rule): `@param {T} [component]` instantiated
+      // with an unknown T.
+      if (declParam.questionToken && !lowerer.bareUndefinedArmedUnion(mapped) && mapped.kind !== "dyn" && mapped.kind !== "jsval") {
         lowerer.unsupported("SC1090", declParam, `optional parameters of type '${lowerer.fmt(mapped)}'`);
       }
       return { type: mapped, mode: declParam.questionToken ? "omittable" : "required" };
@@ -1253,7 +1255,9 @@ function completeFuncValueArgs(
     // misses returns undefined there, whatever the declared result says.
     if (mappedReturn) mappedReturn = lowerer.runtimeOptionalGenericReturnType(decl, mappedReturn);
     if (isJsSourceFile(decl.getSourceFile()) && mappedReturn?.kind === "void") {
-      let returnsValue = false;
+      // A concise arrow returns its body's value: `(f = noop) => f()` infers void from the default, yet returns what
+      // the caller's f returns.
+      let returnsValue = ts.isArrowFunction(decl) && !ts.isBlock(decl.body) && !ts.isVoidExpression(decl.body);
       const scan = (node: ts.Node): void => {
         if (node !== decl && ts.isFunctionLike(node)) return;
         if (ts.isReturnStatement(node) && node.expression) returnsValue = true;
@@ -4021,6 +4025,9 @@ export function lowerCall(lowerer: Lowerer, expr: ts.CallExpression): IrExpr {
 
     // A function imported from a typed host module (an ambient `declare module "host:..."`): a wasm import call.
     { const hosted = lowerHostModuleCall(lowerer, expr); if (hosted) return hosted; }
+
+    // A captured Array.prototype method called with `.call` (Svelte's `index_of.call(list, x)`).
+    { const aliasCall = lowerArrayPrototypeAliasCall(lowerer, expr); if (aliasCall !== null) return aliasCall; }
 
     // The indirect-call idiom `(0, f)(x)` / `(0, a[i])(x)`: a call of the
     // value with no receiver (`this` undefined), the shape bundlers and
@@ -8390,6 +8397,9 @@ function loweredTemplateStrings(
         ret.kind !== "void" &&
         ctxSigs.length === 1 &&
         !returnedIntoValueSlot(lowerer, node) &&
+        // A slot whose void is only JavaScript inference (a parameter defaulted to `noop = () => {}`) is no contract:
+        // the parameter is untyped, and its caller's value is what calls through it return.
+        !(ctxDecl !== undefined && isJsSourceFile(ctxDecl.getSourceFile()) && ts.isFunctionLike(ctxDecl) && !ctxDecl.type && !hasExplicitJsDocReturn(ctxDecl)) &&
         !!(lowerer.checker.getReturnTypeOfSignature(ctxSigs[0]!).flags & ts.TypeFlags.Void)
       ) {
         ret = VOID;
@@ -11667,6 +11677,46 @@ export function lowerFunction(lowerer: Lowerer, decl: ts.FunctionDeclaration): I
     lowerer.objLitGenericFns.set(fnNode, info);
     return info;
   }
+
+/** Array.prototype methods JavaScript libraries capture as values and call with `.call` (Svelte's `index_of`, `includes`):
+ * pure reads of an array, the same whether they run on the compiled array or as the page's generic algorithm. */
+const ALIASED_ARRAY_METHODS = new Set(["indexOf", "includes", "lastIndexOf"]);
+
+/** `alias.call(receiver, ...args)` where `alias` is a never-reassigned binding of `Array.prototype.indexOf` (or includes,
+ * lastIndexOf), in JavaScript on the browser's native dynamic model. The receiver and arguments evaluate once, in order; an
+ * array receiver runs its own method (a compiled array natively, with no host call), and any other receiver keeps the
+ * generic call through the page's function. Null for every other call. */
+function lowerArrayPrototypeAliasCall(lowerer: Lowerer, expr: ts.CallExpression): IrExpr | null {
+  if (!browserTarget() || !nativeDyn() || !isJsSourceFile(expr.getSourceFile())) return null;
+  const access = expr.expression;
+  if (!ts.isPropertyAccessExpression(access) || access.questionDotToken || expr.questionDotToken || access.name.text !== "call") return null;
+  if (expr.arguments.length < 1 || expr.arguments.some(ts.isSpreadElement) || !ts.isIdentifier(access.expression)) return null;
+  let sym = lowerer.checker.getSymbolAtLocation(access.expression);
+  if (sym === undefined) return null;
+  if ((sym.flags & ts.SymbolFlags.Alias) !== 0) sym = lowerer.checker.getAliasedSymbol(sym);
+  const decl = lowerer.checker.valueDeclarationOf(sym);
+  if (decl === undefined || !ts.isVariableDeclaration(decl) || decl.initializer === undefined || !isJsSourceFile(decl.getSourceFile())) return null;
+  const init = decl.initializer;
+  if (!ts.isPropertyAccessExpression(init) || init.questionDotToken || !ts.isPropertyAccessExpression(init.expression)) return null;
+  const method = init.name.text;
+  if (!ALIASED_ARRAY_METHODS.has(method) || lowerer.stdlibGlobalMember(init.expression, "Array") !== "prototype") return null;
+  if (!bindingNeverReassigned(lowerer, sym, decl)) return null;
+  const loc = locOf(expr);
+  const stmts: IrStmt[] = [];
+  const hold = (node: ts.Expression, name: string): IrExpr => {
+    const value = lowerer.coerceToExpected(lowerer.lowerExpr(node), DYN);
+    const local = lowerer.declareHiddenLocal(name, DYN);
+    stmts.push({ kind: "varDecl", localId: local.id, init: value, loc: value.loc });
+    return { kind: "varRef", localId: local.id, type: DYN, loc: value.loc };
+  };
+  const recv = hold(expr.arguments[0]!, "%arrayMethodRecv");
+  const rest = expr.arguments.slice(1).map((a) => hold(a, "%arrayMethodArg"));
+  const generic: IrExpr = { kind: "dynInvoke", recv: lowerer.coerceToExpected(lowerer.lowerExpr(access.expression), DYN), method: "call",
+    calleeName: access.getText(), args: [recv, ...rest], type: DYN, loc };
+  const own: IrExpr = { kind: "dynInvoke", recv, method, calleeName: `${access.expression.getText()}.call`, args: rest, type: DYN, loc };
+  const result: IrExpr = { kind: "ternary", cond: { kind: "dynTest", test: "array", value: recv, type: BOOL, loc }, then: own, else_: generic, type: DYN, loc };
+  return { kind: "seqExpr", stmts, result, type: DYN, loc };
+}
 
 /** True when nothing in `sym`'s DECLARING FILE ever writes it after the
    * initializer: assignments (plain and compound, destructuring targets

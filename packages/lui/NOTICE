@@ -1,0 +1,5 @@
+@scriptw/lui
+Part of scriptw, licensed under the Apache License, Version 2.0 (LICENSE).
+
+src/stream/ holds unmodified copies of the DOM stream (packages/dom-stream/src) and host stream (packages/host-stream/src)
+sources of the same repository, under the same license.

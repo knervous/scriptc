@@ -1,0 +1,12 @@
+{
+  "name": "frameworks-bench",
+  "private": true,
+  "type": "module",
+  "description": "The js-framework-benchmark style table app on SolidJS and Svelte 5, run as JavaScript and as WasmGC builds",
+  "devDependencies": {
+    "@babel/core": "7.29.16",
+    "babel-preset-solid": "1.9.19",
+    "solid-js": "1.9.20",
+    "svelte": "5.59.2"
+  }
+}

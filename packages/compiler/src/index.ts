@@ -60,6 +60,7 @@ import { moduleFetchesNatively, moduleRuntimeFeatures } from "./ir/runtime-featu
 import { hostReach } from "./backend/host-features.js";
 import { checkClosedProfile } from "./backend/wasmgc/closed-profile.js";
 import { indexSiteProfile, SiteProfileError, type SiteProfileIndex } from "./backend/wasmgc/site-profile.js";
+import { DEFAULT_TARGETS, parseCapabilities, parseTargets, planVariants, preferredMode, VARIANTS_SCHEMA, type CapabilityMode, type CapabilityRequest, type Requirement, type VariantSet } from "./backend/wasmgc/capabilities.js";
 import { emitWasmGcModule, WASMGC_HOST_ABI, WasmGcUnsupportedError, type WasmGcEmitResult, type WasmGcLink } from "./backend/wasmgc/emitter.js";
 import { serializeModule } from "./ir/serialize.js";
 import { validateModule } from "./ir/validate.js";
@@ -87,6 +88,7 @@ export {
 export type { NativeLinkInfo, NativeLinkFeatures } from "./backend/native-link-info.js";
 export type { WindowsSubsystem } from "./backend/targets.js";
 
+export * as capabilities from "./backend/wasmgc/capabilities.js";
 export { InternalCompilerError } from "./errors.js";
 export {
   compileExternalC as compileC,
@@ -1701,11 +1703,44 @@ async function compileLibraryTracked(
  * optimization), the emit with the options the compile request resolves to, and the artifacts beside the binary (source
  * map, host imports and modules, fence receipt, link and specialization manifests, release manifest). Whole-program
  * builds and object links (link/build.ts emitLinkedWasmGc) share it, so both refuse and receipt alike. */
+/** The WasmGC output under its capability modes (docs/capabilities.md §4): the preferred artifact, then at most one
+ * compat variant when a declared target needs one and the program uses the feature that differs. */
 async function emitWasmGcArtifacts(mod: IrModule, opts: CompileRequestOptions, entryPath: string, sourceTexts: Map<string, string>,
   profileSites: SiteProfileIndex | undefined): Promise<CompileRequestResult> {
+  const parsedCaps = typeof opts.capabilities === "object" ? { request: opts.capabilities, errors: [] as string[] } : parseCapabilities(opts.capabilities);
+  const parsedTargets = parseTargets(opts.targets ?? DEFAULT_TARGETS);
+  const optionErrors = [...parsedCaps.errors, ...parsedTargets.errors];
+  if (optionErrors.length) return { ok: false, diagnostics: optionErrors.map(m => nativeCodegenDiag("SC3002", m, entryPath)), sourceTexts };
+  // Without capabilities or targets the compiler builds the baseline only (no variant set); the npm package asks for auto.
+  const explicitCaps = opts.capabilities !== undefined || opts.targets !== undefined;
+  const request: CapabilityRequest = { ...parsedCaps.request, ...(explicitCaps ? {} : { preset: "baseline" as const }), ...(parsedCaps.request.relaxedSimd === undefined && opts.experimentalRelaxedSimd === true ? { relaxedSimd: true } : {}) };
+  const preferred = preferredMode(request);
+  const first = await emitWasmGcArtifact(mod, opts, entryPath, sourceTexts, profileSites, fences0(mod), preferred, "preferred");
+  if (!first.ok || first.artifact.kind !== "wasmgc") return first;
+  const uses = first.artifact.capabilityUses!;
+  const plan = planVariants(request, preferred, uses, parsedTargets.targets);
+  if (plan.errors.length) return { ok: false, diagnostics: plan.errors.map(m => nativeCodegenDiag("SC3002", m, entryPath)), sourceTexts };
+  const variantsPath = `${opts.outPath}.variants.json`;
+  const compatPath = opts.outPath.replace(/(\.wasm)?$/, ".compat.wasm");
+  const variants: { path: string; key: string; requires: Requirement[] }[] = [{ path: opts.outPath, key: first.artifact.capabilities!.key, requires: first.artifact.capabilities!.requires }];
+  if (plan.compat) {
+    const second = await emitWasmGcArtifact(mod, { ...opts, outPath: compatPath }, entryPath, sourceTexts, profileSites, fences0(mod), plan.compat, "compat");
+    if (!second.ok || second.artifact.kind !== "wasmgc") return second;
+    variants.push({ path: compatPath, key: second.artifact.capabilities!.key, requires: second.artifact.capabilities!.requires });
+    const set: VariantSet = { schema: VARIANTS_SCHEMA, variants: variants.map(v => ({ file: basename(v.path), key: v.key, requires: v.requires })) };
+    await writeFile(variantsPath, JSON.stringify(set, null, 2) + "\n");
+  } else await rm(variantsPath, { force: true });
+  return { ...first, artifact: { ...first.artifact, variants, explainCapabilities: plan.explain } };
+}
+
+/** The fences of a module (the release gate's list). */
+const fences0 = (mod: IrModule) => collectFences(mod);
+
+async function emitWasmGcArtifact(mod: IrModule, opts: CompileRequestOptions, entryPath: string, sourceTexts: Map<string, string>,
+  profileSites: SiteProfileIndex | undefined, collected: ReturnType<typeof collectFences>, capabilityMode: CapabilityMode, capabilityVariant: "preferred" | "compat"): Promise<CompileRequestResult> {
   // One list for the release gate and the fence receipt (the emitter copies before it changes the IR), so a fence
   // refuses a release exactly when the receipt reports it.
-  const fences = collectFences(mod);
+  const fences = collected;
   if (opts.release) {
     // A release build: optimized, and no reachable unsupported-operation fence.
     if (opts.optimization === "dev") return { ok: false, diagnostics: [nativeCodegenDiag("SC3002", "a release build cannot use optimization \"dev\"", entryPath)], sourceTexts };
@@ -1724,7 +1759,7 @@ async function emitWasmGcArtifacts(mod: IrModule, opts: CompileRequestOptions, e
       try { return readFileSync(file, "utf8"); } catch { return undefined; }
     };
     try {
-      emitted = emitWasmGcModule(mod, { jsFences: !opts.release, ...(wantSourceMap ? { sourceMap: { sourceText, url: opts.sourceMapUrl ?? process.env["SCRIPTC_WASMGC_SOURCE_MAP_URL"] ?? `${basename(opts.outPath)}.map`, sourcesContent: opts.sourceMapContent === true || process.env["SCRIPTC_WASMGC_SOURCE_MAP_CONTENT"] === "1" } } : {}), fuseTestCasts: opts.fuseTestCasts === true, noPageFacades: opts.noPageFacades === true, ...(opts.inModuleMath === false ? { inModuleMath: false } : {}), experimentalTsNativeAny: opts.experimentalTsNativeAny === true, experimentalOpaquePageExpandos: opts.experimentalOpaquePageExpandos === true, experimentalRelaxedSimd: opts.experimentalRelaxedSimd === true, experimentalDynI31: opts.experimentalDynI31 === true, experimentalDomMirror: opts.experimentalDomMirror === true, hostHandles: opts.hostHandles === true, stripSourceSites: opts.stripSourceSites === true, ...(dynInlineSlots(opts) ? { experimentalDynInlineSlots: dynInlineSlots(opts) } : {}), experimentalJsConstructorStructs: opts.experimentalJsConstructorStructs === true, experimentalJsLiteralStructs: opts.experimentalJsLiteralStructs === true, experimentalJsPointsTo: opts.experimentalJsPointsTo === true, optimizeLevel: opts.optimization === "dev" ? 0 : 2, engineDyn: opts.browser === true && opts.dynModel !== "native", browser: opts.browser === true, ...(opts.experimentalJsSpecialize === "guarded" ? { experimentalJsSpecialize: opts.experimentalJsSpecialize, experimentalJsSpecializeProperties: opts.experimentalJsSpecializeProperties, experimentalJsSpecializeCounters: opts.experimentalJsSpecializeCounters } : {}), ...(profileSites ? { profileSites, profileMinInvocations: Number(process.env["SCRIPTC_PGO_MIN_INVOCATIONS"] ?? 0) || 0, profileCounters: opts.experimentalJsSpecializeCounters === true } : {}), ...((opts as { wasmLink?: WasmGcLink }).wasmLink ? { link: (opts as { wasmLink?: WasmGcLink }).wasmLink } : {}) });
+      emitted = emitWasmGcModule(mod, { jsFences: !opts.release, ...(wantSourceMap ? { sourceMap: { sourceText, url: opts.sourceMapUrl ?? process.env["SCRIPTC_WASMGC_SOURCE_MAP_URL"] ?? `${basename(opts.outPath)}.map`, sourcesContent: opts.sourceMapContent === true || process.env["SCRIPTC_WASMGC_SOURCE_MAP_CONTENT"] === "1" } } : {}), fuseTestCasts: opts.fuseTestCasts === true, noPageFacades: opts.noPageFacades === true, ...(opts.inModuleMath === false ? { inModuleMath: false } : {}), experimentalTsNativeAny: opts.experimentalTsNativeAny === true, experimentalOpaquePageExpandos: opts.experimentalOpaquePageExpandos === true, experimentalRelaxedSimd: capabilityMode.relaxedSimd, capabilityMode, capabilityVariant, experimentalDynI31: opts.experimentalDynI31 === true, experimentalDomMirror: opts.experimentalDomMirror === true, hostHandles: opts.hostHandles === true, stripSourceSites: opts.stripSourceSites === true, ...(dynInlineSlots(opts) ? { experimentalDynInlineSlots: dynInlineSlots(opts) } : {}), experimentalJsConstructorStructs: opts.experimentalJsConstructorStructs === true, experimentalJsLiteralStructs: opts.experimentalJsLiteralStructs === true, experimentalJsPointsTo: opts.experimentalJsPointsTo === true, optimizeLevel: opts.optimization === "dev" ? 0 : 2, engineDyn: opts.browser === true && opts.dynModel !== "native", browser: opts.browser === true, ...(opts.experimentalJsSpecialize === "guarded" ? { experimentalJsSpecialize: opts.experimentalJsSpecialize, experimentalJsSpecializeProperties: opts.experimentalJsSpecializeProperties, experimentalJsSpecializeCounters: opts.experimentalJsSpecializeCounters } : {}), ...(profileSites ? { profileSites, profileMinInvocations: Number(process.env["SCRIPTC_PGO_MIN_INVOCATIONS"] ?? 0) || 0, profileCounters: opts.experimentalJsSpecializeCounters === true } : {}), ...((opts as { wasmLink?: WasmGcLink }).wasmLink ? { link: (opts as { wasmLink?: WasmGcLink }).wasmLink } : {}) });
     } catch (err) {
       if (!(err instanceof WasmGcUnsupportedError)) throw err;
       return { ok: false, diagnostics: [nativeCodegenDiag("SC3002", err.message, entryPath)], sourceTexts };
@@ -1736,6 +1771,8 @@ async function emitWasmGcArtifacts(mod: IrModule, opts: CompileRequestOptions, e
     if (emitted.sourceMap !== undefined) await writeFile(`${opts.outPath}.map`, emitted.sourceMap);
     else await rm(`${opts.outPath}.map`, { force: true });
     await writeFile(`${opts.outPath}.host.json`, JSON.stringify(emitted.hostImports, null, 2) + "\n");
+    // The resolved capabilities (the module's scriptc.capabilities section, as a file for tools that do not read wasm).
+    if (emitted.capabilities) await writeFile(`${opts.outPath}.capabilities.json`, JSON.stringify(emitted.capabilities, null, 2) + "\n");
     if (emitted.hostModules) await writeFile(`${opts.outPath}.host-modules.json`, JSON.stringify(emitted.hostModules, null, 2) + "\n");
     else await rm(`${opts.outPath}.host-modules.json`, { force: true });
     // The fence receipt: every JavaScript construct this build compiled as a
@@ -1759,7 +1796,8 @@ async function emitWasmGcArtifacts(mod: IrModule, opts: CompileRequestOptions, e
       functions: Object.fromEntries(mod.functions.filter(f => f.name.startsWith("%") && f.loc?.file).map(f => [f.name, f.loc])) }, null, 2) + "\n");
     else await rm(`${opts.outPath}.specialization.json`, { force: true });
     if (opts.release) await writeFile(`${opts.outPath}.manifest.json`, JSON.stringify(wasmGcManifest(mod, emitted, opts), null, 2) + "\n");
-    return { ok: true, artifact: { kind: "wasmgc", path: opts.outPath, asyncLiveness: emitted.asyncLiveness, ...(emitted.optimizer ? { optimizer: emitted.optimizer } : {}),
+    return { ok: true, artifact: { kind: "wasmgc", path: opts.outPath, asyncLiveness: emitted.asyncLiveness,
+      ...(emitted.capabilities ? { capabilities: emitted.capabilities } : {}), ...(emitted.capabilityUses ? { capabilityUses: emitted.capabilityUses } : {}), ...(emitted.optimizer ? { optimizer: emitted.optimizer } : {}),
       ...(emitted.phases ? { emitPhases: emitted.phases } : {}), ...(emitted.helpers ? { emitHelpers: emitted.helpers } : {}), ...(emitted.pendingFinish ? { pendingFinish: emitted.pendingFinish } : {}), writeMs: Math.round(performance.now() - writeStart) } };
   }
 }

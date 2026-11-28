@@ -4,6 +4,7 @@ import type { NativeLinkInfo } from "./backend/native-link-info.js";
 import type { ScrDiagnostic } from "./diagnostics/diagnostic.js";
 import type { CoverageInput } from "./coverage/report.js";
 import type { WasmOptReceipt } from "./backend/wasmgc/emitter.js";
+import type { CapabilityRequest, CapabilityUses, Requirement, ResolvedCapabilities } from "./backend/wasmgc/capabilities.js";
 import type { TargetCpu } from "./backend/target-cpu.js";
 import type { IrModule } from "./ir/ir.js";
 import type { ObjectUnit } from "./link/module-tag.js";
@@ -176,6 +177,12 @@ export interface CompileBaseOptions {
    * requires Relaxed SIMD: Chrome 114+, Firefox 145+, Node 21+; Safari
    * rejects it (JavaScriptCore keeps relaxed SIMD behind a flag). */
   experimentalRelaxedSimd?: boolean;
+  /** WasmGC capability modes (docs/capabilities.md §4): a preset (`auto`, the default; `baseline`; `compat`) and/or a
+   * list such as `eh=legacy,views=fixed:128,relaxed-simd,threads=auto,-jspi`, or the parsed request. */
+  capabilities?: string | CapabilityRequest;
+  /** WasmGC: the engines to support, `chrome>=137,firefox>=134,safari>=26.2,node>=24` (the default). `auto`
+   * capabilities build a compat variant only for a target that needs one, and a requirement no variant meets is an error. */
+  targets?: string | readonly string[];
   /** Experimental browser/native profile (off by default): objects built by a
    * recognized JS constructor (an ordinary function whose body starts with
    * assignments of constant property names on `this`) are WasmGC structs with
@@ -385,6 +392,14 @@ export type CompileArtifact =
       /** SCRIPTC_WASMGC_DEFER_FINISH: the wasm-opt passes the caller still owes the module (WasmGcEmitResult.pendingFinish). */
       pendingFinish?: string[];
       writeMs?: number;
+      /** The resolved capabilities the artifact records (its scriptc.capabilities section and `<out>.capabilities.json`). */
+      capabilities?: ResolvedCapabilities;
+      /** What the module uses that the capability plan reads. */
+      capabilityUses?: CapabilityUses;
+      /** The variant set, preferred first: one entry, or two when a compat variant was built (`<out>.variants.json`). */
+      variants?: { path: string; key: string; requires: Requirement[] }[];
+      /** Why each capability value was chosen (--explain-capabilities). */
+      explainCapabilities?: string[];
     }
   | { kind: "llvm"; path: string }
   | { kind: "asm"; path: string }

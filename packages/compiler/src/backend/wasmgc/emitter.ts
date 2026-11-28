@@ -45,6 +45,7 @@ import { serializeModule } from "../../ir/serialize.js";
 import { FORK_BYTES_ELEMENT_NAME, FORK_BYTES_ELEMENT_SIZE, DYN_CLASS_PROPERTIES, accessorSlotProp, shapeHasAccessorSlots, canDynCheckTo, RUNTIME_ERROR_CLASSES, isUnitType, typeEquals, typeKey as irTypeKey, type IrExpr, type IrFunction, type IrModule, type IrStmt, type IrType, type SrcLoc } from "../../ir/ir.js";
 import { bytesRuntime } from "./bytes.js";
 import { findSimdModule, simdLowering } from "./simd.js";
+import { BASELINE_MODE, CAPABILITY_SECTION, encodeCapabilitySection, fixedMiB, resolvedRecord, type CapabilityMode, type CapabilityUses, type ResolvedCapabilities } from "./capabilities.js";
 import { jsBridge } from "./jsbridge.js";
 import { fdlibmFor, parseFdlibm, type FdProgram } from "./fdlibm.js";
 import { jsonDecimal } from "./json-number.js";
@@ -53,7 +54,7 @@ import { domDirectImport } from "./host.js";
 import { pageCodeFree, PN_EXT, PN_TYPE, PN_FLAGS, PN_EPOCH, PN_PARENT, PN_FIRST, PN_LAST, PN_NEXT, PN_PREV, PN_DOC, PN_DOC_EPOCH, PN_DOC_ID, PN_PROPS, PN_NPROPS, PNF_INERT, PNF_SUBTREE_INERT, PNF_KNOWN_CHILDREN, PNF_KNOWN_PARENT, UNSAFE_TAGS } from "./dom-mirror.js";
 import { dynEngine, DYN_THIS } from "./dyn-engine.js";
 import { EXECUTED_SPECIALIZABLE, type ProfileSite, type SiteProfileIndex } from "./site-profile.js";
-import { callCode, configureFnTables, TYPED_TABLE_BUDGET, finishFnTables, fnSlotConst, slotHasSig, CLOSURE_CODE, CLOSURE_ENV, CLOSURE_INVOKE, CLOSURE_JS, CLOSURE_PROPS, DYN_ARR_JS, OBJ_JS, OBJ_SHAPE, OBJ_SLOTS, OBJ_PROTO as OBJ_PROTO_FIELD, ARRAY_DATA, ARRAY_LEN, ARRAY_STATES, MATCH_INDEX, MATCH_INPUT, MATCH_DGROUPS, BYTES_BASE, BYTES_CAP, BYTES_LEN, BYTES_OWNER, FRAME_CAUGHT, FRAME_ENV, FRAME_GEN, FRAME_HANDLER, FRAME_PROMISE, FRAME_STATE, GEN_DONE, GEN_FRAME, GEN_OUT, GEN_RESUME, GEN_RUNNING, GEN_START, GEN_STATUS, GEN_TYPE, GEN_SUSPENDED, JOB_CODE, JOB_ENV, JOB_NEXT, JOB_REJECTED, JOB_VALUE, PROMISE_HANDLED, PROMISE_REACTIONS, PROMISE_STATE, PROMISE_VALUE, DYN_ARR_ITEMS, DYN_ARR_LEN, DYN_ARR_PROPS, MAP_BUCKETS, MAP_COUNT, MAP_DEPTH, MAP_HASH, MAP_KEYS, MAP_LIVE, MAP_NEXT, MAP_SIZE, MAP_VALS, GcTypes, UNION_NUM, UNION_REF, UNION_STR, UNION_TAG, INLINE_NULL_BITS, INLINE_DEFAULT_BITS, type InlineField, type ArrayInfo, closureMeta, FNMETA_FLAGS, FNMETA_LENGTH, FNMETA_NAME, FN_FORWARD, FN_OWNS_PROTOTYPE, DYNCOLL_ID, DYNCOLL_JS, DYNCOLL_LOG, ITER_SRC, ITER_IDX, ITER_KIND, ITER_NODE, ITER_PAGE, ITER_DONE, ITER_LEN, ITER_LAST, ITER_HAS, ITERLOG_MODE, ITERLOG_LIVE, ITERLOG_NEXT, PEER_OPS, PEER_VALTYPE, CLASSOBJ_CID, CLASSOBJ_PROTO, FN_CLASS } from "./types.js";
+import { callCode, configureFnTables, TYPED_TABLE_BUDGET, finishFnTables, fnSlotConst, slotHasSig, CLOSURE_CODE, CLOSURE_ENV, CLOSURE_INVOKE, CLOSURE_JS, CLOSURE_PROPS, DYN_ARR_JS, OBJ_JS, OBJ_SHAPE, OBJ_SLOTS, OBJ_PROTO as OBJ_PROTO_FIELD, ARRAY_DATA, ARRAY_LEN, ARRAY_STATES, MATCH_INDEX, MATCH_INPUT, MATCH_DGROUPS, BYTES_BASE, BYTES_CAP, BYTES_LEN, BYTES_OWNER, FRAME_CAUGHT, FRAME_ENV, FRAME_GEN, FRAME_HANDLER, FRAME_PROMISE, FRAME_STATE, GEN_DONE, GEN_FRAME, GEN_OUT, GEN_RESUME, GEN_RUNNING, GEN_START, GEN_STATUS, GEN_TYPE, GEN_SUSPENDED, JOB_CODE, JOB_ENV, JOB_NEXT, JOB_REJECTED, JOB_VALUE, PROMISE_HANDLED, PROMISE_REACTIONS, PROMISE_STATE, PROMISE_VALUE, DYN_ARR_ITEMS, DYN_ARR_LEN, DYN_ARR_PROPS, MAP_BUCKETS, MAP_COUNT, MAP_DEPTH, MAP_HASH, MAP_KEYS, MAP_LIVE, MAP_NEXT, MAP_SIZE, MAP_VALS, GcTypes, UNION_NUM, UNION_REF, UNION_STR, UNION_TAG, INLINE_NULL_BITS, INLINE_DEFAULT_BITS, type InlineField, type ArrayInfo, closureMeta, CLOSURE_ORIGIN, FNMETA_FLAGS, FNMETA_LENGTH, FNMETA_NAME, FN_FORWARD, FN_OWNS_PROTOTYPE, DYNCOLL_ID, DYNCOLL_JS, DYNCOLL_LOG, ITER_SRC, ITER_IDX, ITER_KIND, ITER_NODE, ITER_PAGE, ITER_DONE, ITER_LEN, ITER_LAST, ITER_HAS, ITERLOG_MODE, ITERLOG_LIVE, ITERLOG_NEXT, PEER_OPS, PEER_VALTYPE, CLASSOBJ_CID, CLASSOBJ_PROTO, FN_CLASS } from "./types.js";
 import { findConstructorStructs, isInt32, keySetDispatcherKey, type CtorPut, type CtorFieldKind } from "./ctor-structs.js";
 import { computeIntShadows } from "./int-shadow.js";
 import { opaqueModuleId } from "../../frontend/lowering/stable-names.js";
@@ -65,6 +66,11 @@ export class WasmGcUnsupportedError extends Error {
 }
 
 export interface WasmGcEmitOptions {
+  /** The resolved capability mode (capabilities.ts): exception-handling encoding, byte-view memory, relaxed SIMD and
+   * threads. Default: the baseline. Recorded in the module's scriptc.capabilities section. */
+  capabilityMode?: CapabilityMode;
+  /** Which variant of a set this build is (recorded with the mode). */
+  capabilityVariant?: "preferred" | "compat";
   /** Binaryen optimisation level, 0 disables the optimiser. */
   /** At most 2 (a project decision, 10-25: -O3 is off the table, -O2 is the maximum). */
   optimizeLevel?: 0 | 1 | 2;
@@ -192,6 +198,9 @@ export interface WasmGcEmitResult {
   pendingFinish?: string[];
   /** Wall time per emitter phase, ms (function bodies summed as "functions", tail work as "tail"). */
   phases?: Record<string, number>;
+  /** The resolved capabilities the module records (scriptc.capabilities), and what it uses. */
+  capabilities?: ResolvedCapabilities;
+  capabilityUses?: CapabilityUses;
   /** Generated helpers built, and the time their construction took (inside the phases that asked for them). */
   helpers?: { count: number; ms: number };
   /** The source map JSON (WasmGcEmitOptions.sourceMap). */
@@ -765,6 +774,8 @@ function emitModule(given: IrModule, opts: WasmGcEmitOptions, setPhase: (phase: 
     m.addGlobalExport = (internal: string, external: string) => ge(internal, prefix + external);
   }
   const hostImports = new Set<string>();
+  /** A suspending FFI import was emitted (module "jspi"). */
+  let usesJspi = false;
   const globals = new Map<string, number>();
   const functions = new Map(mod.functions.map(f => [f.name, f]));
   const effects = opts.experimentalTsNativeAny ? analyzeFunctionEffects(mod) : null;
@@ -4160,7 +4171,10 @@ function emitModule(given: IrModule, opts: WasmGcEmitOptions, setPhase: (phase: 
       // A class value is a function value: itself.
       case "classval": if (types.nativeDyn) return value; return unsupported(`dynamic value from ${t.kind}`, loc);
       // Native dyn: page values (symbols, DOM objects, regexes) are held as dyn.
-      case "symbol": case "bigint": case "jsval": case "regex": case "date": if (types.nativeDyn) return fromJsC([value], binaryen.anyref); return unsupported(`dynamic value from ${t.kind}`, loc);
+      // A symbol is always a page symbol, which js.classify would send to the plain internalization (its dyn form): that,
+      // without the host call ($dyn.fromJs ran one for every `x === SOME_SYMBOL` against a typed constant).
+      case "symbol": if (types.nativeDyn && browser && !opts.hostHandles && !types.engineDyn) return anyConvertExtern(m, value); return types.nativeDyn ? fromJsC([value], binaryen.anyref) : unsupported(`dynamic value from ${t.kind}`, loc);
+      case "bigint": case "jsval": case "regex": case "date": if (types.nativeDyn) return fromJsC([value], binaryen.anyref); return unsupported(`dynamic value from ${t.kind}`, loc);
       case "promise": if (types.nativeDyn) return value; return unsupported(`dynamic value from ${t.kind}`, loc);
       default: return unsupported(`dynamic value from ${t.kind}`, loc);
     }
@@ -4471,6 +4485,10 @@ function emitModule(given: IrModule, opts: WasmGcEmitOptions, setPhase: (phase: 
   };
   const truthy = (e: IrExpr): number => {
     if (e.type.kind === "bool") return expr(e);
+    // A bitwise result (or Math.imul, or an i32 local) is an int32 (a uint32 for >>>), never NaN: it is truthy exactly
+    // when its i32 bits are not zero (a uint32 at or above 2^31 has nonzero bits too), with no f64 round trip.
+    if (e.type.kind === "f64" && (e.kind === "bin" && I32_BIN[e.op] || e.kind === "libCall" && e.fn === "math.imul" || e.kind === "varRef" && fn.i32?.has(e.localId)))
+      return m.i32.ne(i32Value(e), m.i32.const(0));
     // An inline field: its bits answer (every unit's f64 form is a NaN, falsy like 0 and NaN; a boolean is true at 2).
     const read = inlineReadOf(e);
     if (read) return read.s.kind === "bool" ? m.i32.eq(read.raw(), m.i32.const(2))
@@ -4779,7 +4797,7 @@ function emitModule(given: IrModule, opts: WasmGcEmitOptions, setPhase: (phase: 
     const own = (key: string, v: number, flags: number) => m.block(null, [dobj.set(p(), m.i32.const(dobj.atom(key)), v), dobj.setFlags(p(), m.i32.const(dobj.atom(key)), m.i32.const(flags))]);
     m.addFunction("$ctor.Object.make", binaryen.none, A, [dynObj().ref], m.block(null, [
       m.local.set(0, dobj.create()), own("length", boxDyn("dyn:num", m.f64.const(1)), ATTR_READONLY | ATTR_HIDDEN), own("name", boxDyn("dyn:str", stringConst(m, "Object")), ATTR_READONLY | ATTR_HIDDEN),
-      m.struct.new([sig(), m.ref.null(binaryen.structref), sig(), p(), m.ref.null(binaryen.externref), m.ref.null(types.fnMeta()!)], binaryen.getHeapType(types.closureFinal()!))], A));
+      m.struct.new([sig(), m.ref.null(binaryen.structref), sig(), p(), m.ref.null(binaryen.externref), m.ref.null(types.fnMeta()!), m.ref.null(binaryen.anyref)], binaryen.getHeapType(types.closureFinal()!))], A));
   });
   /** The native host's String / Number / Boolean / Function constructor values (the frontend's `%builtin.<N>.ctorValue`). */
   const primCtor = (name: string): number => reachable.has(`%builtin.${name}.ctorValue`) ? m.call(symbol(`%builtin.${name}.ctorValue`), [], A) : m.ref.null(A);
@@ -4794,7 +4812,7 @@ function emitModule(given: IrModule, opts: WasmGcEmitOptions, setPhase: (phase: 
     const own = (key: string, v: number, flags: number) => m.block(null, [dobj.set(p(), m.i32.const(dobj.atom(key)), v), dobj.setFlags(p(), m.i32.const(dobj.atom(key)), m.i32.const(flags))]);
     m.addFunction("$ctor.Array.make", binaryen.none, A, [dynObj().ref], m.block(null, [
       m.local.set(0, dobj.create()), own("length", boxDyn("dyn:num", m.f64.const(1)), ATTR_READONLY | ATTR_HIDDEN), own("name", boxDyn("dyn:str", stringConst(m, "Array")), ATTR_READONLY | ATTR_HIDDEN),
-      m.struct.new([sig(), m.ref.null(binaryen.structref), sig(), p(), m.ref.null(binaryen.externref), m.ref.null(types.fnMeta()!)], binaryen.getHeapType(types.closureFinal()!))], A));
+      m.struct.new([sig(), m.ref.null(binaryen.structref), sig(), p(), m.ref.null(binaryen.externref), m.ref.null(types.fnMeta()!), m.ref.null(binaryen.anyref)], binaryen.getHeapType(types.closureFinal()!))], A));
   });
   /** The native host's compiled Array constructor value (the frontend's `%builtin.Array.ctorValue`, registered for every native-host build); null when the module has none. */
   const ARRAY_CTOR_VALUE_FN = "%builtin.Array.ctorValue";
@@ -5154,12 +5172,19 @@ function emitModule(given: IrModule, opts: WasmGcEmitOptions, setPhase: (phase: 
    * function and is never written, so a shared one serves (dynKeysRo).
    * Marks the qualifying calls' argument lists. */
   const roKeysArgs = new WeakSet<IrExpr[]>(), roKeysDone = new WeakSet<IrFunction>();
+  /** The `string[]` checks of such calls (`const k: string[] = Object.keys(x)`, read only through `k.length` and `k[i]`):
+   * one typed array per key list serves them (dynKeysRoTyped). */
+  const roTypedKeys = new WeakSet<IrExpr>();
   const analyzeRoKeys = (f: IrFunction) => {
     if (roKeysDone.has(f)) return;
     roKeysDone.add(f);
     // Writes: `var k` (undefined), `k = Object.keys(x)` or `const k = Object.keys(x)`.
     const defs = new Map<string, IrExpr[][]>(), bad = new Set<string>();
     const isKeys = (x: unknown): x is IrExpr & { kind: "libCall" } => { const e = x as IrExpr | undefined; return e?.kind === "libCall" && e.fn === "dyn.objKeys" && e.args.length === 1; };
+    // `Object.keys(x)` checked to string[]: the typed local's reads are `.length` and `[i]` (arrIntrinsic, arrayGet).
+    const isTypedKeys = (x: unknown): x is IrExpr & { kind: "dynCheck" } => { const e = x as IrExpr | undefined;
+      return e?.kind === "dynCheck" && !e.refOnly && !e.adopt && !e.shared && e.type.kind === "array" && e.type.elem.kind === "string" && isKeys(e.value); };
+    const typedDefs = new Map<string, IrExpr[]>();
     const isUndef = (x: unknown): boolean => { const e = x as IrExpr | undefined; return e === undefined || e === null || (e.kind === "unitLit" && e.unit === "undefined") || (e.kind === "dynFrom" && isUndef(e.value)); };
     const write = (o: Record<string, unknown>): { id: string; value: unknown } | null =>
       (o["kind"] === "varDecl" && typeof o["localId"] === "string") ? { id: o["localId"] as string, value: o["init"] }
@@ -5169,6 +5194,10 @@ function emitModule(given: IrModule, opts: WasmGcEmitOptions, setPhase: (phase: 
       if (!x || typeof x !== "object") return;
       const o = x as Record<string, unknown>, w = write(o);
       if (w && isKeys(w.value)) { const l = defs.get(w.id) ?? []; l.push(w.value.args); defs.set(w.id, l); }
+      else if (w && isTypedKeys(w.value)) {
+        const l = defs.get(w.id) ?? []; l.push((w.value.value as IrExpr & { kind: "libCall" }).args); defs.set(w.id, l);
+        const t = typedDefs.get(w.id) ?? []; t.push(w.value); typedDefs.set(w.id, t);
+      }
       else if (w && !(o["kind"] === "varDecl" && isUndef(w.value))) bad.add(w.id);
       for (const k in o) if (k !== "loc" && k !== "type") findDefs(o[k]);
     };
@@ -5181,6 +5210,11 @@ function emitModule(given: IrModule, opts: WasmGcEmitOptions, setPhase: (phase: 
       if (!x || typeof x !== "object") return;
       const o = x as Record<string, unknown>, e = x as IrExpr;
       if (e.kind === "call" && e.args.length === 1 && isKeys(e.args[0]) && readDispatcherKey(e.callee) === "length") { roKeysArgs.add(e.args[0].args); walk(e.args[0].args); return; }
+      // A typed keys local: its length and an element (a string, by value).
+      if (e.kind === "arrIntrinsic" && e.method === "length" && e.args.length === 0 && isRef(e.receiver) && typedDefs.has((e.receiver as IrExpr & { kind: "varRef" }).localId)) return;
+      if (e.kind === "arrayGet" && isRef(e.arr) && typedDefs.has((e.arr as IrExpr & { kind: "varRef" }).localId)) { walk(e.index); return; }
+      // The safe indexed read (lowerSafeIndexRead): a lifted helper that only reads the element.
+      if (e.kind === "call" && e.callee.startsWith("%arr.idxOr.") && e.args.length === 2 && isRef(e.args[0]) && typedDefs.has((e.args[0] as IrExpr & { kind: "varRef" }).localId)) { walk(e.args[1]); return; }
       if (e.kind === "call" && e.args.length >= 1 && isRef(e.args[0])) {
         const okRead = (e.args.length === 1 && readDispatcherKey(e.callee) === "length") || (e.callee === "%dyn.class.index.get" && e.args.length === 2);
         if (okRead) { for (const a of e.args.slice(1)) walk(a); return; }
@@ -5190,8 +5224,30 @@ function emitModule(given: IrModule, opts: WasmGcEmitOptions, setPhase: (phase: 
       for (const k in o) if (k !== "loc" && k !== "type") walk(o[k]);
     };
     walk(f.body);
-    for (const [id, list] of defs) if (!bad.has(id)) for (const args of list) roKeysArgs.add(args);
+    for (const [id, list] of defs) if (!bad.has(id)) {
+      // A local is one form or the other: a typed local that also takes a dyn keys array keeps the general path.
+      if (typedDefs.has(id) && typedDefs.get(id)!.length !== list.length) continue;
+      for (const args of list) roKeysArgs.add(args);
+      for (const check of typedDefs.get(id) ?? []) roTypedKeys.add(check);
+    }
   };
+  /** A read-only `string[]` of Object.keys (roTypedKeys): the typed form of the shared key array dynKeysRo answers,
+   * built once per array (the last two are kept), where a fresh check would copy the keys on every call. */
+  const dynKeysRoTyped = (t: IrType) => defineHelper(`$dyn.keys.ro.typed.${symbol(irTypeKey(t))}`, () => {
+    const name = `$dyn.keys.ro.typed.${symbol(irTypeKey(t))}`, vt = valueType(t), heap = binaryen.getHeapType(vt);
+    const nullable = binaryen.getTypeFromHeapType(heap, true);
+    for (const k of [0, 1]) { m.addGlobal(`${name}.src${k}`, A, true, m.ref.null(A)); m.addGlobal(`${name}.val${k}`, nullable, true, m.ref.null(nullable)); }
+    const a = () => m.local.get(1, A), r = () => m.local.get(2, nullable), G = (g: string, ty: number) => m.global.get(`${name}.${g}`, ty);
+    m.addFunction(name, A, vt, [A, nullable], m.block(null, [
+      m.local.set(1, m.call(dynKeysRo(), [m.local.get(0, A)], A)),
+      m.if(sameRef(a(), G("src0", A)), m.return(m.ref.as_non_null(G("val0", nullable)))),
+      m.if(sameRef(a(), G("src1", A)), m.return(m.ref.as_non_null(G("val1", nullable)))),
+      m.local.set(2, m.call(dynChecker(t), [a(), stringConst(m, "$")], vt)),
+      m.global.set(`${name}.src1`, G("src0", A)), m.global.set(`${name}.val1`, G("val0", nullable)),
+      m.global.set(`${name}.src0`, a()), m.global.set(`${name}.val0`, r()),
+      m.ref.as_non_null(r()),
+    ], vt));
+  });
   const dynKeysOf = () => defineHelper("$dyn.keys", () => {
     const v = () => m.local.get(0, A), out = () => m.local.get(1, dynArr().ref), j = () => m.local.get(2, i32), n = () => m.local.get(3, i32);
     const indices = (len: number, tag: string) => m.block(null, [m.local.set(3, len),
@@ -7842,14 +7898,26 @@ function emitModule(given: IrModule, opts: WasmGcEmitOptions, setPhase: (phase: 
         m.if(m.i32.eqz(m.ref.is_null(m.local.get(2, E))), m.return(fromJsC([hostCall("js.get", [m.local.get(2, E), dobj.name(a())], [E, E], E)], A))),
         m.return(m.call(dynObjectProto(), [a()], A))], A) : m.ref.null(A),
       () => m.ref.null(A));
-    for (const [key, name] of typedKeyReads) m.addFunction(name, A, A, [], m.block(null, [
-      ...ids.flatMap(id => {
+    for (const [key, name] of typedKeyReads) {
+      /** Shape `id`'s read of `key` (the value is that shape), or null when it has none. */
+      const read = (id: string): number | null => {
         const f = typedFields(id).find(f => f.name === key);
-        if (f) return [m.if(is(v(), id), m.return(m.call(typedRead(id, f), [v()], A)))];
+        if (f) return m.call(typedRead(id, f), [v()], A);
         const acc = typedAccessors(id).get(key);
-        return acc ? [m.if(is(v(), id), m.return(typedAccessorRead(id, key, acc, v())))] : [];
-      }),
-      m.global.get("$typed.miss", dynNull.ref)], A));
+        return acc ? typedAccessorRead(id, key, acc, v()) : null;
+      };
+      const armed = ids.filter(id => read(id) !== null);
+      const miss = () => m.global.get("$typed.miss", dynNull.ref);
+      // Many shapes declare the key (`type`, `key`, `props`): one indirect call by type index, not a test per shape. Tuples have
+      // no type index, so a key a tuple declares keeps the tests.
+      if (armed.length > 4 && armed.every(id => !types.isTupleShape(id))) {
+        tidDispatch(name, [A], A, [], read, miss, miss);
+        continue;
+      }
+      m.addFunction(name, A, A, [], m.block(null, [
+        ...armed.map(id => m.if(is(v(), id), m.return(read(id)!))),
+        miss()], A));
+    }
     for (const [key, name] of typedNumReads) m.addFunction(name, A, f64, [], m.block(null, [
       ...ids.flatMap(id => {
         const f = typedFields(id).find(f => f.name === key && (f.type.kind === "f64" || f.type.kind === "dyn"));
@@ -9541,7 +9609,7 @@ function emitModule(given: IrModule, opts: WasmGcEmitOptions, setPhase: (phase: 
     m.addFunction("$dyn.bind", binaryen.createType([A, A, i32, A, A, A, A, dynArr().ref]), A, [], m.block(null, [
       m.if(m.i32.eqz(fnTest(L(0))), throwError("%TypeError", "Bind must be called on a function")),
       m.struct.new([ref(), m.struct.new([L(0), L(1), m.local.get(2, i32), L(3), L(4), L(5), L(6), m.local.get(7, dynArr().ref)], BE.heap), ref(),
-        m.ref.null(dynObj().ref), m.ref.null(binaryen.externref), m.ref.null(types.fnMeta()!)], binaryen.getHeapType(types.closureFinal()!)),
+        m.ref.null(dynObj().ref), m.ref.null(binaryen.externref), m.ref.null(types.fnMeta()!), m.ref.null(binaryen.anyref)], binaryen.getHeapType(types.closureFinal()!)),
     ], A));
   });
   /** An arrow, method, async or generator function is not a constructor:
@@ -10037,7 +10105,7 @@ function emitModule(given: IrModule, opts: WasmGcEmitOptions, setPhase: (phase: 
       const p = () => m.local.get(0, dynObj().ref);
       const own = (key: string, v: number) => m.block(null, [dobj.set(p(), m.i32.const(dobj.atom(key)), v), dobj.setFlags(p(), m.i32.const(dobj.atom(key)), m.i32.const(ATTR_READONLY | ATTR_HIDDEN))]);
       const made = m.struct.new([fnSlot(fn, types.dynInvokeSig()), m.ref.null(binaryen.structref),
-        fnSlot(fn, types.dynInvokeSig()), p(), m.ref.null(binaryen.externref), m.ref.null(types.fnMeta()!)], binaryen.getHeapType(types.closureFinal()!));
+        fnSlot(fn, types.dynInvokeSig()), p(), m.ref.null(binaryen.externref), m.ref.null(types.fnMeta()!), m.ref.null(binaryen.anyref)], binaryen.getHeapType(types.closureFinal()!));
       // Browser native dyn: adopt the page's builtin (js.adoptBuiltin): page reads of it
       // classify as this closure, which crosses back as the builtin itself.
       const c = () => m.local.get(1, nonNull(fb));
@@ -10659,6 +10727,9 @@ function emitModule(given: IrModule, opts: WasmGcEmitOptions, setPhase: (phase: 
     m.addFunction("$fn.toJs", fb, E, [E], m.block(null, [
       // A forwarding closure: the page form of the function it views (identity).
       m.if(isForward(m.struct.get(closureMeta(true), f(), types.fnMeta()!, false)), m.return(m.call(dynToJs(), [m.call(fnUnwrap(), [f()], A)], E))),
+      // A signature adapter: the page form of the function it adapts (identity).
+      m.if(m.ref.test(f(), nonNull(types.closureFinal()!)), m.if(m.i32.eqz(m.ref.is_null(m.struct.get(CLOSURE_ORIGIN, m.ref.cast(f(), nonNull(types.closureFinal()!)), A, false)))
+        , m.return(m.call(dynToJs(), [m.call(fnUnwrap(), [f()], A)], E)))),
       m.local.set(1, m.struct.get(CLOSURE_JS, f(), E, false)),
       m.if(m.ref.is_null(w()), m.block(null, [
         m.local.set(1, hostCall("js.fromDynFn", [externConvertAny(m, f()), stringConst(m, dynCallFromJs()), name, length, flags], [E, E, E, i32, i32], E)),
@@ -12419,6 +12490,11 @@ function emitModule(given: IrModule, opts: WasmGcEmitOptions, setPhase: (phase: 
   /** jsFences: the innermost expression this backend cannot emit throws instead. */
   /** Expressions already evaluated into a temp (memberTypeof): emitted as that read. */
   const preEmitted = new Map<IrExpr, () => number>();
+  /** A read the same expression repeats with nothing between: a field of a field ... of a local. */
+  const isFieldReadChain = (e: IrExpr): boolean => e.kind === "fieldGet" && (e.obj.kind === "varRef" || isFieldReadChain(e.obj));
+  const sameRead = (a: IrExpr, b: IrExpr): boolean =>
+    a.kind === "varRef" ? b.kind === "varRef" && a.localId === b.localId
+      : a.kind === "fieldGet" && b.kind === "fieldGet" && a.className === b.className && a.field === b.field && sameRead(a.obj, b.obj);
   /** hostHandles: `typeof o.k` (or a typeof test) over a constant-key dyn member read. A page-valued receiver
    * asks the host for typeof o[k] (js.typeof.member, the getter runs, no member value crosses); a compiled
    * receiver (or null/undefined, which throws its own TypeError) keeps the dyn read and `general`. */
@@ -12512,7 +12588,26 @@ function emitModule(given: IrModule, opts: WasmGcEmitOptions, setPhase: (phase: 
       case "strLit": return stringConst(m, e.value);
       case "moduleNsRef": return stringConst(m, moduleIdText(e.moduleId, opts.stripSourceSites));
       case "varRef": return localGet(e.localId, e.type);
-      case "ternary": return m.if(expr(e.cond), expr(e.then), expr(e.else_));
+      case "ternary": {
+        // `x.f` tested for an arm and then narrowed to it (`node.sibling.return = ...` once a loop proved the sibling
+        // there): the frontend spells the read twice, so it is read once, into a local both sites use.
+        const c = e.cond, t = e.then;
+        if (c.kind === "unionIsTag" && !c.negated && t.kind === "unionNarrow" && t.unionId === c.unionId && t.tag === c.tag &&
+            isFieldReadChain(c.value) && sameRead(c.value, t.value)) {
+          const type = valueType(c.value.type), v = temp(type);
+          const read = expr(c.value);
+          preEmitted.set(c.value, () => m.local.get(v, type));
+          preEmitted.set(t.value, () => m.local.get(v, type));
+          try {
+            const choose = m.if(expr(c), expr(t), expr(e.else_));
+            return m.block(null, [m.local.set(v, read), choose], binaryen.getExpressionType(choose));
+          } finally {
+            preEmitted.delete(c.value);
+            preEmitted.delete(t.value);
+          }
+        }
+        return m.if(expr(e.cond), expr(e.then), expr(e.else_));
+      }
       case "logical": {
         if (e.type.kind === "bool") return e.op === "&&"
           ? m.if(expr(e.left), expr(e.right), m.i32.const(0))
@@ -13343,6 +13438,12 @@ function emitModule(given: IrModule, opts: WasmGcEmitOptions, setPhase: (phase: 
             m.struct.new([...withJs(info, fresh()), m.local.get(o, dynObj().ref)], ext.heap)], info.ref), m.local.get(r, info.ref))], info.ref);
       }
       case "dynCheck": {
+        // A read-only string[] of Object.keys (roTypedKeys): the shared typed key array.
+        if (types.nativeDyn && !shared && e.value.kind === "libCall" && e.value.fn === "dyn.objKeys" && (analyzeRoKeys(fn.ir), roTypedKeys.has(e))) {
+          const t = temp(A);
+          return m.block(null, [m.local.set(t, expr(e.value.args[0]!)), nullishThrow(() => m.local.get(t, A), "convert"),
+            m.call(dynKeysRoTyped(e.type), [m.local.get(t, A)], valueType(e.type))], valueType(e.type));
+        }
         // A typed view that must not copy (see noCopyChecks): a native dyn object or array would be copied, so it throws
         // the TypeError naming the binding; anything else converts as before (a compiled record or array of the type is
         // itself, a page object keeps its page-backed view).
@@ -13561,6 +13662,7 @@ function emitModule(given: IrModule, opts: WasmGcEmitOptions, setPhase: (phase: 
           // held in dyn: typeof answers "function" for both.
           case "function": { const fb = types.fnBase(); test = types.nativeDyn && browser ? isCallableDyn(val()) : fb === null ? m.i32.const(0) : fnTest(val()); break; }
           case "truthy": test = truthyLocal(v, { kind: "dyn" }); break;
+          case "plainObject": test = isA(val(), "dyn:obj"); break;
           // Native dyn has no symbol or bigint boxes: only a page value (a
           // non-eq internalized host reference) can be one.
           // An error is an instance of the compiled Error class (subclasses extend it).
@@ -13716,7 +13818,7 @@ function emitModule(given: IrModule, opts: WasmGcEmitOptions, setPhase: (phase: 
       /* closures */
       case "closure":
         if (noSignature().has(e.fnName)) return unsupported(`the function ${e.fnName.replace(/^%/, "")}, whose signature has no Wasm representation`, e.loc);
-        return closure(e.fnName, e.captures, e.type, e.loc);
+        return closure(e.fnName, e.captures, e.type, e.loc, e.adapts === true ? adaptedOrigin(e.captures[0]!, e.loc) : undefined);
       // The running closure: rebuilt from this function and its own capture
       // boxes (zero-capture closures are interned, so identity holds there).
       case "selfRef": return closure(fn.ir.name, (fn.ir.captures ?? []).map(c => c.localId), e.type, e.loc);
@@ -13796,6 +13898,8 @@ function emitModule(given: IrModule, opts: WasmGcEmitOptions, setPhase: (phase: 
       else if (lk === "moduleNs") eq = stringEq(m, expr(left), expr(right));
       else if (lk === "object" && simdLib && (left.type as { className: string }).className === simdLib.v128Class)
         return unsupported("=== on v128 (SIMD values have no identity; compare lanes with f32x4.eq/i32x4.eq and all_true)", left.loc);
+      // Functions compare identity roots: a signature adapter is the function it adapts (IR `adapts`).
+      else if (lk === "func" && types.nativeDyn && types.fnBase()) eq = sameRef(m.call(fnUnwrap(), [expr(left)], A), m.call(fnUnwrap(), [expr(right)], A));
       else if (lk === "array" || lk === "object" || lk === "record" || lk === "func" || lk === "map" || lk === "set" || lk === "promise" || lk === "bytes") eq = m.ref.eq(expr(left), expr(right));
       // A Date is the host's own object: === is the host's identity comparison.
       else if (lk === "date") eq = hostCall("js.eq", [expr(left), expr(right)], [binaryen.externref, binaryen.externref], i32);
@@ -14630,6 +14734,26 @@ function emitModule(given: IrModule, opts: WasmGcEmitOptions, setPhase: (phase: 
    * boolean -> i32, string and page objects -> externref; results the same, void -> none, Uint8Array -> externref copied into compiled
    * storage at once; Promise<T> -> an import taking the compiled promise as a trailing externref `target`, settled by the host through
    * jsSettleI32 / jsSettleF64 / jsSettle (section 6). */
+  /** A callback parameter of a host module function: the exported trampoline `hostcb.<sig>(closure, ...args)` that calls a compiled
+   * closure of that signature with its arguments as they are (number f64, boolean i32, string and page object externref), and the record
+   * entry naming it: `callback:<export>:<param kinds>:<result kind>`. One trampoline per signature, shared by every host function. */
+  const hostCallback = (t: IrType & { kind: "func" }, module: string, field: string, loc: SrcLoc): string => {
+    const kindOf = (x: IrType): string | null => x.kind === "f64" ? "number" : x.kind === "bool" ? "boolean" : x.kind === "string" ? "string" : x.kind === "jsval" ? "object" : null;
+    const kinds = t.params.map(kindOf), ret = t.ret.kind === "void" ? "void" : kindOf(t.ret);
+    if (t.rest || kinds.some((k) => k === null) || ret === null) return unsupported(`host call ${module}.${field}: a callback of this signature`, loc);
+    const sig = kinds.map((k) => k![0]).join("") + "_" + ret[0];
+    const name = `$hostcb.${sig}`, exportName = `hostcb.${sig}`;
+    defineHelper(name, () => {
+      const info = types.closureOf(t), E = binaryen.externref;
+      const wasmParams = t.params.map(valueType), c = 1 + wasmParams.length;
+      const call = callSlot(m.struct.get(0, m.local.get(c, info.ref), i32, false),
+        [m.struct.get(1, m.local.get(c, info.ref), binaryen.structref, false), ...wasmParams.map((wt, i) => m.local.get(1 + i, wt))], info, info.result);
+      m.addFunction(name, binaryen.createType([E, ...wasmParams]), info.result, [info.ref],
+        m.block(null, [m.local.set(c, m.ref.cast(anyConvertExtern(m, m.local.get(0, E)), nonNull(info.ref))), call], info.result));
+      m.addFunctionExport(name, exportName);
+    });
+    return `callback:${exportName}:${kinds.join(",")}:${ret}`;
+  };
   const hostModuleCall = (args: IrExpr[], type: IrType, loc: SrcLoc): number => {
     const E = binaryen.externref;
     const module = (args[0] as IrExpr & { value: string }).value, field = (args[1] as IrExpr & { value: string }).value, operands = args.slice(2);
@@ -14640,6 +14764,9 @@ function emitModule(given: IrModule, opts: WasmGcEmitOptions, setPhase: (phase: 
         case "bool": params.push(i32); values.push(expr(a)); paramNames.push("boolean"); break;
         case "string": params.push(E); values.push(expr(a)); paramNames.push("string"); break;
         case "jsval": params.push(E); values.push(expr(a)); paramNames.push("object"); break;
+        // A callback: the compiled closure as an externref, and the record names the trampoline export the host calls it through.
+        case "func": { const cb = hostCallback(a.type, module, field, loc);
+          params.push(E); values.push(externConvertAny(m, expr(a))); paramNames.push(cb); break; }
         // A Uint8Array: the page view over module memory (bytes.toJs), valid for the call.
         case "bytes": if (a.type.elem !== "u8") return unsupported(`host call ${module}.${field}: argument of type ${a.type.elem} typed array`, loc);
           params.push(E); values.push(valueToJs(expr(a), a.type)); paramNames.push("bytes"); break;
@@ -15981,7 +16108,9 @@ function emitModule(given: IrModule, opts: WasmGcEmitOptions, setPhase: (phase: 
     return unsupported(`library function ${name}`, loc);
   };
 
+  const viewsMiB = fixedMiB((opts.capabilityMode ?? BASELINE_MODE).views);
   const bytes = bytesRuntime({
+    ...(viewsMiB !== null && !opts.link?.memory ? { fixedPages: viewsMiB * 16 } : {}),
     ...(opts.link ? { link: { ...(opts.link.memory ? { memory: opts.link.memory } : {}), ...(opts.link.allocator ? { allocator: opts.link.allocator } : {}) } } : {}),
     undefNaN: () => undefNaN(),
     canonF64: (v: number) => canonF64(v),
@@ -16453,6 +16582,7 @@ function emitModule(given: IrModule, opts: WasmGcEmitOptions, setPhase: (phase: 
     // A suspending import always comes from the host's "jspi" module, which
     // the host wraps with WebAssembly.Suspending (merge-safe; no metadata).
     if (imp.suspending && override) return unsupported(`FFI import ${imp.name}: a suspending import comes from the host, not another module`, e.loc);
+    if (imp.suspending) usesJspi = true;
     const module = imp.suspending ? "jspi" : typeof override === "object" ? override.module : override ?? opts.link?.ffiModule;
     const field = typeof override === "object" ? override.name : imp.symbol;
     if (!module) return unsupported("FFI calls without a link ffiModule (wasm imports need an import module)", e.loc);
@@ -16967,11 +17097,11 @@ function emitModule(given: IrModule, opts: WasmGcEmitOptions, setPhase: (phase: 
   const invokeRefType = () => i32;
   const DYNARR_NULL = () => dynArr().ref;
   /** A closure's fields after code and env; `meta` is its $fnmeta (null: a compiler-made adapter). */
-  const closureTail = (t: IrType, meta?: number): number[] => {
+  const closureTail = (t: IrType, meta?: number, origin?: number): number[] => {
     const mt = meta ?? m.ref.null(types.fnMeta()!);
     if (!types.nativeDyn) return [mt];
     const inv = t.kind === "func" ? dynInvokerOrThrow(t) : null;
-    return [inv ? fnSlot(inv, types.dynInvokeSig()) : m.i32.const(-1), m.ref.null(dynObj().ref), m.ref.null(binaryen.externref), mt];
+    return [inv ? fnSlot(inv, types.dynInvokeSig()) : m.i32.const(-1), m.ref.null(dynObj().ref), m.ref.null(binaryen.externref), mt, origin ?? m.ref.null(binaryen.anyref)];
   };
   /** An immutable $fnmeta global: a function's JS name, length and kind. */
   const fnMetaGlobal = (key: string, name: string, length: number, flags: number): number => {
@@ -17109,15 +17239,19 @@ function emitModule(given: IrModule, opts: WasmGcEmitOptions, setPhase: (phase: 
   const fnForwardMeta = () => fnMetaGlobal("%forward", "", 0, FN_FORWARD);
   const isForward = (meta: number) => m.ref.eq(meta, fnForwardMeta());
   /** The tail of a forwarding closure: dynamic calls go to $fn.forward whole (this and every argument). */
-  const forwardTail = (): number[] => [fnSlot(fnForward(), types.dynInvokeSig()), m.ref.null(dynObj().ref), m.ref.null(binaryen.externref), fnForwardMeta()];
+  const forwardTail = (): number[] => [fnSlot(fnForward(), types.dynInvokeSig()), m.ref.null(dynObj().ref), m.ref.null(binaryen.externref), fnForwardMeta(), m.ref.null(binaryen.anyref)];
   /** A function value as itself: a forwarding closure answers the function it views (native dyn). */
   const fnUnwrap = () => defineHelper("$fn.unwrap", () => {
     const fb = nonNull(types.fnBase()!), v = () => m.local.get(0, A), env = () => m.local.get(1, binaryen.structref), str = types.dynBox("dyn:str");
+    const cl = nonNull(types.closureFinal()!);
+    const origin = () => m.struct.get(CLOSURE_ORIGIN, m.ref.cast(v(), cl), A, false);
     m.addFunction("$fn.unwrap", A, A, [binaryen.structref], m.if(fnTest(v()),
+      // A signature adapter is the function it adapts (its origin is already unwrapped).
+      m.if(m.i32.and(m.ref.test(v(), cl), m.i32.eqz(m.ref.is_null(origin()))), origin(),
       m.if(isForward(m.struct.get(closureMeta(true), fnCast(v()), types.fnMeta()!, false)), m.block(null, [
         m.local.set(1, m.struct.get(CLOSURE_ENV, fnCast(v()), binaryen.structref, false)),
         m.if(m.ref.test(env(), nonNull(dynArr().ref)), m.array.get(m.struct.get(DYN_ARR_ITEMS, m.ref.cast(env(), nonNull(dynArr().ref)), types.anyArray(), false), m.i32.const(0), A, false),
-          fromJsC([m.struct.get(0, m.ref.cast(env(), nonNull(str.ref)), binaryen.externref, false)], A))], A), v()), v()));
+          fromJsC([m.struct.get(0, m.ref.cast(env(), nonNull(str.ref)), binaryen.externref, false)], A))], A), v())), v()));
   });
   /** The uniform entry of a forwarding closure: the viewed function, called with this and every argument. */
   const fnForward = () => defineHelper("$fn.forward", () => {
@@ -17355,7 +17489,7 @@ function emitModule(given: IrModule, opts: WasmGcEmitOptions, setPhase: (phase: 
       const own = (key: string, v: number) => m.block(null, [dobj.set(p(), m.i32.const(dobj.atom(key)), v), dobj.setFlags(p(), m.i32.const(dobj.atom(key)), m.i32.const(ATTR_READONLY | ATTR_HIDDEN))]);
       m.addFunction(`${fn}.make`, binaryen.none, A, [dynObj().ref], m.block(null, [
         m.local.set(0, dobj.create()), own("length", boxDyn("dyn:num", m.f64.const(length))), own("name", boxDyn("dyn:str", stringConst(m, short))),
-        m.struct.new([sig(), m.ref.null(binaryen.structref), sig(), p(), m.ref.null(binaryen.externref), m.ref.null(types.fnMeta()!)], binaryen.getHeapType(types.closureFinal()!))], A));
+        m.struct.new([sig(), m.ref.null(binaryen.structref), sig(), p(), m.ref.null(binaryen.externref), m.ref.null(types.fnMeta()!), m.ref.null(binaryen.anyref)], binaryen.getHeapType(types.closureFinal()!))], A));
     });
     return m.block(null, [m.if(m.ref.is_null(m.global.get(`${fn}.value`, A)), m.global.set(`${fn}.value`, m.call(`${fn}.make`, [], A))), m.global.get(`${fn}.value`, A)], A);
   };
@@ -18611,7 +18745,7 @@ function emitModule(given: IrModule, opts: WasmGcEmitOptions, setPhase: (phase: 
           : errorClass !== undefined && opts.hostHandles ? [own("prototype", errorProto(name), ATTR_READONLY | ATTR_HIDDEN | ATTR_FIXED)]
           : name === "Promise" && opts.hostHandles ? [own("prototype", promiseProto(), ATTR_READONLY | ATTR_HIDDEN | ATTR_FIXED)]
           : browser && !opts.hostHandles ? [own("prototype", fromJsC([hostCall("js.protoOf", [stringConst(m, name)], [binaryen.externref], binaryen.externref)], A), ATTR_READONLY | ATTR_HIDDEN | ATTR_FIXED)] : []),
-        m.local.set(1, m.struct.new([sig(), m.ref.null(binaryen.structref), sig(), p(), m.ref.null(binaryen.externref), m.ref.null(types.fnMeta()!)], binaryen.getHeapType(types.closureFinal()!))),
+        m.local.set(1, m.struct.new([sig(), m.ref.null(binaryen.structref), sig(), p(), m.ref.null(binaryen.externref), m.ref.null(types.fnMeta()!), m.ref.null(binaryen.anyref)], binaryen.getHeapType(types.closureFinal()!))),
         // (the native host's Map / Set prototype objects: the constructor is interned first, so the prototype's own `constructor` read finds it)
         ...(opts.hostHandles && (name === "Map" || name === "Set") ? [m.global.set(g, m.local.get(1, A)), own("prototype", collProtoObject(name), ATTR_READONLY | ATTR_HIDDEN | ATTR_FIXED)] : []),
         ...(name === "URLSearchParams" ? [dobj.set(asA(uspProto(), "dyn:obj"), m.i32.const(dobj.atom("constructor")), m.local.get(1, A)),
@@ -18694,7 +18828,7 @@ function emitModule(given: IrModule, opts: WasmGcEmitOptions, setPhase: (phase: 
    * takes. On the web host the constructor is adopted by the page's Promise at module start. */
   const promiseFnValue = (entry: string, env: number): number => {
     const sig = () => fnSlot(entry, types.dynInvokeSig());
-    return m.struct.new([sig(), env, sig(), m.ref.null(dynObj().ref), m.ref.null(binaryen.externref), m.ref.null(types.fnMeta()!)], binaryen.getHeapType(types.closureFinal()!));
+    return m.struct.new([sig(), env, sig(), m.ref.null(dynObj().ref), m.ref.null(binaryen.externref), m.ref.null(types.fnMeta()!), m.ref.null(binaryen.anyref)], binaryen.getHeapType(types.closureFinal()!));
   };
   const resumeFn = (name: string, build: () => number): string => defineHelper(name, () => {
     const b = withOwnLocals(3, build);
@@ -19914,6 +20048,14 @@ function emitModule(given: IrModule, opts: WasmGcEmitOptions, setPhase: (phase: 
         ? (arrayMethodCall(method, () => m.ref.cast(m.call("$tarr.snapshot", [rv()], A), nonNull(dynArr().ref)), argv()) ?? fail(stringConst(m, `Array.prototype.${method} is not supported yet`)))
         : method === "push" ? m.block(null, [...argv().map(x => m.call("$tarr.set", [rv(), m.call("$tarr.len", [rv()], i32), x], binaryen.none)), boxDyn("dyn:num", m.f64.convert_u.i32(m.call("$tarr.len", [rv()], i32)))], A)
         : method === "sort" ? m.call(tarrSort(), [rv(), argv()[0] ?? m.ref.null(A)], A)
+        // pop: the last element (undefined when empty), and the array one shorter.
+        : method === "pop" ? (() => { const lenT = temp(i32), valT = temp(A); return m.block(null, [
+            m.local.set(lenT, m.call("$tarr.len", [rv()], i32)),
+            m.if(m.i32.eqz(m.local.get(lenT, i32)), m.return(m.ref.null(A))),
+            m.local.set(lenT, m.i32.sub(m.local.get(lenT, i32), m.i32.const(1))),
+            m.local.set(valT, m.call("$tarr.get", [rv(), m.local.get(lenT, i32)], A)),
+            m.call("$tarr.setLength", [rv(), m.f64.convert_u.i32(m.local.get(lenT, i32))], binaryen.none),
+            m.local.get(valT, A)], A); })()
         : fail(stringConst(m, `Array.prototype.${method} on a typed array from untyped code is not supported yet`))),
       // A typed record: call the function stored in its field.
       m.if(typedIs(rv()), dynCallValues(m.call("$typed.get", [rv(), m.i32.const(dobj.atom(method))], A), rv(), argv(), name),
@@ -20004,10 +20146,10 @@ function emitModule(given: IrModule, opts: WasmGcEmitOptions, setPhase: (phase: 
     return m.struct.new(boxes, types.envOf(fnName).heap);
   };
   /** A capturing function's closure over an environment closureEnv built. */
-  const closureOfEnv = (fnName: string, type: IrType, env: number): number => {
+  const closureOfEnv = (fnName: string, type: IrType, env: number, origin?: number): number => {
     if (type.kind !== "func") return unsupported("closure of non-function type");
     const info = types.closureOf(type);
-    return m.struct.new([fnSlot(symbol(fnName), info.sig), env, ...closureTail(type, fnMetaOf(fnName))], heapOf(info.ref));
+    return m.struct.new([fnSlot(symbol(fnName), info.sig), env, ...closureTail(type, fnMetaOf(fnName), origin)], heapOf(info.ref));
   };
   /** A switch whose discriminant is a number and whose every label is a distinct-or-repeated int32 literal (not -0):
    * at least three labels, so a dispatch beats the compares. */
@@ -20075,7 +20217,16 @@ function emitModule(given: IrModule, opts: WasmGcEmitOptions, setPhase: (phase: 
     }
     return closureGlobalMap;
   };
-  const closure = (fnName: string, captures: string[], type: IrType, loc: SrcLoc): number => {
+  /** A signature adapter's identity root (IR `adapts`): the function in its first capture, as the creating function holds it (a
+   * function or a checked-dynamic function value), unwrapped, so an adapter of an adapter stands for the first function too. */
+  const adaptedOrigin = (id: string, loc: SrcLoc): number | undefined => {
+    if (!types.nativeDyn || !types.fnBase()) return undefined;
+    const local = fn.ir.locals.find((l) => l.id === id) ?? fn.ir.params.map((p) => ({ id: p.localId, type: p.type })).find((p) => p.id === id);
+    if (local === undefined) return unsupported(`adapter capture ${id}`, loc);
+    const value = expr({ kind: "varRef", localId: id, type: local.type, loc } as IrExpr);
+    return m.call(fnUnwrap(), [local.type.kind === "func" ? value : value], binaryen.anyref);
+  };
+  const closure = (fnName: string, captures: string[], type: IrType, loc: SrcLoc, origin?: number): number => {
     if (type.kind !== "func") return unsupported("closure of non-function type", loc);
     const info = types.closureOf(type), target = functions.get(fnName);
     if (!target) return unsupported(`closure over unknown function ${fnName}`, loc);
@@ -20087,7 +20238,7 @@ function emitModule(given: IrModule, opts: WasmGcEmitOptions, setPhase: (phase: 
       GcTypes.addFunctionWithHeapType(m, code, info.sig, [], body);
     }
     const codeRef = fnSlot(code, info.sig);
-    if (target.captures?.length) return closureOfEnv(fnName, type, closureEnv(fnName, captures, loc));
+    if (target.captures?.length) return closureOfEnv(fnName, type, closureEnv(fnName, captures, loc), origin);
     const interned = `$fnval.${symbol(fnName)}`;
     if (!globals.has(interned)) { m.addGlobal(interned, info.ref, true, m.ref.null(info.ref)); globals.set(interned, info.ref); }
     // One function per closure-free function value, made on first use (each class's key helpers, among others, read the same
@@ -20315,6 +20466,8 @@ function emitModule(given: IrModule, opts: WasmGcEmitOptions, setPhase: (phase: 
       if (rt.el === binaryen.v128) return unsupported("identity search over v128 elements", e.loc);
       // Page values (externref elements: jsval, symbol, bigint, date, regex): the page's own === / SameValueZero.
       if (rt.el === binaryen.externref) return hostCall(sameValueZero ? "js.sameValueZero" : "js.eq", [x, y], [binaryen.externref, binaryen.externref], i32);
+      // Functions: identity roots (a signature adapter is the function it adapts).
+      if (elemIr.kind === "func" && types.nativeDyn && types.fnBase()) return sameRef(m.call(fnUnwrap(), [x], A), m.call(fnUnwrap(), [y], A));
       return m.ref.eq(x, y);
     };
     switch (e.method) {
@@ -23010,12 +23163,23 @@ function emitModule(given: IrModule, opts: WasmGcEmitOptions, setPhase: (phase: 
   }
   // Closed world: every GC type is private to the module.
   binaryen.setClosedWorld(true);
-  // Binaryen's builder emits legacy try/catch; ship standard exnref EH.
+  // Binaryen's builder emits legacy try/catch; ship standard exnref EH (capability eh=legacy keeps the builder's).
+  const capabilityMode = opts.capabilityMode ?? BASELINE_MODE;
+  const legacyEh = capabilityMode.eh === "legacy";
   // The host-ABI version the module was built against (host.ts checks it).
   m.addCustomSection("scriptc.host-abi", new TextEncoder().encode(WASMGC_HOST_ABI));
+  // What the module requires of an engine, and the mode it was built under (host.ts reads it before instantiating).
+  const usesMemory = hostImports.has("bytes.track") || hostImports.has("bytes.toJs") || !!opts.link?.memory;
+  const capabilityUses: CapabilityUses = {
+    byteViews: hostImports.has("bytes.toJs"), memory: usesMemory, jspi: usesJspi,
+    relaxedSimd: opts.experimentalRelaxedSimd === true && simdLib !== null && simdLib !== undefined,
+    simd: usesMemory || (simdLib !== null && simdLib !== undefined), sharedMemory: opts.link?.memory?.shared === true,
+  };
+  const capabilities = resolvedRecord(capabilityMode, capabilityUses, opts.capabilityVariant ?? "preferred");
+  m.addCustomSection(CAPABILITY_SECTION, encodeCapabilitySection(capabilities));
   // Typed host modules: the signatures the host record carries, so an environment can adapt a plain-JS implementation (instantiateLinked).
   if (hostModules.length) m.addCustomSection("scriptc.host-modules", new TextEncoder().encode(JSON.stringify({ namespace: ns ?? "", modules: hostModules })));
-  if (!nativeFinish) {
+  if (!nativeFinish && !legacyEh) {
     setPhase("exnref translation");
     m.runPasses(["translate-to-exnref"]);
     setPhase("validation after exnref");
@@ -23048,7 +23212,7 @@ function emitModule(given: IrModule, opts: WasmGcEmitOptions, setPhase: (phase: 
       if (info.vars.length > DEV_COALESCE_LOCALS) wideFns.push([info.vars.length, info.name]);
     }
     if (process.env["SCRIPTC_TIMING"] === "1") process.stderr.write(`scriptc timing ${JSON.stringify({ phase: "wasmgc.coalesce-candidates", functions: wideFns.length, widest, threshold: DEV_COALESCE_LOCALS, top: wideFns.sort((x, y) => y[0] - x[0]).slice(0, 8) })}\n`);
-    const finishFlags = [...(nativeFinish ? ["--translate-to-exnref"] : []), ...(widest > DEV_COALESCE_LOCALS ? ["--coalesce-locals"] : [])];
+    const finishFlags = [...(nativeFinish && !legacyEh ? ["--translate-to-exnref"] : []), ...(widest > DEV_COALESCE_LOCALS ? ["--coalesce-locals"] : [])];
     // SCRIPTC_WASMGC_DEFER_FINISH=1 (a release whose caller runs wasm-opt next: scripts/wasmgc/release-split.mjs): the module
     // is written as built and the finish's passes are handed back (pendingFinish) to run in front of the caller's level, one
     // read and write of the module instead of two.
@@ -23090,5 +23254,5 @@ function emitModule(given: IrModule, opts: WasmGcEmitOptions, setPhase: (phase: 
   const text = opts.text ? m.emitText() : undefined;
   m.dispose();
   if (SM && smMap !== undefined && SM.sourcesContent) smMap = withSourcesContent(smMap, SM.sourceText);
-  return { binary, asyncLiveness, ...(pendingFinish ? { pendingFinish } : {}), helpers: { count: helperClock.count, ms: Math.round(helperClock.ms) }, ...(smMap === undefined ? {} : { sourceMap: smMap }), ...(optimizer ? { optimizer } : {}), ...(text === undefined ? {} : { text }), hostImports: [...hostImports].sort(), ...(hostModules.length ? { hostModules: [...hostModules] } : {}), specializations, specializationCounters, ...(profile ? { profileReport } : {}), ...(effects ? { functionEffects: [...effects.values()], pureCallElisions } : {}), ...(shared ? { atoms: sharedAtoms } : {}), ...(fences.length ? { fences } : {}) };
+  return { binary, asyncLiveness, capabilities, capabilityUses, ...(pendingFinish ? { pendingFinish } : {}), helpers: { count: helperClock.count, ms: Math.round(helperClock.ms) }, ...(smMap === undefined ? {} : { sourceMap: smMap }), ...(optimizer ? { optimizer } : {}), ...(text === undefined ? {} : { text }), hostImports: [...hostImports].sort(), ...(hostModules.length ? { hostModules: [...hostModules] } : {}), specializations, specializationCounters, ...(profile ? { profileReport } : {}), ...(effects ? { functionEffects: [...effects.values()], pureCallElisions } : {}), ...(shared ? { atoms: sharedAtoms } : {}), ...(fences.length ? { fences } : {}) };
 }
