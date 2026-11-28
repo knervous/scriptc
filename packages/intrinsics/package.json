@@ -1,0 +1,19 @@
+{
+  "name": "@scriptc/intrinsics",
+  "version": "0.0.0",
+  "private": true,
+  "description": "Intrinsic libraries for scriptc: TypeScript modules with exact plain-JavaScript bodies that the compiler lowers to instructions",
+  "license": "Apache-2.0",
+  "type": "module",
+  "exports": {
+    "./int": "./int.ts",
+    "./math": "./math.ts",
+    "./layout": "./layout.ts",
+    "./f16": {
+      "wasmgc": "./f16.ts",
+      "types": "./f16.ts",
+      "default": "./f16.engine.mjs"
+    },
+    "./atomics": "./atomics.ts"
+  }
+}

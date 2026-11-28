@@ -24,6 +24,36 @@
       "types": "./lib/host.d.ts",
       "default": "./lib/host.mjs"
     },
+    "./int": {
+      "wasmgc": "./intrinsics/int.ts",
+      "types": "./intrinsics/int.d.ts",
+      "default": "./intrinsics/int.mjs"
+    },
+    "./math": {
+      "wasmgc": "./intrinsics/math.ts",
+      "types": "./intrinsics/math.d.ts",
+      "default": "./intrinsics/math.mjs"
+    },
+    "./layout": {
+      "wasmgc": "./intrinsics/layout.ts",
+      "types": "./intrinsics/layout.d.ts",
+      "default": "./intrinsics/layout.mjs"
+    },
+    "./f16": {
+      "wasmgc": "./intrinsics/f16.ts",
+      "types": "./intrinsics/f16.d.ts",
+      "default": "./intrinsics/f16.engine.mjs"
+    },
+    "./atomics": {
+      "wasmgc": "./intrinsics/atomics.ts",
+      "types": "./intrinsics/atomics.d.ts",
+      "default": "./intrinsics/atomics.mjs"
+    },
+    "./simd": {
+      "wasmgc": "./intrinsics/simd.ts",
+      "types": "./intrinsics/simd.d.ts",
+      "default": "./intrinsics/simd.mjs"
+    },
     "./package.json": "./package.json"
   },
   "bin": {

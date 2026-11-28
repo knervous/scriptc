@@ -1,0 +1,57 @@
+{
+  "app": "snapshot",
+  "node": "v24.22.3",
+  "platform": "linux-x64",
+  "cpus": 4,
+  "cpu": "Intel(R) Xeon(R) Processor @ 2.10GHz",
+  "date": "2026-11-28T09:03:00.910Z",
+  "results": [
+    "packets 300 bytes 1125685 per packet 3752 hash 3139431730 mirror equal"
+  ],
+  "lanes": {
+    "js": {
+      "match": true,
+      "times": {
+        "time": 26.4
+      }
+    },
+    "js+fallback": {
+      "match": true,
+      "times": {
+        "time": 40.5
+      }
+    },
+    "wasmgc-base": {
+      "match": true,
+      "times": {
+        "time": 23.9
+      },
+      "bytes": 6944,
+      "compileMs": 1213
+    },
+    "wasmgc": {
+      "match": true,
+      "times": {
+        "time": 130.4
+      },
+      "bytes": 7417,
+      "compileMs": 1199
+    },
+    "native-base": {
+      "match": true,
+      "times": {
+        "time": 7.3
+      },
+      "bytes": 445664,
+      "compileMs": 1083
+    },
+    "native": {
+      "match": true,
+      "times": {
+        "time": 64.5
+      },
+      "bytes": 433792,
+      "compileMs": 1291
+    }
+  }
+}

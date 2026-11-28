@@ -35,6 +35,7 @@ $ npx scriptw run app.wasm
 - `--capabilities <list>`, `--targets <list>` and `--explain-capabilities` choose and explain the capability modes (see [Capabilities](#capabilities)).
 - `--browser` compiles a page program: the DOM, timers and typed `host:` modules are in scope. Load it in a page with `scriptw/host` (below). Its dynamic values use the native WasmGC object model, which UI libraries and frameworks need.
 - `--conditions <list>` adds package export conditions, such as `dom-stream`. The `wasmgc` condition is always on: a package that maps it to TypeScript source (`"wasmgc": "./src/index.ts"`, as `@scriptw/lui` does) is compiled into the module from that source.
+- `--compile-packages <list>` compiles the named npm packages into the module instead of leaving them as npm JavaScript (see [npm packages](#npm-packages-in-a-page-program)).
 - `scriptw --version` prints the package version, the compiler version and the source commit.
 
 ## Running a module in a web page
@@ -114,6 +115,23 @@ Parameters and results are numbers, booleans, strings, objects passed by referen
 
 The loader works the same under Node, so the module above runs there too when Node supplies `host:clock`.
 
+### npm packages in a page program
+
+An npm package a page program imports stays npm JavaScript by default: the module imports it from the page, and the page hands the package to the loader, keyed by the specifier the program imports. A bundler or an import map gives the page the package; for React:
+
+```js
+import * as React from "react";
+import * as ReactDOM from "react-dom";
+import * as ReactDOMClient from "react-dom/client";
+
+const program = await instantiateWasmGc(bytes, {
+  modules: { react: React, "react-dom": ReactDOM, "react-dom/client": ReactDOMClient },
+});
+await program.main();
+```
+
+The program's own code is compiled; each call into the package, and each value it hands over, crosses to the page. `--compile-packages <list>` (`compilePackages` in `compile`) compiles the named packages' JavaScript into the module instead, so nothing crosses. It takes packages whose CommonJS or ES module exports the compiler can follow; React does not compile this way yet (its entry chooses its build with `process.env.NODE_ENV` at run time), so React stays npm JavaScript.
+
 ## The compiler as a function
 
 ```js
@@ -123,7 +141,7 @@ const result = await compile("src/app.ts", { outPath: "dist/app.wasm", browser: 
 if (!result.ok) for (const d of result.diagnostics) console.error(formatDiagnostic(d));
 ```
 
-`compile` takes `capabilities`, `targets` and `conditions` as the CLI does, and `dynModel: "engine"` with `browser` for the smallest page module (dynamic values as engine values behind host calls; UI libraries need the default, `"native"`). It resolves to `{ ok: true, wasmPath, hostSidecarPath, capabilitiesPath, capabilities, variants, variantsPath?, explainCapabilities }` or `{ ok: false, diagnostics }`, where each diagnostic has a `message` and, when known, a `code`, `file`, `line` and `hint`. It runs under Node only; type declarations ship for both entry points.
+`compile` takes `capabilities`, `targets`, `conditions` and `compilePackages` as the CLI does, and `dynModel: "engine"` with `browser` for the smallest page module (dynamic values as engine values behind host calls; UI libraries need the default, `"native"`). It resolves to `{ ok: true, wasmPath, hostSidecarPath, capabilitiesPath, capabilities, variants, variantsPath?, explainCapabilities }` or `{ ok: false, diagnostics }`, where each diagnostic has a `message` and, when known, a `code`, `file`, `line` and `hint`. It runs under Node only; type declarations ship for both entry points.
 
 ## Capabilities
 
@@ -138,6 +156,7 @@ Every module needs WasmGC and exception handling. What else it needs depends on 
 - `relaxed-simd` (off by default): the SIMD library's relaxed multiply-adds. Results may differ in the low bits; Safari rejects the module, and `auto` builds a variant without it for such a target.
 - `threads=off|shared|auto`: `shared` needs a shared memory, which a page has only when cross-origin isolated.
 - `-jspi`: refuse a program that suspends on host promises. Such a program needs JSPI, and a target without it is a build error.
+- `math=fast|strict` (`fast` by default): `strict` refuses relaxed SIMD. A program that imports `scriptw/math` is always built `strict`. The key carries `;math=strict` only when strict.
 
 `--targets` lists the engines to support, by default `chrome>=137,firefox>=134,safari>=26.2,node>=24.15`. `--explain-capabilities` prints what was chosen and why.
 
@@ -181,9 +200,31 @@ await ring.waitForCompletion(seen);
 ring.reap((id, status, result) => console.log(ring.threads, id, status, result));
 ```
 
+## Intrinsic libraries
+
+Six subpath exports carry language-level features that compile to instructions on WasmGC and natively, and run as exact plain JavaScript otherwise. An import such as `import { popcnt } from "scriptw/int"` runs the library's JavaScript under Node or in an uncompiled page. `scriptw build` compiles the library's TypeScript source, which it reads through the package's `wasmgc` export condition, and lowers each call. The results are the same either way.
+
+- `scriptw/int`: `clz`, `ctz`, `popcnt`, `rotl`, `rotr`, `bswap`, `mulhi`, wrapping and saturating `add`/`sub`/`mul`, and narrowing (`toInt8`, `toUint16`, ...). Each has a 32-bit form over numbers and a 64-bit form over bigints (`popcnt64`, `mulWrap64`, ...). It also declares the contract types `Int32`, `Uint32`, `Int8`, `Uint8`, `Int16`, `Uint16`, `Int64` and `Uint64`. The compiler proves every value written to a slot of one of these types, or refuses the build with SC7002 (SC7003 when the contract cannot be checked). As class fields, the 8- and 16-bit types are stored packed.
+- `scriptw/math`: `sin`, `cos`, `exp`, `log`, `pow` and the rest of the transcendental functions, as one port computes them. The doubles are the same under Node, WasmGC and native code. A program that imports it is built with `math=strict`, which also turns relaxed SIMD off.
+- `scriptw/layout`: fixed-layout records over a byte view, read and written in place. `layout()` computes offsets, `RecordView` reads and writes them, and `layoutSource()` generates a view class with one accessor per field. `cStruct()` and `wgslStruct()` print the same layout for C and WGSL.
+- `scriptw/f16`: binary16 storage, with `toF16Bits`, `fromF16Bits`, `f16round`, `getFloat16`/`setFloat16`, `packF16` and `unpackF16`. The JavaScript entry uses the engine's conversion where it has one (`F16_PATH` says which), and an exact software conversion elsewhere.
+- `scriptw/atomics`: the `AtomicInt32` and `AtomicUint32` cells, `WorkCounter` and `SpinLock`, over `Atomics`.
+- `scriptw/simd`: Wasm SIMD128 (`v128`, `f32x4`, `i32x4`) over a lane-exact scalar fallback.
+
+```ts
+import { popcnt, rotl } from "scriptw/int";
+import type { Int32 } from "scriptw/int";
+
+let h: Int32 = 0;
+for (let i: Int32 = 0; i < 1000; i++) h = rotl(h ^ popcnt(i), 5);
+console.log(h);
+```
+
+`--explain-capabilities` lists each library a module imports and how it is provided. The module's capability record lists them as well (`intrinsics`). [docs/intrinsics.md]({{repository}}/blob/main/docs/intrinsics.md) has the details and the fallbacks.
+
 ## Choosing a UI framework
 
-The same table program (js-framework-benchmark's operations) was measured on four UI frameworks, each as JavaScript and compiled with scriptw. The table shows each compiled lane's median script time as a ratio to its own framework's JavaScript build; 1.00 is parity, lower is better. "stream" is the framework's DOM on the batched DOM bridge (`packages/dom-stream` in the repository); "per-call" makes one host call per DOM operation. Measured in headless Chromium 158.0.8127.36 on a 4-core 2.30 GHz Xeon, with React 19.2.8 (TypeScript port), SolidJS 1.9.20, Svelte 5.59.2 and LUI 0.1.0.
+The same table program (js-framework-benchmark's operations) was measured on four UI frameworks, each as JavaScript and compiled with scriptw. The table shows each compiled lane's median script time as a ratio to its own framework's JavaScript build; 1.00 is parity, lower is better. "stream" is the framework's DOM on the batched DOM bridge (`packages/dom-stream` in the repository); "per-call" makes one host call per DOM operation; React's row is published React built with `scriptw build --browser --release` and nothing else, React itself running as the page's npm JavaScript. Measured in headless Chromium 158.0.8127.36 on a 4-core 2.30 GHz Xeon, with React 19.2.8 (published, from npm), SolidJS 1.9.20, Svelte 5.59.2 and LUI 0.1.0.
 
 | Framework | Lane | create 1k | replace 1k | update 10th | select | swap | remove | append 1k | clear |
 |---|---|---|---|---|---|---|---|---|---|
@@ -191,12 +232,12 @@ The same table program (js-framework-benchmark's operations) was measured on fou
 | SolidJS | per-call, published | 1.72 | 1.40 | 1.99 | 4.25 | 2.09 | 2.17 | 1.79 | 1.16 |
 | LUI | stream | 1.66 | 1.53 | 1.13 | 1.19 | 1.04 | 1.28 | 1.59 | 1.75 |
 | LUI | per-call | 1.54 | 1.28 | 1.19 | 1.20 | 1.04 | 1.26 | 1.59 | 1.08 |
-| React | stream | 2.32 | 1.45 | 2.02 | 2.52 | 1.09 | 2.95 | 2.24 | 1.23 |
+| React | published, npm JavaScript | 3.29 | 2.23 | 4.98 | 7.71 | 1.48 | 5.37 | 3.75 | 1.07 |
 | Svelte 5 | per-call, published | 2.48 | 2.55 | 2.46 | 8.60 | 3.05 | 2.66 | 2.94 | 1.78 |
 
 - **SolidJS** fits best: fine-grained updates, templates the bridge clones in one command, and a runtime small enough to type. It is also the fastest in absolute terms, as JavaScript and compiled.
 - **LUI** (`@scriptw/lui` on npm) is written for this compiler and needs no port; its compiled ratios are close to Solid's. `scriptw build --browser` compiles it from the installed package, and `--conditions dom-stream` puts it on the DOM stream.
-- **React** runs from a strict TypeScript port of its client packages (`packages/react-ts`).
+- **React** works out of the box: the app is compiled, and React itself stays the page's npm JavaScript (see [npm packages](#npm-packages-in-a-page-program)). The gap is the boundary: each element a compiled component creates is a call into React with its props converted. Compiling React into the module does not work yet. The repository's strict TypeScript port of React's client packages (`packages/react-ts`), on the DOM stream, shows what compiling and typing React buys: 2.27, 1.43, 2.10, 3.14, 1.11, 2.94, 2.07 and 1.00 on the same operations.
 - **Svelte 5** compiles from its published runtime, untyped, so it pays dynamic dispatch throughout.
 
 The full results (every lane, host calls per operation, where the time goes, and what was tried) are in `benchmarks/frameworks/RESULTS.md` in the repository. The harness is `benchmarks/frameworks` (with React's in `benchmarks/react-dom`), and `node benchmarks/frameworks/run.mjs` reproduces it.

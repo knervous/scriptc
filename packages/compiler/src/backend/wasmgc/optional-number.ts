@@ -197,7 +197,10 @@ export function unboxOptionalNumbers(f: IrFunction, hooks: OptionalNumberHooks):
         const numTag = arms.findIndex(a => a.kind === "f64"), undefTag = arms.findIndex(a => a.kind === "undefinedT");
         if (numTag < 0 || undefTag < 0) return e;
         const c = { unionId: arg.type.unionId, numTag, undefTag };
-        const read = produce(arg, c, e.loc);
+        // An unboxed local read back through the helper (`let i = map.get(k); ... return i`, the checker having
+        // narrowed i past undefined): the local's f64 itself, so no box is made only to be opened.
+        const w = wrapOf(arg);
+        const read = w && w.c.unionId === c.unionId ? w.x : produce(arg, c, e.loc);
         if (!read) return e;
         const id = `%optn.${temps++}`;
         f.locals.push({ id, name: id, type: F64, mutable: false });

@@ -8,6 +8,7 @@
  * indices, no other members, and (by the type mapping) no identity. */
 import binaryen from "binaryen";
 import type { IrExpr, IrModule, SrcLoc } from "../../ir/ir.js";
+import { intrinsicModule } from "../../ir/intrinsic-libraries.js";
 
 export const SIMD_LIBRARY_FILE = "simd.intrinsics.ts";
 
@@ -15,6 +16,9 @@ export const SIMD_LIBRARY_FILE = "simd.intrinsics.ts";
 export interface SimdModule { prefix: string; v128Class: string }
 
 export function findSimdModule(mod: IrModule): SimdModule | null {
+  // The pragma (`@scriptc-intrinsics simd/1`), wherever the module is installed; the file name otherwise.
+  const lib = intrinsicModule(mod, "simd");
+  if (lib) return { prefix: `%${lib.tag}`, v128Class: `${lib.tag}v128` };
   for (const f of mod.functions) {
     const file = f.loc?.file ?? "";
     if (!file.endsWith(`/${SIMD_LIBRARY_FILE}`) && file !== SIMD_LIBRARY_FILE) continue;

@@ -284,6 +284,10 @@ const MODULE_FIELDS: Record<StringFields<Omit<IrModule, "functions">>, Role> = {
   "recordLinks[].to": "other",
   "recordLinks[].compose": "reference",
   "recordSourcesFolded[]": "other",
+  "intrinsics[].tag": "other",
+  "intrinsics[].library": "other",
+  "intrinsics[].file": "other",
+  "contracts.narrowFields[]": "other",
 };
 
 const loc = { file: "references.ts", start: 0, end: 0 };

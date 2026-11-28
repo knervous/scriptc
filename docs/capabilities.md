@@ -353,6 +353,8 @@ The findings shape the design. Most capabilities are universal in every engine t
 | JSPI suspending imports | `off` (default), `on` (manifest) | build, checked at load | none for synchronous source | — |
 | Threads (shared memory, workers) | `off` (default), `shared`, `auto` | build (link) and load (isolation) | the single-threaded consumer (§4.3) | yes for results and order; not for timing |
 | Native: CPU level, host set, workers, thread instances | existing | build | existing | — |
+| Deterministic math | `fast` (default), `strict` | build (and implied by importing `scriptw/math`) | — (the strict-math library is the same code on every target and in plain JavaScript) | yes: bit-identical doubles |
+| Intrinsic libraries (int, math, layout, f16, atomics, simd) | recorded per module | build | each library's plain-JavaScript bodies; f16's engine conversion where present ([intrinsics.md](intrinsics.md)) | yes |
 
 ### 4.1 Build time versus load time
 
@@ -615,3 +617,20 @@ Run here:
 | Chromium 158, default / isolated / JS API deleted | all | byte views with `toResizableBuffer` deleted |
 
 **Not run here:** Node 26, Firefox, WebKit and the pinned Chrome for Testing lanes. The workflow defines them; this environment has Node 22 and 24 and Playwright's Chromium only.
+
+### 5.9 Intrinsic libraries and the math mode
+
+[intrinsics.md](intrinsics.md) describes the intrinsic layer. Its effect on capabilities is small.
+
+- **The record.** `CapabilityUses.intrinsics`, the record and the `scriptc.capabilities` section carry `intrinsics`: the libraries a module imports, sorted (`["f16", "int", "math"]`). A reader that predates the field ignores it. `--explain-capabilities` prints one `intrinsics:` line per library with its lowering and fallback, and a `math:` line.
+- **The math mode.**
+  - `math=fast|strict` is the only new mode. A program that imports the strict-math library is built `strict` whatever was asked (`effectiveMode`).
+  - `strict` turns the SIMD library's relaxed lowerings off, and refuses an explicit `relaxed-simd` at planning time.
+  - `strict` also stores every NaN written to a `Float32Array`, a `Float64Array` or through `DataView` as the canonical quiet NaN (`bytes.ts`, `canonicalNaN`). A folded `0 / 0` (`0x7ff8…`) and the same division at run time (`0xfff8…` on x86) then read back the same bits.
+  - The key ends in `;math=strict` only when strict. `modeOfKey` reads keys with or without it, and refuses `math=fast` spelled out, so a key has one spelling.
+- **Requirements.** No library adds an engine requirement. The instructions they lower to (i32/i64, SIMD128, atomics on unshared memory) are in every WasmGC engine's baseline (§1.1). Shared-memory atomics still come from `threads=shared`.
+- **f16.** The only load-time choice is f16's, and it is made in plain JavaScript, not in the module: the package's JavaScript entry uses `Math.f16round` and the `DataView` float16 methods where present, and reports `F16_PATH`. Compiled modules always convert in software (WasmGC) or through the runtime (native). Both are exact, so this is a speed fallback, not a semantic one.
+- **Checked by:**
+  - `packages/compiler/src/backend/wasmgc/capabilities.test.ts`: the key, `modeOfKey`, the strict refusal, the record and the explain lines;
+  - the differential corpus 4729 to 4732 (Node, WasmGC, native).
+

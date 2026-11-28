@@ -28,6 +28,9 @@ export async function compile(entry, options = {}) {
     // The `wasmgc` condition lets a package ship TypeScript source for compiled builds beside its JavaScript
     // (`"wasmgc": "./src/index.ts"`): that source is compiled into the module rather than run as npm JavaScript.
     conditions: ["wasmgc", ...(options.conditions ?? []).filter((c) => c !== "wasmgc")],
+    // Named npm packages whose JavaScript is compiled into the module (the compiler's npm-static mode) instead of
+    // loaded as npm JavaScript; a package it cannot take that way stays npm JavaScript (with a note) or fails the build.
+    ...(options.compilePackages?.length ? { npmStatic: [...options.compilePackages] } : {}),
     // The package builds auto capabilities against the default (or given) targets: a compat variant only when a target
     // needs one and the program uses the feature that differs.
     capabilities: options.capabilities ?? "auto",

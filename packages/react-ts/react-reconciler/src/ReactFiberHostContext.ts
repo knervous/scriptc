@@ -57,7 +57,7 @@ function popHostContainer(fiber: Fiber) {
     pop(rootInstanceStackCursor, fiber);
 }
 function getHostContext(): HostContext {
-    const context = requiredContext(contextStackCursor.current);
+    const context = contextStackCursor.current!;
     return context;
 }
 function pushHostContext(fiber: Fiber): void {
@@ -67,7 +67,7 @@ function pushHostContext(fiber: Fiber): void {
         // transition. We use the same optimization for regular host context below.
         push(hostTransitionProviderCursor, fiber, fiber);
     }
-    const context: HostContext = requiredContext(contextStackCursor.current);
+    const context: HostContext = contextStackCursor.current!;
     const nextContext = getChildHostContext(context, fiber.type);
     // Don't push this Fiber's context unless it's unique.
     if (context !== nextContext) {

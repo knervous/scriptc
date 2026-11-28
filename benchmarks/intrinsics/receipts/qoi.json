@@ -1,0 +1,69 @@
+{
+  "app": "qoi",
+  "node": "v24.22.3",
+  "platform": "linux-x64",
+  "cpus": 4,
+  "cpu": "Intel(R) Xeon(R) Processor @ 2.10GHz",
+  "date": "2026-11-28T09:02:36.365Z",
+  "results": [
+    "qoi bytes 553732 of 1048576 encoded 4085297757 round trip exact"
+  ],
+  "lanes": {
+    "js": {
+      "match": true,
+      "times": {
+        "time.encode": 16.5,
+        "time.decode": 16.3,
+        "time": 32.8
+      }
+    },
+    "js+fallback": {
+      "match": true,
+      "times": {
+        "time.encode": 18,
+        "time.decode": 19.5,
+        "time": 37.6
+      }
+    },
+    "wasmgc-base": {
+      "match": true,
+      "times": {
+        "time.encode": 51.3,
+        "time.decode": 58,
+        "time": 109.3
+      },
+      "bytes": 13693,
+      "compileMs": 1146
+    },
+    "wasmgc": {
+      "match": true,
+      "times": {
+        "time.encode": 55.5,
+        "time.decode": 61.1,
+        "time": 116.6
+      },
+      "bytes": 13247,
+      "compileMs": 1327
+    },
+    "native-base": {
+      "match": true,
+      "times": {
+        "time.encode": 20.2,
+        "time.decode": 14,
+        "time": 34.2
+      },
+      "bytes": 416976,
+      "compileMs": 1083
+    },
+    "native": {
+      "match": true,
+      "times": {
+        "time.encode": 8.6,
+        "time.decode": 14.6,
+        "time": 23.2
+      },
+      "bytes": 412160,
+      "compileMs": 1061
+    }
+  }
+}

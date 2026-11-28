@@ -1,0 +1,86 @@
+{
+ "date": "2026-11-28T08:58:33.977Z",
+ "browser": "158.0.8127.36",
+ "webgl": "WebKit WebGL",
+ "pages": 2,
+ "warmup": 30,
+ "frames": 60,
+ "lanes": [
+  "three.wasm",
+  "lite.wasm",
+  "core.wasm"
+ ],
+ "counts": {
+  "1000": {
+   "three.wasm": {
+    "callsPerFrame": 11009,
+    "calls": {
+     "host.js.get": 5009,
+     "host.js.set": 3000,
+     "host.js.fromNum": 2996,
+     "host.js.isCallableMember": 2,
+     "host.js.callMethod.0": 1,
+     "host.js.callMethod.2": 1
+    },
+    "checksum": 982
+   },
+   "lite.wasm": {
+    "callsPerFrame": 11003,
+    "calls": {
+     "host.js.get": 5006,
+     "host.js.set": 3000,
+     "host.js.fromNum": 2996,
+     "host.js.callFn.2": 1
+    },
+    "checksum": 982
+   },
+   "core.wasm": {
+    "callsPerFrame": 11006,
+    "calls": {
+     "host.js.get": 5006,
+     "host.js.set": 3000,
+     "host.js.fromNum": 2996,
+     "host.js.isCallableMember": 2,
+     "host.js.callMethod.0": 2
+    },
+    "checksum": 982
+   }
+  },
+  "10000": {
+   "three.wasm": {
+    "callsPerFrame": 109973,
+    "calls": {
+     "host.js.get": 50009,
+     "host.js.set": 30000,
+     "host.js.fromNum": 29960,
+     "host.js.isCallableMember": 2,
+     "host.js.callMethod.0": 1,
+     "host.js.callMethod.2": 1
+    },
+    "checksum": 1792
+   },
+   "lite.wasm": {
+    "callsPerFrame": 109967,
+    "calls": {
+     "host.js.get": 50006,
+     "host.js.set": 30000,
+     "host.js.fromNum": 29960,
+     "host.js.callFn.2": 1
+    },
+    "checksum": 10098
+   },
+   "core.wasm": {
+    "callsPerFrame": 109970,
+    "calls": {
+     "host.js.get": 50006,
+     "host.js.set": 30000,
+     "host.js.fromNum": 29960,
+     "host.js.isCallableMember": 2,
+     "host.js.callMethod.0": 2
+    },
+    "checksum": 10098
+   }
+  }
+ },
+ "errors": []
+}

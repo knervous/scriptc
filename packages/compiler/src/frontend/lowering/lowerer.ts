@@ -2,6 +2,9 @@
 import { constructedValue, type ConstructorReturnPlan } from "./constructor-returns.js";
 import { keyedHelperName, setStableNameFiles, setStableNameRoot, stableFileName } from "./stable-names.js";
 import { createHash } from "node:crypto";
+import { intrinsicPragma } from "../../ir/intrinsic-libraries.js";
+import { checkContracts, withContracts } from "../../ir/contract-check.js";
+import { collectContractAnnotations, isContractSource } from "../contract-annotations.js";
 import { HEADER_PLACEHOLDER_CODE, objectModuleHash, objectModuleTag, type ObjectUnit } from "../../link/module-tag.js";
 import { nativeAnyEnabled, browserTarget, wasmGcLaneTarget, defines, isDomLibFile, isNodeWebGlobalMirror, nativeDyn, hostHandlesEnabled, interfaceClassArmsEnabled, stripSourceSites, sourcePathPrefixMap, sourceSitePath } from "../browser-target.js";
 import { trapUnimplementedVirtualCalls } from "./unimplemented-virtual.js";
@@ -79,6 +82,7 @@ import type {
   IrGlobal,
   IrLocal,
   IrModule,
+  IrIntrinsicModule,
   IrObjectClassView,
   IrParam,
   IrRecordShape,
@@ -3829,6 +3833,19 @@ export class Lowerer {
       return !!result && bound.has(result);
     };
     const fieldName = (node: ts.PropertyAccessExpression): string => node.name.text;
+    const admitsUndefined = (t: ts.Type): boolean => (t.flags & ts.TypeFlags.Undefined) !== 0 ||
+      (t.isUnionType() && ts.constituentTypes(t).some((arm) => (arm.flags & ts.TypeFlags.Undefined) !== 0));
+    /** A variable or parameter declared with a type that admits undefined, read where the checker's control flow has
+     * narrowed undefined away. */
+    const checkerNarrowedPastUndefined = (symbol: ts.Symbol, use: ts.Identifier): boolean => {
+      const declaration = this.checker.valueDeclarationOf(symbol);
+      if (declaration === undefined || !(ts.isVariableDeclaration(declaration) || ts.isParameter(declaration)) || !ts.isIdentifier(declaration.name)) return false;
+      try {
+        return admitsUndefined(this.typeOf(declaration.name)) && !admitsUndefined(this.typeOf(use));
+      } catch {
+        return false;
+      }
+    };
     const mayBeOptional = (node: ts.Expression): boolean => {
       // `xs[i]!` is the explicit proven-present form. Its array read keeps
       // the established dense bounds trap and must not promote the enclosing
@@ -3852,7 +3869,10 @@ export class Lowerer {
       ) return true;
       if (ts.isIdentifier(e)) {
         const symbol = symbolOf(e);
-        return symbol !== null && optionalSymbols.has(symbol);
+        if (symbol === null || !optionalSymbols.has(symbol)) return false;
+        // A binding whose own declared type admits undefined (`const h = free.pop()`) is one the checker tracks: where
+        // its control flow has removed undefined (`if (h !== undefined) return h`), the test that removed it ran.
+        return !checkerNarrowedPastUndefined(symbol, e);
       }
       // A read of a class field assigned a missing value (optionalInstanceField).
       if (ts.isPropertyAccessExpression(e)) {
@@ -5050,6 +5070,15 @@ export class Lowerer {
             ...(this.npmEmbedded ? { embedded: this.npmEmbedded } : {}),
             entry: ENTRY_NAME,
             ...(this.ffiImports.length > 0 ? { ffiImports: [...this.ffiImports] } : {}),
+            ...((): { intrinsics?: IrIntrinsicModule[] } => {
+              const out: IrIntrinsicModule[] = [];
+              for (const sf of this.moduleOrder) {
+                const tag = this.fileTag.get(sf);
+                const pragma = tag ? intrinsicPragma(sf.text) : null;
+                if (pragma) out.push({ tag: tag!, ...pragma, file: sf.fileName });
+              }
+              return out.length ? { intrinsics: out } : {};
+            })(),
             ...(this.objectUnit ? {
               objectHierarchy: this.objectHierarchy(), objectDispatch: this.objectDispatchState(), ...this.objectRevision(),
               ...(this.objectArmsDigest() !== null ? { objectArms: this.objectArmsDigest()! } : {}),
@@ -5059,12 +5088,25 @@ export class Lowerer {
             } : {}),
           };
     if (module) sanitizeUnregisteredClassTypes(module, (name) => this.classes.has(name));
+    // Fixed-width integer contracts (ir/contract-check.ts): prove every write, or refuse the program.
+    let checkedModule = module;
+    if (module) {
+      const annotations = this.moduleOrder.flatMap((sf) => {
+        const trusted = intrinsicPragma(sf.text) !== null;
+        return collectContractAnnotations(sf, (spec) => isContractSource(spec, sf.fileName), trusted);
+      });
+      const checked = checkContracts(module, annotations);
+      if (checked.diagnostics.length) {
+        for (const d of checked.diagnostics) this.diags.push(d);
+        checkedModule = null;
+      } else withContracts(module, checked.contracts);
+    }
     // Execution tiers from the final bodies (ir/tiers.ts): upstream's validator
     // holds static-tier functions to the boundary vocabulary (invariant I1).
     // A function's tier is not serialized and no backend of this fork reads it.
     assignLegacyTiers(functions);
     return {
-      module,
+      module: checkedModule,
       diagnostics: this.diags,
       runtimeFences: this.runtimeFences,
       stats: this.stats,

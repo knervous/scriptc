@@ -1,0 +1,54 @@
+{
+  "app": "f16-mesh",
+  "node": "v24.22.3",
+  "platform": "linux-x64",
+  "cpus": 4,
+  "cpu": "Intel(R) Xeon(R) Processor @ 2.10GHz",
+  "date": "2026-11-28T09:03:10.914Z",
+  "results": [
+    "bytes 5120000 -> 2560000 max position error 0.00390625 packed 4278791832"
+  ],
+  "lanes": {
+    "js": {
+      "match": true,
+      "times": {
+        "time": 39.2
+      }
+    },
+    "js+fallback": {
+      "match": true,
+      "times": {
+        "time": 407.2
+      }
+    },
+    "wasmgc-base": {
+      "error": "SC2020 'Float16Array<ArrayBuffer>' is part of the standard library types but has no scriptc lowering yet; SC2020 'new Float16Array' is part of the standard library types but has no scriptc lowering yet; SC1090 assignment to non-array elements are not supported yet; SC2004 uses of 'half' inherit the blocker on its declaration"
+    },
+    "wasmgc": {
+      "match": true,
+      "times": {
+        "time": 344.1
+      },
+      "bytes": 8835,
+      "compileMs": 1237
+    },
+    "native-base": {
+      "error": "SC2020 'Float16Array<ArrayBuffer>' is part of the standard library types but has no scriptc lowering yet; SC2020 'new Float16Array' is part of the standard library types but has no scriptc lowering yet; SC1090 assignment to non-array elements are not supported yet; SC2004 uses of 'half' inherit the blocker on its declaration"
+    },
+    "native": {
+      "match": true,
+      "times": {
+        "time": 105.7
+      },
+      "bytes": 446280,
+      "compileMs": 1118
+    },
+    "js+fallback (engine)": {
+      "match": true,
+      "times": {
+        "time": 66.3
+      },
+      "note": "f16.engine.mjs: Math.f16round/DataView float16 where the engine has them"
+    }
+  }
+}

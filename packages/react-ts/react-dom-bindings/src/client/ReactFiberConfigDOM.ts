@@ -107,7 +107,7 @@ export type HostContextDev = {
     ancestorInfo: AncestorInfoDev;
 };
 type HostContextProd = HostContextNamespace;
-export type HostContext = HostContextDev | HostContextProd;
+export type HostContext = HostContextProd;
 export type ChildSet = undefined; // Unused
 export type TimeoutHandle = number;
 export type NoTimeout = -1;

@@ -1,5 +1,6 @@
 // This file was modified from scriptc (Apache-2.0); see MODIFICATIONS.md.
 /* Focused LLVM expression emission extracted from emitter.ts. */
+import { emitIntIntrinsic } from "./intrinsics.js";
 import { arrayClassDescriptor } from "./classes.js";
 import { InternalCompilerError } from "../../errors.js";
 import { newValueMayThrow } from "../../ir/analysis.js";
@@ -110,6 +111,11 @@ export function emitCallExpr(
   const B = host.B;
   switch (e.kind) {
     case "call": {
+      // The int intrinsic library (intrinsics.ts): LLVM integer intrinsics instead of the module's bodies.
+      if (!awaitEntry && !resultSlot && !stackResult) {
+        const lowered = emitIntIntrinsic(host, e);
+        if (lowered) return lowered;
+      }
       const callee = host.fnByName.get(e.callee);
       if (!callee) throw new InternalCompilerError(`llvm emitter bug: unknown callee ${e.callee}`);
       if (!plainCall && !awaitEntry && !resultSlot && !stackResult) {

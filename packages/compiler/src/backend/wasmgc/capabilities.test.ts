@@ -79,3 +79,27 @@ test("the probes are valid modules and detect this engine", () => {
   expect(missingRequirements(["wasm-gc", "js-string-builtins"], { ...caps, "js-string-builtins": false })).toEqual([]);
   expect(refusalText(["resizable-memory-buffer"])).toMatch(/Chrome 144.*Node 26.*--experimental-wasm-rab-integration/);
 });
+
+test("math=strict joins the key only when set, reads back, and refuses relaxed SIMD", () => {
+  expect(capabilityKey({ ...BASELINE_MODE, math: "strict" })).toBe("wgc-cap/1;eh=exnref;views=resizable;relaxed=0;threads=off;math=strict");
+  expect(modeOfKey("wgc-cap/1;eh=exnref;views=resizable;relaxed=0;threads=off;math=strict")).toEqual({ ...BASELINE_MODE, math: "strict" });
+  expect(modeOfKey(capabilityKey(BASELINE_MODE))).toEqual(BASELINE_MODE);
+  expect(modeOfKey("wgc-cap/1;eh=exnref;views=resizable;relaxed=0;threads=off;math=fast")).toBe(null);
+  expect(parseCapabilities("math=strict").request.math).toBe("strict");
+  expect(parseCapabilities("math=exact").errors).toHaveLength(1);
+  const strict = preferredMode(parseCapabilities("math=strict,relaxed-simd").request);
+  expect(planVariants({ preset: "auto", math: "strict", relaxedSimd: true }, strict, NONE, []).errors.join()).toMatch(/math=strict refuses relaxed SIMD/);
+});
+
+test("a module importing the strict-math library is built math=strict and records its intrinsic libraries", () => {
+  const uses: CapabilityUses = { byteViews: false, memory: false, jspi: false, relaxedSimd: false, simd: false, sharedMemory: false, intrinsics: ["int", "math"] };
+  const record = resolvedRecord(BASELINE_MODE, uses, "preferred");
+  expect(record.key).toMatch(/;math=strict$/);
+  expect(record.intrinsics).toEqual(["int", "math"]);
+  const decoded = decodeCapabilitySection(encodeCapabilitySection(record));
+  expect(decoded?.intrinsics).toEqual(["int", "math"]);
+  expect(decoded?.mode.math).toBe("strict");
+  const explain = planVariants({ preset: "auto" }, BASELINE_MODE, uses, []).explain.join("\n");
+  expect(explain).toMatch(/math: strict \(the program imports the strict-math library\); relaxed SIMD off; NaNs stored to memory canonical/);
+  expect(explain).toMatch(/intrinsics: int: i32\/i64 instructions/);
+});

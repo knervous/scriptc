@@ -128,11 +128,7 @@ function Main() {
   const [state, dispatch] = useReducer(reduce, { rows: [], selected: 0, nextId: 1, seed: 42 });
   const act = dispatch;
   const rows = state.rows;
-  const children: unknown[] = [];
-  for (let i = 0; i < rows.length; i++) {
-    const row = rows[i]!;
-    children.push(h(MemoRow, { key: row.id, row, selected: row.id === state.selected, dispatch: act }));
-  }
+  const children = rows.map((row: Row) => h(MemoRow, { key: row.id, row, selected: row.id === state.selected, dispatch: act }));
   return h("div", { className: "container" },
     h("div", { className: "jumbotron" },
       h("div", { className: "row" },

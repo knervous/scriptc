@@ -123,6 +123,41 @@ function sourceCommit() {
   }
 }
 
+// The intrinsic libraries (docs/intrinsics.md), as subpath exports (scriptw/int, scriptw/math, ...). Each ships three
+// ways: the TypeScript source under the `wasmgc` condition, which scriptw adds for every build so the compiler reads the
+// source (and recognises the library by its pragma); plain JavaScript (`default`) for Node and browsers running the
+// program uncompiled; and declarations (`types`). The f16 library's JavaScript entry is f16.engine.mjs, which uses the
+// engine's binary16 conversion where it has one.
+const ts5 = createRequire(fromCompiler.resolve("typescript5/package.json"))("./lib/typescript.js");
+const stagedIntrinsics = path.join(stage, "intrinsics");
+fs.mkdirSync(stagedIntrinsics, { recursive: true });
+const intrinsicSources = {
+  int: "packages/intrinsics/int.ts", math: "packages/intrinsics/math.ts", layout: "packages/intrinsics/layout.ts",
+  f16: "packages/intrinsics/f16.ts", atomics: "packages/intrinsics/atomics.ts", simd: "packages/simd/simd.intrinsics.ts",
+};
+// Relative imports between the libraries name the .ts sources; the JavaScript and the declarations name theirs.
+const relink = (text, ext) => text.replace(/(from\s+["']\.\/[a-z0-9-]+)\.ts(["'])/g, `$1${ext}$2`);
+for (const [name, rel] of Object.entries(intrinsicSources)) {
+  const source = fs.readFileSync(path.join(repo, rel), "utf8");
+  fs.writeFileSync(path.join(stagedIntrinsics, `${name}.ts`), source);
+  const js = ts5.transpileModule(source, { compilerOptions: { module: ts5.ModuleKind.ESNext, target: ts5.ScriptTarget.ES2022, verbatimModuleSyntax: false }, fileName: `${name}.ts` }).outputText;
+  fs.writeFileSync(path.join(stagedIntrinsics, `${name}.mjs`), relink(js, ".mjs"));
+}
+fs.writeFileSync(path.join(stagedIntrinsics, "f16.engine.mjs"), relink(fs.readFileSync(path.join(repo, "packages/intrinsics/f16.engine.mjs"), "utf8"), ".mjs"));
+{
+  const files = Object.keys(intrinsicSources).map((name) => path.join(stagedIntrinsics, `${name}.ts`));
+  const program = ts5.createProgram(files, {
+    declaration: true, emitDeclarationOnly: true, allowImportingTsExtensions: true, strict: true, skipLibCheck: true,
+    target: ts5.ScriptTarget.ES2022, module: ts5.ModuleKind.ESNext, moduleResolution: ts5.ModuleResolutionKind.Bundler, lib: ["lib.es2024.d.ts"],
+  });
+  const emitted = program.emit(undefined, (file, text) => fs.writeFileSync(file, relink(text, ".js")));
+  const errors = ts5.getPreEmitDiagnostics(program).concat(emitted.diagnostics);
+  if (errors.length) {
+    for (const d of errors) console.error(`assemble: ${ts5.flattenDiagnosticMessageText(d.messageText, "\n")}`);
+    process.exit(1);
+  }
+}
+
 // The package: the template's fields, its bin, lib, README and changelog, and the repository's license files.
 const template = JSON.parse(fs.readFileSync(path.join(pkgRoot, "package.json"), "utf8"));
 const { companions, ...fields } = template;
@@ -151,7 +186,7 @@ const manifest = {
   optionalDependencies: process.env.SCRIPTW_COMPANIONS === "1"
     ? Object.fromEntries(companions.map((name) => [name, template.version]))
     : undefined,
-  files: ["bin", "lib", "packages", "vendor", "build-info.json", "LICENSE", "NOTICE", "README.md", "CHANGELOG.md"],
+  files: ["bin", "lib", "intrinsics", "packages", "vendor", "build-info.json", "LICENSE", "NOTICE", "README.md", "CHANGELOG.md"],
   dependencies: { typescript: tsgoVersion, ...bundled },
   bundleDependencies: Object.keys(bundled),
 };

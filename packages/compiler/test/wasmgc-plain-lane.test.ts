@@ -8,7 +8,8 @@
  *   - abstract properties read and written through base-typed receivers;
  *   - `+` over a caught error's message once the module has closures (the
  *     ToPrimitive and function-to-host paths are native-dyn only);
- *   - Number(x) over dynamically held values.
+ *   - Number(x) over dynamically held values;
+ *   - a JavaScript function's own `this` binding, which the lane has no receiver for.
  */
 import { execFile } from "node:child_process";
 import { mkdtemp, readFile, rm } from "node:fs/promises";
@@ -25,6 +26,7 @@ const execFileAsync = promisify(execFile);
 const repoRoot = fileURLToPath(new URL("../../..", import.meta.url));
 const programs = [
   "packages/compiler/test/fixtures/wasmgc-plain/fix-1127-class-method-interface.ts",
+  "packages/compiler/test/fixtures/wasmgc-plain/js-function-this-unbound.ts",
   "tests/corpus/4726-fix-1127-abstract-property-implementations.ts",
   "tests/corpus/4727-fix-1127-catch-message-concat-after-await.ts",
   "tests/corpus/4728-fix-1127-number-of-dynamic-values.ts",

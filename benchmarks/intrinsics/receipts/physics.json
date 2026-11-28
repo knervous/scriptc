@@ -1,0 +1,58 @@
+{
+  "app": "physics",
+  "node": "v24.22.3",
+  "platform": "linux-x64",
+  "cpus": 4,
+  "cpu": "Intel(R) Xeon(R) Processor @ 2.10GHz",
+  "date": "2026-11-28T09:02:55.436Z",
+  "results": [
+    "state hashes b92cc968 c3416bc8 e97dc6b5 51db6ee6",
+    "body 0 25.646762624708504 4.742620337933584 -0.5632975382999408"
+  ],
+  "lanes": {
+    "js": {
+      "match": true,
+      "times": {
+        "time": 128
+      }
+    },
+    "js+fallback": {
+      "match": true,
+      "times": {
+        "time": 169.8
+      }
+    },
+    "wasmgc-base": {
+      "match": true,
+      "times": {
+        "time": 206
+      },
+      "bytes": 17702,
+      "compileMs": 1252
+    },
+    "wasmgc": {
+      "match": true,
+      "times": {
+        "time": 212.1
+      },
+      "bytes": 20462,
+      "compileMs": 1847
+    },
+    "native-base": {
+      "match": true,
+      "times": {
+        "time": 49.8
+      },
+      "bytes": 386112,
+      "compileMs": 1097
+    },
+    "native": {
+      "match": true,
+      "times": {
+        "time": 74.8
+      },
+      "bytes": 481376,
+      "compileMs": 1454
+    }
+  }
+}

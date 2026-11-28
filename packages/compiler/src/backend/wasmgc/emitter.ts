@@ -36,6 +36,7 @@ import { provenInBounds, versionTypedArrayBounds } from "../../ir/typed-array-bo
 import { analyzeIntegerRanges, type IntegerRange } from "../../ir/integer-ranges-wasmgc.js";
 import { scopeEnvironments, type Carrier, type ScopeGroup } from "./scope-env.js";
 import { hasOptionalNumbers, unboxOptionalNumbers } from "./optional-number.js";
+import { countAllocations } from "./alloc-counts.js";
 import { findMapFusions, type MapFusion } from "./map-fusion.js";
 import { findAliasingCopies } from "./dyn-copy-check.js";
 import { hoistAwaits } from "./async-hoist.js";
@@ -45,6 +46,8 @@ import { serializeModule } from "../../ir/serialize.js";
 import { FORK_BYTES_ELEMENT_NAME, FORK_BYTES_ELEMENT_SIZE, DYN_CLASS_PROPERTIES, accessorSlotProp, shapeHasAccessorSlots, canDynCheckTo, RUNTIME_ERROR_CLASSES, isUnitType, typeEquals, typeKey as irTypeKey, type IrExpr, type IrFunction, type IrModule, type IrStmt, type IrType, type SrcLoc } from "../../ir/ir.js";
 import { bytesRuntime } from "./bytes.js";
 import { findSimdModule, simdLowering } from "./simd.js";
+import { INT_LOWERED, f16Lowering, intLowering, mathLowering } from "./intrinsics.js";
+import { MATH_FUNCTIONS, MATH_WORDS, intrinsicMemberName, intrinsicModule, isIntrinsicMember } from "../../ir/intrinsic-libraries.js";
 import { BASELINE_MODE, CAPABILITY_SECTION, encodeCapabilitySection, fixedMiB, resolvedRecord, type CapabilityMode, type CapabilityUses, type ResolvedCapabilities } from "./capabilities.js";
 import { jsBridge } from "./jsbridge.js";
 import { fdlibmFor, parseFdlibm, type FdProgram } from "./fdlibm.js";
@@ -54,7 +57,7 @@ import { domDirectImport } from "./host.js";
 import { pageCodeFree, PN_EXT, PN_TYPE, PN_FLAGS, PN_EPOCH, PN_PARENT, PN_FIRST, PN_LAST, PN_NEXT, PN_PREV, PN_DOC, PN_DOC_EPOCH, PN_DOC_ID, PN_PROPS, PN_NPROPS, PNF_INERT, PNF_SUBTREE_INERT, PNF_KNOWN_CHILDREN, PNF_KNOWN_PARENT, UNSAFE_TAGS } from "./dom-mirror.js";
 import { dynEngine, DYN_THIS } from "./dyn-engine.js";
 import { EXECUTED_SPECIALIZABLE, type ProfileSite, type SiteProfileIndex } from "./site-profile.js";
-import { callCode, configureFnTables, TYPED_TABLE_BUDGET, finishFnTables, fnSlotConst, slotHasSig, CLOSURE_CODE, CLOSURE_ENV, CLOSURE_INVOKE, CLOSURE_JS, CLOSURE_PROPS, DYN_ARR_JS, OBJ_JS, OBJ_SHAPE, OBJ_SLOTS, OBJ_PROTO as OBJ_PROTO_FIELD, ARRAY_DATA, ARRAY_LEN, ARRAY_STATES, MATCH_INDEX, MATCH_INPUT, MATCH_DGROUPS, BYTES_BASE, BYTES_CAP, BYTES_LEN, BYTES_OWNER, FRAME_CAUGHT, FRAME_ENV, FRAME_GEN, FRAME_HANDLER, FRAME_PROMISE, FRAME_STATE, GEN_DONE, GEN_FRAME, GEN_OUT, GEN_RESUME, GEN_RUNNING, GEN_START, GEN_STATUS, GEN_TYPE, GEN_SUSPENDED, JOB_CODE, JOB_ENV, JOB_NEXT, JOB_REJECTED, JOB_VALUE, PROMISE_HANDLED, PROMISE_REACTIONS, PROMISE_STATE, PROMISE_VALUE, DYN_ARR_ITEMS, DYN_ARR_LEN, DYN_ARR_PROPS, MAP_BUCKETS, MAP_COUNT, MAP_DEPTH, MAP_HASH, MAP_KEYS, MAP_LIVE, MAP_NEXT, MAP_SIZE, MAP_VALS, GcTypes, UNION_NUM, UNION_REF, UNION_STR, UNION_TAG, INLINE_NULL_BITS, INLINE_DEFAULT_BITS, type InlineField, type ArrayInfo, closureMeta, CLOSURE_ORIGIN, FNMETA_FLAGS, FNMETA_LENGTH, FNMETA_NAME, FN_FORWARD, FN_OWNS_PROTOTYPE, DYNCOLL_ID, DYNCOLL_JS, DYNCOLL_LOG, ITER_SRC, ITER_IDX, ITER_KIND, ITER_NODE, ITER_PAGE, ITER_DONE, ITER_LEN, ITER_LAST, ITER_HAS, ITERLOG_MODE, ITERLOG_LIVE, ITERLOG_NEXT, PEER_OPS, PEER_VALTYPE, CLASSOBJ_CID, CLASSOBJ_PROTO, FN_CLASS } from "./types.js";
+import { callCode, configureFnTables, TYPED_TABLE_BUDGET, finishFnTables, fnSlotConst, slotHasSig, CLOSURE_CODE, CLOSURE_ENV, CLOSURE_INVOKE, CLOSURE_JS, CLOSURE_PROPS, DYN_ARR_JS, OBJ_JS, OBJ_SHAPE, OBJ_SLOTS, OBJ_PROTO as OBJ_PROTO_FIELD, ARRAY_DATA, ARRAY_LEN, ARRAY_STATES, MATCH_INDEX, MATCH_INPUT, MATCH_DGROUPS, BYTES_BASE, BYTES_CAP, BYTES_LEN, BYTES_OWNER, FRAME_CAUGHT, FRAME_ENV, FRAME_GEN, FRAME_HANDLER, FRAME_PROMISE, FRAME_STATE, GEN_DONE, GEN_FRAME, GEN_OUT, GEN_RESUME, GEN_RUNNING, GEN_START, GEN_STATUS, GEN_TYPE, GEN_SUSPENDED, JOB_CODE, JOB_ENV, JOB_NEXT, JOB_REJECTED, JOB_VALUE, PROMISE_HANDLED, PROMISE_REACTIONS, PROMISE_STATE, PROMISE_VALUE, DYN_ARR_ITEMS, DYN_ARR_LEN, DYN_ARR_PROPS, MAP_BUCKETS, MAP_COUNT, MAP_DEPTH, MAP_HASH, MAP_KEYS, MAP_LIVE, MAP_NEXT, MAP_SIZE, MAP_VALS, GcTypes, UNION_NUM, UNION_REF, UNION_STR, UNION_TAG, INLINE_NULL_BITS, INLINE_DEFAULT_BITS, type InlineField, type ArrayInfo, type NarrowKind, closureMeta, CLOSURE_ORIGIN, FNMETA_FLAGS, FNMETA_LENGTH, FNMETA_NAME, FN_FORWARD, FN_OWNS_PROTOTYPE, DYNCOLL_ID, DYNCOLL_JS, DYNCOLL_LOG, ITER_SRC, ITER_IDX, ITER_KIND, ITER_NODE, ITER_PAGE, ITER_DONE, ITER_LEN, ITER_LAST, ITER_HAS, ITERLOG_MODE, ITERLOG_LIVE, ITERLOG_NEXT, PEER_OPS, PEER_VALTYPE, CLASSOBJ_CID, CLASSOBJ_PROTO, FN_CLASS } from "./types.js";
 import { findConstructorStructs, isInt32, keySetDispatcherKey, type CtorPut, type CtorFieldKind } from "./ctor-structs.js";
 import { computeIntShadows } from "./int-shadow.js";
 import { opaqueModuleId } from "../../frontend/lowering/stable-names.js";
@@ -844,7 +847,33 @@ function emitModule(given: IrModule, opts: WasmGcEmitOptions, setPhase: (phase: 
   if (types.nativeDyn) m.addGlobal(THIS_N, binaryen.anyref, true, m.ref.null(binaryen.anyref));
   // SIMD library: its calls become instructions and its bodies are never compiled.
   const simdLib = findSimdModule(mod);
+  const intLib = intrinsicModule(mod, "int");
+  /** A call the int library lowers (intrinsics.ts): its callee's body is never emitted for it. */
+  const intLowered = (callee: string): boolean => (intLib !== null && isIntrinsicMember(intLib, callee) && Object.hasOwn(INT_LOWERED, intrinsicMemberName(intLib, callee)))
+    || (mathLib !== null && isIntrinsicMember(mathLib, callee) && (MATH_FUNCTIONS.has(intrinsicMemberName(mathLib, callee)) || MATH_WORDS.has(intrinsicMemberName(mathLib, callee))))
+    || (f16Lib !== null && isIntrinsicMember(f16Lib, callee) && ["toF16Bits", "fromF16Bits"].includes(intrinsicMemberName(f16Lib, callee)));
+  const mathLib = intrinsicModule(mod, "math");
+  const f16Lib = intrinsicModule(mod, "f16");
   if (simdLib) types.simdV128 = simdLib.v128Class;
+  // Fixed-width integer fields (ir/contract-check.ts): every class of the family stores the field as i32 (packed for
+  // 8- and 16-bit types). Int32 fields come from int32Fields, the narrower and unsigned ones from narrowFields.
+  {
+    const families = new Map<string, NarrowKind>();
+    for (const f of mod.contracts?.int32Fields ?? []) families.set(f, "Int32");
+    for (const f of mod.contracts?.narrowFields ?? []) { const cut = f.lastIndexOf("\0"); families.set(f.slice(0, cut), f.slice(cut + 1) as NarrowKind); }
+    if (families.size) {
+      const byName = new Map((mod.classes ?? []).map(c => [c.name, c]));
+      const out = new Map<string, NarrowKind>();
+      for (const c of mod.classes ?? []) for (const f of c.fields) {
+        if (f.type.kind !== "f64") continue;
+        let top: string | null = null;
+        for (let k = byName.get(c.name); k; k = k.base ? byName.get(k.base) : undefined) if (k.fields.some(x => x.name === f.name)) top = k.name;
+        const kind = top !== null ? families.get(`${top}\0${f.name}`) : undefined;
+        if (kind) out.set(`c:${c.name}.${f.name}`, kind);
+      }
+      types.narrowFields = out;
+    }
+  }
   const symbol = (name: string) => name.replace(/[^A-Za-z0-9_.$]/g, c => `_${c.charCodeAt(0).toString(16)}`);
   /** Property names inside helper names: injective (every character outside
    * [A-Za-z0-9$], "_" and "." included, becomes `_<hex>_`), because helpers
@@ -1017,7 +1046,7 @@ function emitModule(given: IrModule, opts: WasmGcEmitOptions, setPhase: (phase: 
   const inspectValue = (value: any): void => {
       if (pureInitOn && typeof value === "string" && pureGlobals.has(value)) { readSeen.add(value); const st = deferredInits.get(value); if (st !== undefined) { deferredInits.delete(value); pendingTrees.push(st); } }
       if (value && typeof value === "object" && typeof value.kind === "string") {
-        if (value.kind === "call") { if (!simdLib || !value.callee.startsWith(simdLib.prefix)) visit(value.callee); }
+        if (value.kind === "call") { if ((!simdLib || !value.callee.startsWith(simdLib.prefix)) && !intLowered(value.callee)) visit(value.callee); }
         // `l || d` that re-tags its truthy side calls the retag helper by name (orDefault.retag).
         else if (value.kind === "orDefault" && typeof value.retag === "string") visit(value.retag);
         else if (value.kind === "closure") {
@@ -3454,6 +3483,11 @@ function emitModule(given: IrModule, opts: WasmGcEmitOptions, setPhase: (phase: 
     return s ? inlineOutAs(s, m.struct.get(types.recordField(shapeId, field), ref, inlineStorage(s), false), t) : m.struct.get(types.recordField(shapeId, field), ref, valueType(t), false);
   };
   const clsGet = (className: string, field: string, ref: number, t: IrType): number => {
+    const narrow = types.narrowField({ cls: className }, field);
+    if (narrow) {
+      const raw = m.struct.get(types.classField(className, field), ref, i32, narrow === "Int8" || narrow === "Int16");
+      return narrow === "Uint32" ? m.f64.convert_u.i32(raw) : m.f64.convert_s.i32(raw);
+    }
     if (atomCls(className, field)) return atomOut(m.struct.get(types.classField(className, field), ref, i32, false), t);
     const s = classInline(className, field);
     return s ? inlineOutAs(s, m.struct.get(types.classField(className, field), ref, inlineStorage(s), false), t) : m.struct.get(types.classField(className, field), ref, valueType(t), false);
@@ -3469,7 +3503,8 @@ function emitModule(given: IrModule, opts: WasmGcEmitOptions, setPhase: (phase: 
     return ops.map((o, i) => i < names.length ? atomRec(shapeId, names[i]!) ? atomIn(o) : storeAs(recordInline(shapeId, names[i]!), o) : o);
   };
   const recSet = (shapeId: string, field: string, ref: number, value: number): number => m.struct.set(types.recordField(shapeId, field), ref, atomRec(shapeId, field) ? atomIn(value) : storeAs(recordInline(shapeId, field), value));
-  const clsSet = (className: string, field: string, ref: number, value: number): number => m.struct.set(types.classField(className, field), ref, atomCls(className, field) ? atomIn(value) : storeAs(classInline(className, field), value));
+  const clsSet = (className: string, field: string, ref: number, value: number): number => m.struct.set(types.classField(className, field), ref,
+    types.narrowField({ cls: className }, field) ? toInt32(value) : atomCls(className, field) ? atomIn(value) : storeAs(classInline(className, field), value));
   /** A value already computed (of the field's IR type `fieldType`) as a field's storage. */
   const storeAs = (s: InlineField | null, value: number): number => s ? inlineIn(s, value) : value;
   /** Arms whose payload is an externref (strings and engine values) live in the string slot. */
@@ -12490,6 +12525,19 @@ function emitModule(given: IrModule, opts: WasmGcEmitOptions, setPhase: (phase: 
   /** jsFences: the innermost expression this backend cannot emit throws instead. */
   /** Expressions already evaluated into a temp (memberTypeof): emitted as that read. */
   const preEmitted = new Map<IrExpr, () => number>();
+  /** Whether `f` reads its own `this` (dyn.this): through a local the entry binds to it (`this.0`), or outright. */
+  const plainThisReads = new Map<IrFunction, boolean>();
+  const plainThisRead = (f: IrFunction): boolean => {
+    const known = plainThisReads.get(f);
+    if (known !== undefined) return known;
+    const isThis = (v: any) => v?.kind === "libCall" && (v.fn === "dyn.this" || v.fn === "dyn.generatorThis");
+    const bound = new Set<string>(), binding = new Set<object>();
+    walkObjects(f.body, (v: any) => { if (v?.kind === "varDecl" && isThis(v.init)) { bound.add(v.localId); binding.add(v.init); } });
+    let read = false;
+    walkObjects(f.body, (v: any) => { if ((v?.kind === "varRef" && bound.has(v.localId)) || (isThis(v) && !binding.has(v))) read = true; });
+    plainThisReads.set(f, read);
+    return read;
+  };
   /** A read the same expression repeats with nothing between: a field of a field ... of a local. */
   const isFieldReadChain = (e: IrExpr): boolean => e.kind === "fieldGet" && (e.obj.kind === "varRef" || isFieldReadChain(e.obj));
   const sameRead = (a: IrExpr, b: IrExpr): boolean =>
@@ -12791,7 +12839,21 @@ function emitModule(given: IrModule, opts: WasmGcEmitOptions, setPhase: (phase: 
       case "downcast": return m.ref.cast(expr(e.value), valueType(e.type));
       case "call": {
         if (fn.ctor && ctorPuts.get(e)?.ctor === ctorStructs[fn.ctor.index]) return ctorPut(e, ctorPuts.get(e)!);
+        // `o.f!` (and any checked narrowing helper) over an inline union field narrowed to its scalar arm: the stored
+        // bits answer it, and only another arm boxes them for the helper (which throws or converts as it always did).
+        if (e.callee.startsWith("%union.narrow.") && !e.callee.startsWith("%union.narrow.width.") && e.args.length === 1) {
+          const read = inlineReadOf(e.args[0]!), helper = functions.get(e.callee);
+          const arms = read ? types.unionArms(read.s.unionId) : [];
+          if (read && helper && arms[read.s.scalarTag] && typeEquals(arms[read.s.scalarTag]!, helper.returnType)) {
+            const s = read.s, bits = temp(inlineStorage(s)), held = () => m.local.get(bits, inlineStorage(s));
+            return m.block(null, [m.local.set(bits, read.raw()),
+              m.if(inlineIsTag(s, held, s.scalarTag), inlineNarrow(s, held()), m.call(symbol(e.callee), [inlineOut(s, held())], valueType(e.type)))], valueType(e.type));
+          }
+        }
         if (simd?.isIntrinsic(e.callee)) return simd.call(e.callee, e.args, e.loc);
+        if (intOps?.lowers(e.callee)) return intOps.call(e.callee, e.args, e.loc);
+        if (mathOps?.lowers(e.callee)) return mathOps.call(e.callee, e.args);
+        if (f16Ops?.lowers(e.callee)) return f16Ops.call(e.callee, e.args);
         // `a.localeCompare(b)` asks the host, as the dyn path does: the page's ICU collation (the JS build's order), the
         // native host's root-collation approximation. The frontend's helper compares code units, so "a" sorted after "B".
         if (e.callee === "%str.localeCompare" && e.args.length === 2 && e.args.every((a) => a.type.kind === "string"))
@@ -13110,6 +13172,17 @@ function emitModule(given: IrModule, opts: WasmGcEmitOptions, setPhase: (phase: 
         const cls = types.classOf(e.className), field = types.classField(e.className, e.field);
         const obj = temp(cls.ref), old = temp(f64);
         const next = e.op === "+" ? m.f64.add(m.local.get(old, f64), m.f64.const(1)) : m.f64.sub(m.local.get(old, f64), m.f64.const(1));
+        if (types.narrowField({ cls: e.className }, e.field)) {
+          // A fixed-width integer field: the contract proved the new value in range.
+          const nw = temp(f64);
+          return m.block(null, [
+            m.local.set(obj, expr(e.obj)),
+            m.local.set(old, clsGet(e.className, e.field, m.local.get(obj, cls.ref), e.type)),
+            m.local.set(nw, next),
+            clsSet(e.className, e.field, m.local.get(obj, cls.ref), m.local.get(nw, f64)),
+            m.local.get(e.prefix ? nw : old, f64),
+          ], f64);
+        }
         return m.block(null, [
           m.local.set(obj, expr(e.obj)),
           m.local.set(old, m.struct.get(field, m.local.get(obj, cls.ref), f64, false)),
@@ -15557,7 +15630,14 @@ function emitModule(given: IrModule, opts: WasmGcEmitOptions, setPhase: (phase: 
             native())], i32);
       } break;
       case "dyn.sameValue": return m.call(dynSameValue(), [expr(args[0]!), expr(args[1]!)], i32);
-      case "dyn.this": case "dyn.generatorThis": return fn.thisLocal !== undefined ? m.local.get(fn.thisLocal, A) : m.global.get(THIS_N, A);
+      case "dyn.this": case "dyn.generatorThis": {
+        if (fn.thisLocal !== undefined) return m.local.get(fn.thisLocal, A);
+        if (types.nativeDyn) return m.global.get(THIS_N, A);
+        // The plain lane (neither dyn model) passes no receiver: a JavaScript function's own `this` binding (`this.0`,
+        // bound at entry) is undefined there, which is exact while nothing reads it; a read is refused.
+        if (plainThisRead(fn.ir)) unsupported("`this` in a JavaScript function outside --browser (this build passes no receiver)", loc);
+        return m.ref.null(A);
+      }
       // Native dyn operators: ToNumber/ToInt32 on boxes; + concatenates when either side is a string or object.
       case "dyn.add": {
         // `'' + x` / `x + ''` on a string x is x: no concatenation and no new box
@@ -16110,6 +16190,7 @@ function emitModule(given: IrModule, opts: WasmGcEmitOptions, setPhase: (phase: 
 
   const viewsMiB = fixedMiB((opts.capabilityMode ?? BASELINE_MODE).views);
   const bytes = bytesRuntime({
+    ...((opts.capabilityMode ?? BASELINE_MODE).math === "strict" || intrinsicModule(mod, "math") !== null ? { canonicalNaN: true } : {}),
     ...(viewsMiB !== null && !opts.link?.memory ? { fixedPages: viewsMiB * 16 } : {}),
     ...(opts.link ? { link: { ...(opts.link.memory ? { memory: opts.link.memory } : {}), ...(opts.link.allocator ? { allocator: opts.link.allocator } : {}) } } : {}),
     undefNaN: () => undefNaN(),
@@ -16129,7 +16210,11 @@ function emitModule(given: IrModule, opts: WasmGcEmitOptions, setPhase: (phase: 
     dynToNumber: (v: number) => m.call(dynToNumberHelper(NaN), [v], f64),
     dynIsUndefined: (v: number) => types.engineDyn ? hostCall("js.is.undefined", [v], [binaryen.externref], i32) : m.ref.is_null(v),
   });
-  const simd = simdLib ? simdLowering(simdLib, { m, expr: (e: IrExpr) => expr(e), toInt32, f32: (e: IrExpr) => isExactF32(e) ? f32Value(e) : m.f32.demote(expr(e)), vectorAddress: bytes.vectorAddress, unsupported, relaxed: opts.experimentalRelaxedSimd === true }) : null;
+  const mathOps = mathLib ? mathLowering(mathLib, { m, expr: (e: IrExpr) => expr(e), toInt32, hostCall, unsupported,
+    routine: (name: string) => fdlibmFor({ m, defineHelper, program: (fdlibmProgram ??= parseFdlibm(FDLIBM_SOURCE)) }).routine(name) }) : null;
+  const f16Ops = f16Lib ? f16Lowering(f16Lib, { m, expr: (e: IrExpr) => expr(e), toInt32, hostCall, unsupported }) : null;
+  const intOps = intLib ? intLowering(intLib, { m, expr: (e: IrExpr) => expr(e), toInt32, hostCall, unsupported }) : null;
+  const simd = simdLib ? simdLowering(simdLib, { m, expr: (e: IrExpr) => expr(e), toInt32, f32: (e: IrExpr) => isExactF32(e) ? f32Value(e) : m.f32.demote(expr(e)), vectorAddress: bytes.vectorAddress, unsupported, relaxed: opts.experimentalRelaxedSimd === true && (opts.capabilityMode ?? BASELINE_MODE).math !== "strict" && intrinsicModule(mod, "math") === null }) : null;
   const js = jsBridge({
     m, expr: (e: IrExpr) => expr(e), host, stringConst: (v: string) => stringConst(m, v),
     externConvertAny: (v: number) => pageExt(v), escape: (t: IrType) => escapeType(t, true), request: (node: string) => notePagedRequest(node), within: <T,>(node: string, build: () => T) => conditionalBody(node, build), anyConvertExtern: (v: number) => anyConvertExtern(m, v),
@@ -22999,7 +23084,7 @@ function emitModule(given: IrModule, opts: WasmGcEmitOptions, setPhase: (phase: 
     if (self && !JSON.stringify(f.body).includes(`"localId":"${self.localId}","value"`)) {
       const reads = new Map<string, { className: string; field: string; type: IrType }>();
       walkObjects(f.body, (v: any) => {
-        if (v?.kind === "fieldGet" && v.obj?.kind === "varRef" && v.obj.localId === self.localId && !mutableFields.has(v.field) && !classInline(v.className, v.field) && !atomCls(v.className, v.field)) reads.set(v.field, v); });
+        if (v?.kind === "fieldGet" && v.obj?.kind === "varRef" && v.obj.localId === self.localId && !mutableFields.has(v.field) && !classInline(v.className, v.field) && !atomCls(v.className, v.field) && !types.narrowField({ cls: v.className }, v.field)) reads.set(v.field, v); });
       for (const [field, r] of reads) {
         const slot = params.length + fn.localTypes.length;
         fn.localTypes.push(valueType(r.type));
@@ -23172,8 +23257,9 @@ function emitModule(given: IrModule, opts: WasmGcEmitOptions, setPhase: (phase: 
   const usesMemory = hostImports.has("bytes.track") || hostImports.has("bytes.toJs") || !!opts.link?.memory;
   const capabilityUses: CapabilityUses = {
     byteViews: hostImports.has("bytes.toJs"), memory: usesMemory, jspi: usesJspi,
-    relaxedSimd: opts.experimentalRelaxedSimd === true && simdLib !== null && simdLib !== undefined,
+    relaxedSimd: opts.experimentalRelaxedSimd === true && capabilityMode.math !== "strict" && !mathLib && simdLib !== null && simdLib !== undefined,
     simd: usesMemory || (simdLib !== null && simdLib !== undefined), sharedMemory: opts.link?.memory?.shared === true,
+    ...(mod.intrinsics?.length ? { intrinsics: [...new Set(mod.intrinsics.map(l => l.library))].sort() } : {}),
   };
   const capabilities = resolvedRecord(capabilityMode, capabilityUses, opts.capabilityVariant ?? "preferred");
   m.addCustomSection(CAPABILITY_SECTION, encodeCapabilitySection(capabilities));
@@ -23250,6 +23336,13 @@ function emitModule(given: IrModule, opts: WasmGcEmitOptions, setPhase: (phase: 
     // No binaryen.js 132 fallback: optimiseWithWasmOpt refuses a missing tool (requireWasmOpt), so a release is always wasm-opt 133's.
     if (!optimised) throw new Error("wasmgc backend: wasm-opt produced no module");
     binary = optimised.binary; optimizer = optimised.receipt;
+  }
+  // SCRIPTC_WASMGC_ALLOC_COUNTS=1 (debugging): a counter per allocation site of the finished module (alloc-counts.ts).
+  if (typeof process !== "undefined" && process.env?.["SCRIPTC_WASMGC_ALLOC_COUNTS"] === "1") {
+    requireWasmOpt();
+    const dir = mkdtempSync(join(tmpdir(), "wasmgc-alloc-"));
+    try { binary = countAllocations(binary, (args) => execWasmOpt([...WASM_OPT_FEATURES, ...args]), dir, { writeFileSync, readFileSync }, join); }
+    finally { rmSync(dir, { recursive: true, force: true }); }
   }
   const text = opts.text ? m.emitText() : undefined;
   m.dispose();

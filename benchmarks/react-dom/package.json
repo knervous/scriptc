@@ -4,6 +4,8 @@
   "type": "module",
   "description": "A js-framework-benchmark style React program, run on JavaScript React and as a WasmGC build",
   "devDependencies": {
+    "@types/react": "19.2.18",
+    "@types/react-dom": "19.2.7",
     "react": "19.2.8",
     "react-dom": "19.2.8"
   }

@@ -166,6 +166,8 @@ importers:
 
   packages/host-stream: {}
 
+  packages/intrinsics: {}
+
   packages/llvm-darwin-arm64: {}
 
   packages/llvm-darwin-x64: {}

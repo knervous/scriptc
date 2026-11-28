@@ -1,0 +1,12 @@
+{
+  "name": "scene-bench",
+  "private": true,
+  "type": "module",
+  "description": "A CPU-side scene benchmark for three.js, Babylon Lite and Babylon.js, as JavaScript and compiled to WasmGC",
+  "devDependencies": {
+    "@babylonjs/core": "9.38.0",
+    "@babylonjs/lite": "1.42.0",
+    "@types/three": "0.187.0",
+    "three": "0.187.0"
+  }
+}

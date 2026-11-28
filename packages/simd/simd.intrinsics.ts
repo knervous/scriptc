@@ -1,3 +1,4 @@
+/* @scriptc-intrinsics simd/1 */
 /* Wasm SIMD for TypeScript: AssemblyScript's names over a scalar fallback.
  *
  * Under Node, tests and unbundled dev builds this file runs as written: a

@@ -1,5 +1,15 @@
 # Changelog
 
+## Unreleased
+
+- Intrinsic libraries, as subpath exports: `scriptw/int` (fixed-width integers and bit operations), `scriptw/math` (deterministic math), `scriptw/layout` (fixed-layout records in linear memory), `scriptw/f16` (binary16 storage), `scriptw/atomics` (typed atomic cells) and `scriptw/simd` (the SIMD library). Each runs as exact JavaScript uncompiled; compiled, its calls lower to instructions on WasmGC and natively. The compiler recognises a library by a pragma in its source, wherever it is installed.
+- Contract types `Uint32`, `Int8`, `Uint8`, `Int16`, `Uint16`, `Int64` and `Uint64`, beside `Int32`, from `scriptw/int` or `@scriptc/types`. Every write to a contract slot is proven, or the build fails with SC7002 naming the write (SC7003 for one it cannot check); before this, contracts were not checked at all. 8- and 16-bit class fields are packed on WasmGC.
+- `--capabilities math=fast|strict`. A program importing `scriptw/math` is strict. The capability record lists the intrinsic libraries a module uses, and `--explain-capabilities` prints a line for each.
+- Native builds also use the `wasmgc` export condition, so a package's compiled source is the same for both targets.
+- `--compile-packages <list>` (and `compilePackages` in `compile()`) compiles the named npm packages' JavaScript into the module instead of leaving it as npm JavaScript the page supplies.
+- The README describes how a page hands the npm packages a page program imports to the loader (`modules`).
+- A JavaScript function in a build without `--browser` no longer makes an invalid module when it never reads `this`.
+
 ## 0.1.0 (2026-11-28)
 
 The first release.

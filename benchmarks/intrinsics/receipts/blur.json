@@ -1,0 +1,71 @@
+{
+  "app": "blur",
+  "node": "v24.22.3",
+  "platform": "linux-x64",
+  "cpus": 4,
+  "cpu": "Intel(R) Xeon(R) Processor @ 2.10GHz",
+  "date": "2026-11-28T09:03:18.339Z",
+  "results": [
+    "bands 24 jobs 192 blurred 3658215008"
+  ],
+  "lanes": {
+    "js": {
+      "match": true,
+      "times": {
+        "time": 257.6
+      }
+    },
+    "js+fallback": {
+      "match": true,
+      "times": {
+        "time": 147.1
+      }
+    },
+    "wasmgc-base": {
+      "match": true,
+      "times": {
+        "time": 775.9
+      },
+      "bytes": 2681,
+      "compileMs": 946
+    },
+    "wasmgc": {
+      "match": true,
+      "times": {
+        "time": 808.5
+      },
+      "bytes": 3365,
+      "compileMs": 1182
+    },
+    "native-base": {
+      "match": true,
+      "times": {
+        "time": 76.7
+      },
+      "bytes": 400136,
+      "compileMs": 1031
+    },
+    "native": {
+      "match": true,
+      "times": {
+        "time": 90.5
+      },
+      "bytes": 411832,
+      "compileMs": 1064
+    },
+    "js threads=shared": {
+      "match": true,
+      "times": {
+        "time": 79
+      },
+      "note": "4 worker_threads over SharedArrayBuffer, bands claimed from a WorkCounter"
+    },
+    "js threads=off (task ring)": {
+      "match": true,
+      "times": {
+        "time": 167.2
+      },
+      "note": "createTaskRing threads=off: each band published and drained on the owner thread"
+    }
+  }
+}

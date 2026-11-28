@@ -228,6 +228,9 @@ export const PEER_OPS: readonly (readonly [string, readonly ("a" | "i")[], "a" |
 ];
 export const PEER_VALTYPE: Record<"a" | "i" | "e" | "n", () => number> = { a: () => binaryen.anyref, i: () => binaryen.i32, e: () => binaryen.externref, n: () => binaryen.none };
 
+/** The contract types a class field can be stored narrow for. */
+export type NarrowKind = "Int8" | "Uint8" | "Int16" | "Uint16" | "Int32" | "Uint32";
+
 export class GcTypes {
   private readonly slots = new Map<string, number>();
   private readonly defs: { key: string; build: (b: binaryen.TypeBuilder, index: number) => void }[] = [];
@@ -913,7 +916,7 @@ export class GcTypes {
     // Supertypes must precede subtypes inside the recursion group.
     if (def!.base && !this.slots.has(`cls:${def!.base}`)) { this.klass(def!.base); if (this.slots.has(`cls:${name}`)) return; }
     if (!this.slot(`cls:${name}`, (b, i) => {
-      b.setStructType(i, [...this.classPrefix(), ...def!.fields.map(f => ({ type: this.fieldTemp(b, f.type, { cls: name }, f.name), packedType: binaryen.notPacked, mutable: true }))]);
+      b.setStructType(i, [...this.classPrefix(), ...def!.fields.map(f => ({ type: this.fieldTemp(b, f.type, { cls: name }, f.name), packedType: this.fieldPacked({ cls: name }, f.name), mutable: true }))]);
       // A class nothing extends is FINAL: a test against it is an inlined exact-type compare (a non-final
       // target costs a runtime subtype check). The runtime error classes and a shared runtime stay open.
       if (this.sharedRuntime || name === "%Error" || this.hasSubclass(name)) b.setOpen(i);
@@ -927,7 +930,7 @@ export class GcTypes {
     // A class others extend is an open BASE nothing instantiates: its instances are of a FINAL subtype
     // `clsf:` (same layout), so "instance of X" is a chain of exact tests on the final types.
     if (this.splitsClass(name)) this.slot(`clsf:${name}`, (b, i) => {
-      b.setStructType(i, [...this.classPrefix(), ...def!.fields.map(f => ({ type: this.fieldTemp(b, f.type, { cls: name }, f.name), packedType: binaryen.notPacked, mutable: true }))]);
+      b.setStructType(i, [...this.classPrefix(), ...def!.fields.map(f => ({ type: this.fieldTemp(b, f.type, { cls: name }, f.name), packedType: this.fieldPacked({ cls: name }, f.name), mutable: true }))]);
       b.setSubType(i, this.htIndex(b, this.slots.get(`cls:${name}`)!));
     });
     if (def!.base) this.klass(def!.base);
@@ -970,9 +973,21 @@ export class GcTypes {
   isAtomField(owner: { cls?: string; shape?: string }, field: string): boolean {
     return this.atomFields !== null && this.atomFields.has(owner.shape !== undefined ? `r:${owner.shape}.${field}` : `c:${owner.cls}.${field}`);
   }
+  /** Fixed-width integer class fields (ir/contract-check.ts proved every write), keyed `c:<class>.<field>` for every
+   * class of a hierarchy that has the field: stored as i32, packed to i8/i16 for the 8- and 16-bit types. */
+  narrowFields: ReadonlyMap<string, NarrowKind> | null = null;
+  narrowField(owner: { cls?: string; shape?: string }, field: string): NarrowKind | null {
+    return this.narrowFields !== null && owner.cls !== undefined ? this.narrowFields.get(`c:${owner.cls}.${field}`) ?? null : null;
+  }
+  /** A class field's packed storage (binaryen.i8 or binaryen.i16), or notPacked. */
+  fieldPacked(owner: { cls?: string; shape?: string }, field: string): number {
+    const k = this.narrowField(owner, field);
+    return k === "Int8" || k === "Uint8" ? binaryen.i8 : k === "Int16" || k === "Uint16" ? binaryen.i16 : binaryen.notPacked;
+  }
   /** A field's storage type while the group builds. */
   private fieldTemp(b: binaryen.TypeBuilder, t: IrType, owner: { cls?: string; shape?: string }, field?: string): number {
     if (field !== undefined && this.isAtomField(owner, field)) return binaryen.i32;
+    if (field !== undefined && this.narrowField(owner, field)) return binaryen.i32;
     const s = this.inlineField(t, owner);
     return s ? (s.kind === "num" ? binaryen.i64 : binaryen.i32) : this.temp(b, t);
   }

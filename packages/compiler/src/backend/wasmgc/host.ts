@@ -175,6 +175,8 @@ export function wasmGcHostImports(opts: WasmGcHostOptions = {}, state: WasmGcHos
     "bigint.parse": (text: string) => BigInt(text),
     // A wasm i64 arrives as a signed BigInt; unsigned reads reinterpret it as 64 bits.
     "bigint.fromI64": (v: bigint, unsigned: number) => (unsigned ? BigInt.asUintN(64, v) : v),
+    // A bigint as a wasm i64: the JS API's ToBigInt64 takes its low 64 bits (the int intrinsics' 64-bit arguments).
+    "bigint.toI64": (v: bigint) => v,
     "bigint.fromNum": (n: number) => BigInt(n),
     "bigint.from": (v: any) => BigInt(v),
     "bigint.toNum": (b: bigint) => Number(b),

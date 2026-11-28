@@ -1,0 +1,69 @@
+{
+  "app": "bitset",
+  "node": "v24.22.3",
+  "platform": "linux-x64",
+  "cpus": 4,
+  "cpu": "Intel(R) Xeon(R) Processor @ 2.10GHz",
+  "date": "2026-11-28T09:02:48.542Z",
+  "results": [
+    "primes below 4000000 283146 odd primes 283145 sum 544501644261"
+  ],
+  "lanes": {
+    "js": {
+      "match": true,
+      "times": {
+        "time.sieve": 29.9,
+        "time.scan": 107,
+        "time": 136.9
+      }
+    },
+    "js+fallback": {
+      "match": true,
+      "times": {
+        "time.sieve": 29.2,
+        "time.scan": 82.3,
+        "time": 111.5
+      }
+    },
+    "wasmgc-base": {
+      "match": true,
+      "times": {
+        "time.sieve": 204.7,
+        "time.scan": 367.5,
+        "time": 572.2
+      },
+      "bytes": 2927,
+      "compileMs": 858
+    },
+    "wasmgc": {
+      "match": true,
+      "times": {
+        "time.sieve": 202.3,
+        "time.scan": 187.8,
+        "time": 390
+      },
+      "bytes": 2711,
+      "compileMs": 870
+    },
+    "native-base": {
+      "match": true,
+      "times": {
+        "time.sieve": 44.2,
+        "time.scan": 74.6,
+        "time": 118.8
+      },
+      "bytes": 400560,
+      "compileMs": 1037
+    },
+    "native": {
+      "match": true,
+      "times": {
+        "time.sieve": 46.1,
+        "time.scan": 73.9,
+        "time": 120
+      },
+      "bytes": 390376,
+      "compileMs": 1014
+    }
+  }
+}

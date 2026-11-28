@@ -1,5 +1,5 @@
 // One lane per page: `?lane=js` loads the JavaScript build, `?lane=wasm&wasm=<url>` a WasmGC build (with `host=<url>`
-// for its host). The runner (run.mjs) calls window.bench.* through Playwright.
+// for its host, and `modules=<url>` for the npm packages it leaves as JavaScript). The runner (run.mjs) calls window.bench.* through Playwright.
 //
 // An operation is a click on one of the app's buttons (or row links), so it runs through React's root delegation as a
 // person's click would. Its script time ends when React's commit is done (a mutation observer's microtask), and layout
@@ -19,17 +19,20 @@ async function load() {
   const bytes = new Uint8Array(await (await fetch(params.get("wasm"))).arrayBuffer());
   const wrapImports = (imports) => {
     for (const [ns, table] of Object.entries(imports ?? {})) {
-      if (ns === "'" || typeof table !== "object") continue;
+      if (ns === "'" || typeof table !== "object" || table === null) continue;
+      // A copy of each table (an npm package's module namespace, from `modules`, cannot be written).
+      const copy = {};
       for (const [k, f] of Object.entries(table)) {
-        if (typeof f !== "function" || f.__counted) continue;
+        if (typeof f !== "function" || f.__counted) { copy[k] = f; continue; }
         const key = `${ns}.${k}`;
         const counted = function (...a) {
           if (countingOn) counts.set(key, (counts.get(key) ?? 0) + 1);
           return f.apply(this, a);
         };
         counted.__counted = true;
-        table[k] = counted;
+        copy[k] = counted;
       }
+      imports[ns] = copy;
     }
   };
   if (counting) {
@@ -55,7 +58,11 @@ async function load() {
     const linked = await instantiateLinked(bytes, { "": { error: (...a) => console.error(...a) } }, imports);
     memory = linked.instance.exports.memory;
     m = { ...linked.modules[""], instance: linked.instance };
-  } else m = await instantiateWasmGc(bytes, { error: (...a) => console.error(...a) });
+  } else {
+    // modules=<url>: npm packages the build left as JavaScript (build-wasm.mjs --published), handed to the loader.
+    const modules = params.get("modules") ? (await import(params.get("modules"))).modules : undefined;
+    m = await instantiateWasmGc(bytes, { error: (...a) => console.error(...a), ...(modules ? { modules } : {}) });
+  }
   await m.main();
   window.__wasmExports = m.instance.exports;
   return m.instance.exports;

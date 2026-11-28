@@ -1,3 +1,4 @@
+// This file was modified from scriptc (Apache-2.0); see MODIFICATIONS.md.
 /* scriptc contract types.
  *
  * Type aliases with no runtime semantics: import them with `import type`,
@@ -23,6 +24,33 @@
  * reads that find a value are int32s. Holes, missing indices and `length`
  * changes behave as in JavaScript. */
 export type Int32 = number;
+
+/** A number that is always an unsigned 32-bit integer (`x >>> 0`, a length,
+ * an unsigned int intrinsic result, or bounded arithmetic). Checked like
+ * `Int32`; as a class field it is stored in 32 bits. */
+export type Uint32 = number;
+
+/** A number in [-128, 127], checked like `Int32`. As a class instance field
+ * it is stored in one byte (WasmGC: a packed i8 struct field; native: an
+ * int32 slot). */
+export type Int8 = number;
+/** A number in [0, 255] (`x & 0xff`), checked like `Int32`. As a class
+ * instance field it is stored in one byte. */
+export type Uint8 = number;
+/** A number in [-32768, 32767], checked like `Int32`. As a class instance
+ * field it is stored in two bytes. */
+export type Int16 = number;
+/** A number in [0, 65535] (`x & 0xffff`), checked like `Int32`. As a class
+ * instance field it is stored in two bytes. */
+export type Uint16 = number;
+
+/** A bigint in [-2^63, 2^63 - 1]. Every value stored into the slot must be
+ * one by construction: an in-range literal, `BigInt.asIntN(64, x)`, another
+ * `Int64`, or a signed 64-bit result of the int intrinsic library. */
+export type Int64 = bigint;
+/** A bigint in [0, 2^64 - 1]: an in-range literal, `BigInt.asUintN(64, x)`,
+ * another `Uint64`, or a 64-bit result of the int intrinsic library. */
+export type Uint64 = bigint;
 
 /** Return-type wrapper: the function never throws. scriptc proves that no
  * throw, throwing call or throwing operation can escape the function, or

@@ -2,7 +2,7 @@
 
 This tree is a derivative of scriptc (https://github.com/vercel-labs/scriptc), licensed under the Apache License, Version 2.0 (LICENSE). It is compared here with upstream commit `97248e92994ff55f7009e0057700241b9109a35e`. The LLVM backend (`packages/compiler/src/backend/llvm`), the IR (`packages/compiler/src/ir`), the runtime (`packages/runtime` and the runtime and LLVM packs) and `native/llvm-codegen` track upstream at that commit, with the changes listed below. The frontend (`packages/compiler/src/frontend`), the compiler's unit and integration tests, the test corpus and fixtures, the compatibility inventory and the documentation are this fork's own and follow an earlier upstream state, so upstream's newer tests and documentation are not included.
 
-As section 4(b) of the license requires, the files below carry changes. 1117 files are modified from that upstream commit and 3328 files are new; 23326 upstream files are not part of this tree (see "Removed files"). Each modified source file of the compiler, the runtime and the repository tooling also says so in its first comment line.
+As section 4(b) of the license requires, the files below carry changes. 1119 files are modified from that upstream commit and 3432 files are new; 23326 upstream files are not part of this tree (see "Removed files"). Each modified source file of the compiler, the runtime and the repository tooling also says so in its first comment line.
 
 ## Modified files
 
@@ -656,6 +656,8 @@ As section 4(b) of the license requires, the files below carry changes. 1117 fil
 - `packages/runtime/src/scr_zlib.h`
 - `packages/runtime/test/error-seed-atexit.test.ts`
 - `packages/runtime/vendor/README.md`
+- `packages/types/README.md`
+- `packages/types/index.d.ts`
 - `packages/types/package.json`
 - `pnpm-lock.yaml`
 - `pnpm-workspace.yaml`
@@ -1130,6 +1132,28 @@ As section 4(b) of the license requires, the files below carry changes. 1117 fil
 - `.github/workflows/host-sets.yml`
 - `.github/workflows/release-scriptw.yml`
 - `NOTICE`
+- `benchmarks/3d/.gitignore`
+- `benchmarks/3d/README.md`
+- `benchmarks/3d/RESULTS.md`
+- `benchmarks/3d/build-js.mjs`
+- `benchmarks/3d/build-wasm.mjs`
+- `benchmarks/3d/core/app.ts`
+- `benchmarks/3d/core/entry.ts`
+- `benchmarks/3d/core/modules.ts`
+- `benchmarks/3d/lite/app.ts`
+- `benchmarks/3d/lite/entry.ts`
+- `benchmarks/3d/lite/modules.ts`
+- `benchmarks/3d/package-lock.json`
+- `benchmarks/3d/package.json`
+- `benchmarks/3d/page/bench.js`
+- `benchmarks/3d/page/index.html`
+- `benchmarks/3d/receipts/scenes-counts.json`
+- `benchmarks/3d/receipts/scenes.json`
+- `benchmarks/3d/run.mjs`
+- `benchmarks/3d/three/app.ts`
+- `benchmarks/3d/three/entry.ts`
+- `benchmarks/3d/three/modules.ts`
+- `benchmarks/3d/tsconfig.json`
 - `benchmarks/frameworks/.gitignore`
 - `benchmarks/frameworks/README.md`
 - `benchmarks/frameworks/RESULTS.md`
@@ -1140,6 +1164,7 @@ As section 4(b) of the license requires, the files below carry changes. 1117 fil
 - `benchmarks/frameworks/package-lock.json`
 - `benchmarks/frameworks/package.json`
 - `benchmarks/frameworks/page/index.html`
+- `benchmarks/frameworks/receipts/allocs-ab.json`
 - `benchmarks/frameworks/receipts/baseline-published-counts.json`
 - `benchmarks/frameworks/receipts/baseline-published.json`
 - `benchmarks/frameworks/receipts/final-counts.json`
@@ -1147,6 +1172,8 @@ As section 4(b) of the license requires, the files below carry changes. 1117 fil
 - `benchmarks/frameworks/receipts/final.json`
 - `benchmarks/frameworks/receipts/lanes-1.json`
 - `benchmarks/frameworks/receipts/react-after-codegen.json`
+- `benchmarks/frameworks/receipts/react-published-counts.json`
+- `benchmarks/frameworks/receipts/react-published.json`
 - `benchmarks/frameworks/run.mjs`
 - `benchmarks/frameworks/solid/PATCHES.md`
 - `benchmarks/frameworks/solid/app/app.tsx`
@@ -1165,11 +1192,54 @@ As section 4(b) of the license requires, the files below carry changes. 1117 fil
 - `benchmarks/frameworks/svelte/stream/main.svelte.ts`
 - `benchmarks/frameworks/svelte/stream/renderer.ts`
 - `benchmarks/frameworks/tables.mjs`
+- `benchmarks/intrinsics/README.md`
+- `benchmarks/intrinsics/RESULTS.md`
+- `benchmarks/intrinsics/bitset/baseline.ts`
+- `benchmarks/intrinsics/bitset/main.ts`
+- `benchmarks/intrinsics/blur/baseline.ts`
+- `benchmarks/intrinsics/blur/kernel.ts`
+- `benchmarks/intrinsics/blur/lanes.mjs`
+- `benchmarks/intrinsics/blur/main.ts`
+- `benchmarks/intrinsics/blur/threads.ts`
+- `benchmarks/intrinsics/common/input.ts`
+- `benchmarks/intrinsics/f16-mesh/baseline.ts`
+- `benchmarks/intrinsics/f16-mesh/lanes.mjs`
+- `benchmarks/intrinsics/f16-mesh/main.ts`
+- `benchmarks/intrinsics/hash/baseline.ts`
+- `benchmarks/intrinsics/hash/main.ts`
+- `benchmarks/intrinsics/lz4/baseline.ts`
+- `benchmarks/intrinsics/lz4/main.ts`
+- `benchmarks/intrinsics/package.json`
+- `benchmarks/intrinsics/particles/baseline.ts`
+- `benchmarks/intrinsics/particles/gen.mjs`
+- `benchmarks/intrinsics/particles/main.ts`
+- `benchmarks/intrinsics/particles/vertex.gen.ts`
+- `benchmarks/intrinsics/physics/baseline.ts`
+- `benchmarks/intrinsics/physics/main.ts`
+- `benchmarks/intrinsics/qoi/baseline.ts`
+- `benchmarks/intrinsics/qoi/main.ts`
+- `benchmarks/intrinsics/receipts/bitset.json`
+- `benchmarks/intrinsics/receipts/blur.json`
+- `benchmarks/intrinsics/receipts/f16-mesh.json`
+- `benchmarks/intrinsics/receipts/hash.json`
+- `benchmarks/intrinsics/receipts/lz4.json`
+- `benchmarks/intrinsics/receipts/particles.json`
+- `benchmarks/intrinsics/receipts/physics.json`
+- `benchmarks/intrinsics/receipts/qoi.json`
+- `benchmarks/intrinsics/receipts/snapshot.json`
+- `benchmarks/intrinsics/results-notes.md`
+- `benchmarks/intrinsics/results.mjs`
+- `benchmarks/intrinsics/run.mjs`
+- `benchmarks/intrinsics/snapshot/baseline.ts`
+- `benchmarks/intrinsics/snapshot/entity.gen.ts`
+- `benchmarks/intrinsics/snapshot/gen.mjs`
+- `benchmarks/intrinsics/snapshot/main.ts`
 - `benchmarks/react-dom/.gitignore`
 - `benchmarks/react-dom/README.md`
 - `benchmarks/react-dom/RESULTS.md`
 - `benchmarks/react-dom/app/app.ts`
 - `benchmarks/react-dom/app/js-entry.ts`
+- `benchmarks/react-dom/app/react-modules.ts`
 - `benchmarks/react-dom/build-js.mjs`
 - `benchmarks/react-dom/build-wasm.mjs`
 - `benchmarks/react-dom/package-lock.json`
@@ -1177,6 +1247,8 @@ As section 4(b) of the license requires, the files below carry changes. 1117 fil
 - `benchmarks/react-dom/page/bench-page.js`
 - `benchmarks/react-dom/page/index.html`
 - `benchmarks/react-dom/profile.mjs`
+- `benchmarks/react-dom/published/entry.ts`
+- `benchmarks/react-dom/published/tsconfig.json`
 - `benchmarks/react-dom/receipts/baseline-percall-counts.json`
 - `benchmarks/react-dom/receipts/baseline-percall-identityfix-counts.json`
 - `benchmarks/react-dom/receipts/baseline-percall-identityfix.json`
@@ -1189,6 +1261,7 @@ As section 4(b) of the license requires, the files below carry changes. 1117 fil
 - `benchmarks/react-dom/wasm/entry.ts`
 - `benchmarks/react-dom/wasm/tsconfig.json`
 - `docs/capabilities.md`
+- `docs/intrinsics.md`
 - `docs/public/Geist-Regular.ttf`
 - `docs/public/GeistPixel-Square.ttf`
 - `docs/src/app/og/og-image.tsx`
@@ -2335,6 +2408,11 @@ As section 4(b) of the license requires, the files below carry changes. 1117 fil
 - `npm/wasmgc/package.json`
 - `npm/wasmgc/scripts/assemble.mjs`
 - `npm/wasmgc/test/browser.mjs`
+- `npm/wasmgc/test/compiled-package/run.mjs`
+- `npm/wasmgc/test/compiled-package/smoke-cjs/index.d.ts`
+- `npm/wasmgc/test/compiled-package/smoke-cjs/index.js`
+- `npm/wasmgc/test/compiled-package/smoke-cjs/package.json`
+- `npm/wasmgc/test/compiled-package/uses-cjs.ts`
 - `npm/wasmgc/test/hosted/host-math.d.ts`
 - `npm/wasmgc/test/hosted/run.mjs`
 - `npm/wasmgc/test/hosted/scaled.ts`
@@ -2348,6 +2426,7 @@ As section 4(b) of the license requires, the files below carry changes. 1117 fil
 - `npm/wasmgc/test/samples/classes.ts`
 - `npm/wasmgc/test/samples/generics.ts`
 - `npm/wasmgc/test/samples/hello.ts`
+- `npm/wasmgc/test/samples/intrinsics.ts`
 - `npm/wasmgc/test/samples/uncaught.expect.json`
 - `npm/wasmgc/test/samples/uncaught.ts`
 - `npm/wasmgc/test/smoke.mjs`
@@ -2362,6 +2441,7 @@ As section 4(b) of the license requires, the files below carry changes. 1117 fil
 - `packages/compiler/src/backend/llvm/expr-island.ts`
 - `packages/compiler/src/backend/llvm/frozen-records.ts`
 - `packages/compiler/src/backend/llvm/host-modules.ts`
+- `packages/compiler/src/backend/llvm/intrinsics.ts`
 - `packages/compiler/src/backend/llvm/jsword-encoding.ts`
 - `packages/compiler/src/backend/llvm/jsword.ts`
 - `packages/compiler/src/backend/llvm/lib-native-dyn.ts`
@@ -2369,6 +2449,8 @@ As section 4(b) of the license requires, the files below carry changes. 1117 fil
 - `packages/compiler/src/backend/scriptw-packages.ts`
 - `packages/compiler/src/backend/wasmgc/address.test.ts`
 - `packages/compiler/src/backend/wasmgc/address.ts`
+- `packages/compiler/src/backend/wasmgc/alloc-counts.test.ts`
+- `packages/compiler/src/backend/wasmgc/alloc-counts.ts`
 - `packages/compiler/src/backend/wasmgc/async-frame-liveness.test.ts`
 - `packages/compiler/src/backend/wasmgc/async-hoist.ts`
 - `packages/compiler/src/backend/wasmgc/bytes-token.test.ts`
@@ -2392,6 +2474,7 @@ As section 4(b) of the license requires, the files below carry changes. 1117 fil
 - `packages/compiler/src/backend/wasmgc/host-keys.test.ts`
 - `packages/compiler/src/backend/wasmgc/host.ts`
 - `packages/compiler/src/backend/wasmgc/int-shadow.ts`
+- `packages/compiler/src/backend/wasmgc/intrinsics.ts`
 - `packages/compiler/src/backend/wasmgc/jsbridge.ts`
 - `packages/compiler/src/backend/wasmgc/json-number.test.ts`
 - `packages/compiler/src/backend/wasmgc/json-number.ts`
@@ -2410,6 +2493,7 @@ As section 4(b) of the license requires, the files below carry changes. 1117 fil
 - `packages/compiler/src/frontend/browser-target.ts`
 - `packages/compiler/src/frontend/comptime-node.test.ts`
 - `packages/compiler/src/frontend/comptime-node.ts`
+- `packages/compiler/src/frontend/contract-annotations.ts`
 - `packages/compiler/src/frontend/lowering/checked-arm-extraction.ts`
 - `packages/compiler/src/frontend/lowering/construction-exposure.ts`
 - `packages/compiler/src/frontend/lowering/containers/bytes-is-view.test.ts`
@@ -2440,6 +2524,7 @@ As section 4(b) of the license requires, the files below carry changes. 1117 fil
 - `packages/compiler/src/ir/char-unit-locals-wasmgc.test.ts`
 - `packages/compiler/src/ir/char-unit-locals-wasmgc.ts`
 - `packages/compiler/src/ir/constant-globals-wasmgc.ts`
+- `packages/compiler/src/ir/contract-check.ts`
 - `packages/compiler/src/ir/date-host.ts`
 - `packages/compiler/src/ir/fork-lib-calls.ts`
 - `packages/compiler/src/ir/fresh-locals.ts`
@@ -2449,6 +2534,7 @@ As section 4(b) of the license requires, the files below carry changes. 1117 fil
 - `packages/compiler/src/ir/implicit-references.ts`
 - `packages/compiler/src/ir/integer-ranges-wasmgc.test.ts`
 - `packages/compiler/src/ir/integer-ranges-wasmgc.ts`
+- `packages/compiler/src/ir/intrinsic-libraries.ts`
 - `packages/compiler/src/ir/jsword.test.ts`
 - `packages/compiler/src/ir/jsword.ts`
 - `packages/compiler/src/ir/numeric-call-specialization-wasmgc.test.ts`
@@ -2474,6 +2560,7 @@ As section 4(b) of the license requires, the files below carry changes. 1117 fil
 - `packages/compiler/src/source-paths.ts`
 - `packages/compiler/test/browser-date-host-receiver.test.ts`
 - `packages/compiler/test/condition-source.test.ts`
+- `packages/compiler/test/contract-check.test.ts`
 - `packages/compiler/test/error-accessor-dispatch.test.ts`
 - `packages/compiler/test/fixtures/fix-1127-strict-frontend/family-off/main.ts`
 - `packages/compiler/test/fixtures/fix-1127-strict-frontend/family-off/tsconfig.json`
@@ -2483,13 +2570,17 @@ As section 4(b) of the license requires, the files below carry changes. 1117 fil
 - `packages/compiler/test/fixtures/fix-1127-strict-frontend/indexed/tsconfig.json`
 - `packages/compiler/test/fixtures/profile-specialization/main.ts`
 - `packages/compiler/test/fixtures/profile-specialization/sites.js`
+- `packages/compiler/test/fixtures/strict-nan/nan-bits.ts`
 - `packages/compiler/test/fixtures/task-ring-runner.mjs`
 - `packages/compiler/test/fixtures/wasmgc-plain/fix-1127-class-method-interface.ts`
+- `packages/compiler/test/fixtures/wasmgc-plain/js-function-this-unbound-helper.js`
+- `packages/compiler/test/fixtures/wasmgc-plain/js-function-this-unbound.ts`
 - `packages/compiler/test/native-entry-thread-locals.test.ts`
 - `packages/compiler/test/npm-fetch-analysis.test.ts`
 - `packages/compiler/test/npm-fetch-cases.ts`
 - `packages/compiler/test/profile-specialization.test.ts`
 - `packages/compiler/test/strict-frontend.test.ts`
+- `packages/compiler/test/strict-nan.test.ts`
 - `packages/compiler/test/task-ring.test.ts`
 - `packages/compiler/test/ts7/baselines/order-parity.json`
 - `packages/compiler/test/union-element-dyn-identity.test.ts`
@@ -2514,6 +2605,14 @@ As section 4(b) of the license requires, the files below carry changes. 1117 fil
 - `packages/host-stream/src/stream.ts`
 - `packages/host-stream/test/gen.test.ts`
 - `packages/host-stream/test/stream.test.ts`
+- `packages/intrinsics/atomics.ts`
+- `packages/intrinsics/f16.engine.mjs`
+- `packages/intrinsics/f16.ts`
+- `packages/intrinsics/int.ts`
+- `packages/intrinsics/layout.ts`
+- `packages/intrinsics/math.ts`
+- `packages/intrinsics/package.json`
+- `packages/intrinsics/test/fallbacks.test.ts`
 - `packages/lui/.gitignore`
 - `packages/lui/LICENSE`
 - `packages/lui/NOTICE`
@@ -2803,6 +2902,7 @@ As section 4(b) of the license requires, the files below carry changes. 1117 fil
 - `packages/runtime/vendor/curl/include/curl/urlapi.h`
 - `packages/runtime/vendor/curl/include/curl/websockets.h`
 - `packages/simd/simd.intrinsics.ts`
+- `scripts/gen-intrinsics-math.mjs`
 - `scripts/modifications-upstream.tsv`
 - `scripts/modifications.mjs`
 - `scripts/wasmgc-corpus.mjs`
@@ -2865,6 +2965,10 @@ As section 4(b) of the license requires, the files below carry changes. 1117 fil
 - `tests/corpus/4726-fix-1127-abstract-property-implementations.ts`
 - `tests/corpus/4727-fix-1127-catch-message-concat-after-await.ts`
 - `tests/corpus/4728-fix-1127-number-of-dynamic-values.ts`
+- `tests/corpus/4729-intrinsics-int.ts`
+- `tests/corpus/4730-intrinsics-int-fields.ts`
+- `tests/corpus/4731-intrinsics-strict-math.ts`
+- `tests/corpus/4732-intrinsics-f16-layout-atomics.ts`
 - `tests/corpus/760-any-arithmetic.ts`
 - `tests/corpus/763-any-flow.ts`
 - `tests/corpus/968-jsval-lift.ts`
@@ -3533,6 +3637,7 @@ As section 4(b) of the license requires, the files below carry changes. 1117 fil
 - `tests/wasmgc-browser/fixtures/index-record-conditional-spread.ts`
 - `tests/wasmgc-browser/fixtures/index-record-dynamic-write.ts`
 - `tests/wasmgc-browser/fixtures/inexact-predicate-else-shared-field.ts`
+- `tests/wasmgc-browser/fixtures/inline-field-non-null-reads.ts`
 - `tests/wasmgc-browser/fixtures/inline-number-and-write-fast-paths.ts`
 - `tests/wasmgc-browser/fixtures/inline-scalar-fields-classes.ts`
 - `tests/wasmgc-browser/fixtures/inline-scalar-fields-dyn.ts`
@@ -3845,6 +3950,7 @@ As section 4(b) of the license requires, the files below carry changes. 1117 fil
 - `tests/wasmgc-browser/fixtures/namespace-captured.ts`
 - `tests/wasmgc-browser/fixtures/namespace-values-lib/detailed.ts`
 - `tests/wasmgc-browser/fixtures/namespace-values-lib/plain.ts`
+- `tests/wasmgc-browser/fixtures/narrowed-optional-returns.ts`
 - `tests/wasmgc-browser/fixtures/narrowing-stale-args.ts`
 - `tests/wasmgc-browser/fixtures/narrowing-stale-corpus.ts`
 - `tests/wasmgc-browser/fixtures/narrowing-stale-property.ts`

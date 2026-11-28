@@ -8,6 +8,8 @@
 // - the page programs under pages/ build with `--browser` (browser.mjs runs them in Chromium);
 // - hosted/scaled.ts, which imports a typed `host:` module, builds with `--browser` and runs under Node through the
 //   exported loader, `scriptw/host`;
+// - compiled-package/uses-cjs.ts builds with `--browser --compile-packages smoke-cjs` (a CommonJS package installed
+//   from its tarball) into a module with no npm JavaScript, which prints what Node prints;
 // - `import("scriptw")` compiles through the programmatic API, and `scriptw --version` names the versions and commit.
 //
 //   node npm/wasmgc/test/smoke.mjs <package.tgz> [--keep]
@@ -35,7 +37,8 @@ const check = (ok, label, detail) => {
   console.log(`${ok ? "ok  " : "FAIL"} ${label}`);
   if (!ok) { failures++; if (detail !== undefined) console.log(detail); }
 };
-const copyDir = (from) => { for (const f of fs.readdirSync(from)) fs.copyFileSync(path.join(from, f), path.join(dir, f)); };
+// (the files of `from`, not its directories)
+const copyDir = (from) => { for (const f of fs.readdirSync(from, { withFileTypes: true })) if (f.isFile()) fs.copyFileSync(path.join(from, f.name), path.join(dir, f.name)); };
 const t0 = performance.now();
 try {
   fs.writeFileSync(path.join(dir, "package.json"), JSON.stringify({ name: "smoke", private: true, type: "module" }) + "\n");
@@ -89,6 +92,17 @@ try {
   const hosted = hostedBuild.status === 0 ? sh(process.execPath, ["run.mjs", "scaled.wasm"]) : hostedBuild;
   check(hosted.status === 0 && hosted.stdout === "scaled 10 20 30\nlater 21\n" && hosted.stderr === "",
     `host: module through scriptw/host: build ${hostedBuild.ms} ms`, { stdout: hosted.stdout, stderr: hosted.stderr, status: hosted.status });
+
+  // --compile-packages: an installed CommonJS package compiled into a page program instead of loaded as npm JavaScript.
+  copyDir(path.join(here, "compiled-package"));
+  const packed = npm(["pack", "--silent", "--pack-destination", dir, path.join(here, "compiled-package", "smoke-cjs")]);
+  const cjsTarball = path.join(dir, "smoke-cjs-1.0.0.tgz");
+  const cjsInstall = packed.status === 0 ? npm(["install", "--no-audit", "--no-fund", "--no-save", cjsTarball]) : packed;
+  const compiledBuild = cjsInstall.status === 0 ? scriptw(["build", "uses-cjs.ts", "--browser", "--compile-packages", "smoke-cjs", "-o", "uses-cjs.wasm"]) : cjsInstall;
+  const compiled = compiledBuild.status === 0 ? sh(process.execPath, ["run.mjs", "uses-cjs.wasm"]) : compiledBuild;
+  const cjsOracle = sh(process.execPath, ["uses-cjs.ts"]);
+  check(compiled.status === 0 && compiled.stdout === `${cjsOracle.stdout}compiled in\n` && compiled.stderr === "",
+    `--compile-packages smoke-cjs: build ${compiledBuild.ms} ms`, { stdout: compiled.stdout, stderr: compiled.stderr, status: compiled.status, node: cjsOracle.stdout });
 
   // The programmatic API, and a refusal's diagnostic.
   fs.writeFileSync(path.join(dir, "bad.ts"), "const n: number = 1;\nconst s: string = n;\nconsole.log(s);\n");

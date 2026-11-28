@@ -16,11 +16,16 @@ export const VARIANTS_SCHEMA = "wgc-variants/1";
 export type ViewsMode = "resizable" | `fixed:${number}`;
 export type ThreadsMode = "off" | "shared" | "auto";
 
+export type MathMode = "fast" | "strict";
+
 export interface CapabilityMode {
   eh: "exnref" | "legacy";
   views: ViewsMode;
   relaxedSimd: boolean;
   threads: ThreadsMode;
+  /** strict (docs/intrinsics.md): deterministic floating point. No relaxed SIMD (its results vary in the low bits by
+   * engine and CPU), and a program importing the strict-math library records it. Optional: absent reads as fast. */
+  math?: MathMode;
 }
 
 /** Engine capabilities a module can require. `js-string-builtins` and `imported-string-constants` are soft: the host
@@ -46,6 +51,8 @@ export interface CapabilityUses {
   simd: boolean;
   /** An imported shared memory (wasm link). */
   sharedMemory: boolean;
+  /** The intrinsic libraries the module imports (int, math, layout, f16, atomics, simd), sorted. */
+  intrinsics?: string[];
 }
 
 /** The record the `<out>.capabilities.json` sidecar carries. The `scriptc.capabilities` section carries the same
@@ -57,6 +64,8 @@ export interface ResolvedCapabilities {
   /** "preferred", or "compat" for the second variant of a set. */
   variant: "preferred" | "compat";
   requires: Requirement[];
+  /** The intrinsic libraries the module imports, when it imports any. */
+  intrinsics?: string[];
 }
 
 export const BASELINE_MODE: CapabilityMode = Object.freeze({ eh: "exnref", views: "resizable", relaxedSimd: false, threads: "off" });
@@ -67,7 +76,8 @@ const MAX_FIXED_MIB = 4096;
 
 /** The canonical key of a mode: the only form that may enter a cache key or name a variant. */
 export function capabilityKey(mode: CapabilityMode): string {
-  return `${CAPABILITY_SCHEMA};eh=${mode.eh};views=${mode.views};relaxed=${mode.relaxedSimd ? 1 : 0};threads=${mode.threads}`;
+  // math=strict joins the key only when set, so every key built before the mode existed is unchanged.
+  return `${CAPABILITY_SCHEMA};eh=${mode.eh};views=${mode.views};relaxed=${mode.relaxedSimd ? 1 : 0};threads=${mode.threads}${mode.math === "strict" ? ";math=strict" : ""}`;
 }
 
 /** MiB of a fixed view mode, or null for resizable. */
@@ -155,6 +165,7 @@ export interface CapabilityRequest {
   threads?: ThreadsMode;
   /** false (`-jspi`): refuse a program that suspends on host promises. */
   jspi?: boolean;
+  math?: MathMode;
 }
 
 export function parseCapabilities(spec: string | undefined): { request: CapabilityRequest; errors: string[] } {
@@ -172,8 +183,9 @@ export function parseCapabilities(spec: string | undefined): { request: Capabili
     else if (k === "-relaxed-simd" && v === undefined) request.relaxedSimd = false;
     else if (k === "threads" && (v === "off" || v === "shared" || v === "auto")) request.threads = v;
     else if ((k === "jspi" || k === "+jspi") && v === undefined) request.jspi = true;
+    else if (k === "math" && (v === "fast" || v === "strict")) request.math = v;
     else if (k === "-jspi" && v === undefined) request.jspi = false;
-    else errors.push(`capability "${raw}": expected auto, baseline, compat, eh=exnref|legacy, views=resizable|fixed[:<MiB>], [-]relaxed-simd, threads=off|shared|auto or [-]jspi`);
+    else errors.push(`capability "${raw}": expected auto, baseline, compat, eh=exnref|legacy, views=resizable|fixed[:<MiB>], [-]relaxed-simd, threads=off|shared|auto, [-]jspi or math=fast|strict`);
   }
   return { request, errors };
 }
@@ -186,11 +198,12 @@ export function preferredMode(request: CapabilityRequest): CapabilityMode {
     views: request.views ?? base.views,
     relaxedSimd: request.relaxedSimd ?? base.relaxedSimd,
     threads: request.threads ?? base.threads,
+    ...((request.math ?? base.math) === "strict" ? { math: "strict" as const } : {}),
   };
 }
 
 function compatOf(mode: CapabilityMode, request: CapabilityRequest): CapabilityMode {
-  return { eh: "legacy", views: request.views !== undefined && request.views !== "resizable" ? request.views : `fixed:${DEFAULT_FIXED_MIB}`, relaxedSimd: false, threads: mode.threads };
+  return { eh: "legacy", views: request.views !== undefined && request.views !== "resizable" ? request.views : `fixed:${DEFAULT_FIXED_MIB}`, relaxedSimd: false, threads: mode.threads, ...(mode.math === "strict" ? { math: "strict" as const } : {}) };
 }
 
 export interface VariantPlan {
@@ -208,9 +221,11 @@ export function planVariants(request: CapabilityRequest, preferred: CapabilityMo
   const explain: string[] = [], errors: string[] = [];
   const list = (ts: readonly Target[]) => ts.map(formatTarget).join(", ");
   explain.push(`targets: ${list(targets)}`);
-  explain.push(`preferred: ${capabilityKey(preferred)}`);
+  explain.push(`preferred: ${capabilityKey(effectiveMode(preferred, uses))}`);
   const needs = requirementsOf(preferred, uses).filter(r => !SOFT_REQUIREMENTS.has(r));
   explain.push(`preferred requires: ${needs.join(", ")} (strings: the host falls back to plain JavaScript when the engine lacks them)`);
+  if (preferred.math === "strict" && preferred.relaxedSimd) errors.push("math=strict refuses relaxed SIMD: its results differ in the low bits by engine and CPU (drop relaxed-simd, or use math=fast)");
+  explain.push(...intrinsicsExplain(preferred, uses));
   if (uses.jspi && request.jspi === false) errors.push("the program suspends on host promises (a suspending FFI import), and the capabilities refuse JSPI (-jspi)");
   if (uses.jspi) {
     const lacking = targetsLacking("jspi", targets);
@@ -233,6 +248,7 @@ export function planVariants(request: CapabilityRequest, preferred: CapabilityMo
         views: viewsLacking.length ? (request.views && request.views !== "resizable" ? request.views : `fixed:${DEFAULT_FIXED_MIB}`) : preferred.views,
         relaxedSimd: relaxedLacking.length ? false : preferred.relaxedSimd,
         threads: preferred.threads,
+        ...(preferred.math === "strict" ? { math: "strict" as const } : {}),
       };
       if (ehLacking.length) lift.push(`eh=legacy for ${list(ehLacking)} (no exnref)`);
       if (viewsLacking.length) lift.push(`views=${compat.views} for ${list(viewsLacking)} (no WebAssembly.Memory.prototype.toResizableBuffer; the program hands typed arrays to JavaScript)`);
@@ -244,7 +260,31 @@ export function planVariants(request: CapabilityRequest, preferred: CapabilityMo
 }
 
 export function resolvedRecord(mode: CapabilityMode, uses: CapabilityUses, variant: "preferred" | "compat"): ResolvedCapabilities {
-  return { schema: CAPABILITY_SCHEMA, key: capabilityKey(mode), mode: { ...mode }, variant, requires: requirementsOf(mode, uses) };
+  const resolved = effectiveMode(mode, uses);
+  return { schema: CAPABILITY_SCHEMA, key: capabilityKey(resolved), mode: resolved, variant, requires: requirementsOf(resolved, uses),
+    ...(uses.intrinsics?.length ? { intrinsics: [...uses.intrinsics] } : {}) };
+}
+
+/** The mode a module is built under: a program importing the strict-math library is math=strict whatever was asked. */
+export function effectiveMode(mode: CapabilityMode, uses: CapabilityUses): CapabilityMode {
+  return uses.intrinsics?.includes("math") && mode.math !== "strict" ? { ...mode, math: "strict" } : { ...mode };
+}
+
+/** How each intrinsic library the program imports is provided (--explain-capabilities; docs/intrinsics.md). */
+export const INTRINSIC_EXPLAIN: Readonly<Record<string, string>> = {
+  int: "int: i32/i64 instructions (clz, ctz, popcnt, rotl, rotr, mul, wrap); saturating forms through i64; fallback: the module's exact JavaScript",
+  math: "math: the in-module fdlibm routines, the same source the library's JavaScript was generated from; NaN results canonical; fallback: the generated JavaScript (bit-identical)",
+  layout: "layout: fixed-offset little-endian loads and stores on module memory through DataView; fallback: the same DataView accessors in JavaScript",
+  f16: "f16: binary16 storage converted to f64 at load and store in wasm (no f16 arithmetic); fallback: Float16Array/DataView.getFloat16 when the engine has them, else the module's software conversion",
+  atomics: "atomics: wasm atomic instructions on module memory; wait/notify need threads=shared; fallback: the single-threaded task ring (threads=off), same results",
+  simd: "simd: wasm SIMD128 instructions; fallback: the module's lane-exact scalar JavaScript",
+};
+export function intrinsicsExplain(mode: CapabilityMode, uses: CapabilityUses): string[] {
+  const out: string[] = [];
+  const math = effectiveMode(mode, uses).math ?? "fast";
+  out.push(`math: ${math}${math === "strict" ? (uses.intrinsics?.includes("math") ? " (the program imports the strict-math library)" : " (requested)") + "; relaxed SIMD off; NaNs stored to memory canonical" : " (the default)"}`);
+  for (const lib of uses.intrinsics ?? []) out.push(`intrinsics: ${INTRINSIC_EXPLAIN[lib] ?? `${lib}: compiled from the module's own bodies (this compiler has no lowering for it)`}`);
+  return out;
 }
 
 /** A variant set (`<out>.variants.json`): artifacts in order of preference. */
@@ -256,7 +296,7 @@ export interface VariantSet {
 /* ── the custom section ────────────────────────────────────────────────── */
 
 export function encodeCapabilitySection(record: ResolvedCapabilities): Uint8Array {
-  return new TextEncoder().encode(JSON.stringify({ key: record.key, variant: record.variant, requires: record.requires }));
+  return new TextEncoder().encode(JSON.stringify({ key: record.key, variant: record.variant, requires: record.requires, ...(record.intrinsics ? { intrinsics: record.intrinsics } : {}) }));
 }
 
 /** The mode a canonical key spells, or null for a key of another schema. */
@@ -266,14 +306,16 @@ export function modeOfKey(key: string): CapabilityMode | null {
   const kv = Object.fromEntries(parts.slice(1).map(p => p.split("=") as [string, string]));
   const views = kv["views"] === "resizable" || /^fixed:\d+$/.test(kv["views"] ?? "") ? kv["views"] as ViewsMode : null;
   if ((kv["eh"] !== "exnref" && kv["eh"] !== "legacy") || !views || !["off", "shared", "auto"].includes(kv["threads"] ?? "")) return null;
-  return { eh: kv["eh"], views, relaxedSimd: kv["relaxed"] === "1", threads: kv["threads"] as ThreadsMode };
+  if (kv["math"] !== undefined && kv["math"] !== "strict") return null;
+  return { eh: kv["eh"], views, relaxedSimd: kv["relaxed"] === "1", threads: kv["threads"] as ThreadsMode, ...(kv["math"] === "strict" ? { math: "strict" as const } : {}) };
 }
 
 export function decodeCapabilitySection(payload: ArrayBuffer | Uint8Array): ResolvedCapabilities | null {
   try {
-    const r = JSON.parse(new TextDecoder().decode(payload)) as { key: string; variant?: "preferred" | "compat"; requires: Requirement[] };
+    const r = JSON.parse(new TextDecoder().decode(payload)) as { key: string; variant?: "preferred" | "compat"; requires: Requirement[]; intrinsics?: string[] };
     const mode = r && typeof r.key === "string" ? modeOfKey(r.key) : null;
-    return mode && Array.isArray(r.requires) ? { schema: CAPABILITY_SCHEMA, key: r.key, mode, variant: r.variant ?? "preferred", requires: r.requires } : null;
+    return mode && Array.isArray(r.requires) ? { schema: CAPABILITY_SCHEMA, key: r.key, mode, variant: r.variant ?? "preferred", requires: r.requires,
+      ...(Array.isArray(r.intrinsics) ? { intrinsics: r.intrinsics } : {}) } : null;
   } catch { return null; }
 }
 

@@ -28,6 +28,10 @@ export interface BytesLink {
 
 export interface BytesContext {
   link?: BytesLink;
+  /** math=strict (docs/intrinsics.md): a NaN stored into a Float32Array, a Float64Array or through DataView is the
+   * canonical quiet NaN, so the bits a program reads back never depend on whether a NaN was folded at compile time
+   * (JavaScript's 0x7ff8000000000000) or computed at run time (0xfff8000000000000 on x86, 0x7ff8... on arm64). */
+  canonicalNaN?: boolean;
   /** A fixed memory of this many 64 KiB pages (capability views=fixed): declared at its maximum, it never grows, so
    * byte views handed to JavaScript never detach. Absent: one page, growing on demand to 4 GiB. */
   fixedPages?: number;
@@ -81,6 +85,15 @@ const HEAP_START = 1024;
 
 export function bytesRuntime(ctx: BytesContext) {
   const { m, types, defineHelper } = ctx;
+  const canon = (t: "f32" | "f64", v: number): number => {
+    if (!ctx.canonicalNaN) return v;
+    const vt = t === "f64" ? f64 : binaryen.f32, name = `$canon.nan.${t}`;
+    defineHelper(name, () => {
+      const x = () => m.local.get(0, vt);
+      m.addFunction(name, vt, vt, [], m.select(t === "f64" ? m.f64.ne(x(), x()) : m.f32.ne(x(), x()), t === "f64" ? m.f64.const(NaN) : m.f32.const(NaN), x()));
+    });
+    return m.call(name, [v], vt);
+  };
   const B = () => types.bytesRef();
   /** The struct a new typed array of element kind `elem` is ($Bytes.<elem>, types.ts bytesType). */
   const BE = (elem: IrBytesElem) => binaryen.getHeapType(types.bytesElemRef(elem));
@@ -220,8 +233,8 @@ export function bytesRuntime(ctx: BytesContext) {
       case "u32": case "i32": return m.i32.store(0, a(4), at, ctx.toInt32(v()));
       case "u8c": return m.i32.store8(0, 1, at, m.if(m.i32.eqz(m.f64.gt(v(), m.f64.const(0))), m.i32.const(0),
         m.if(m.f64.ge(v(), m.f64.const(255)), m.i32.const(255), m.i32.trunc_u.f64(m.f64.nearest(v())))));
-      case "f32": return m.f32.store(0, a(4), at, m.f32.demote(v()));
-      case "f64": return m.f64.store(0, a(8), at, v());
+      case "f32": return m.f32.store(0, a(4), at, canon("f32", m.f32.demote(v())));
+      case "f64": return m.f64.store(0, a(8), at, canon("f64", v()));
       case "f16": return ctx.unsupported("Float16Array");
     }
   };
@@ -591,7 +604,7 @@ export function bytesRuntime(ctx: BytesContext) {
     }
     const vt = elem === "f64" ? f64 : elem === "f32" ? binaryen.f32 : i32;
     const v = ctx.temp(vt);
-    const computed = elem === "f64" ? ctx.expr(value) : elem === "f32" ? ctx.f32Value(value) : ctx.i32Value(value);
+    const computed = elem === "f64" ? canon("f64", ctx.expr(value)) : elem === "f32" ? canon("f32", ctx.f32Value(value)) : ctx.i32Value(value);
     const at = addr(elem, m.local.get(b, B()), m.local.get(i, i32)), got = m.local.get(v, vt);
     const write = elem === "u8" || elem === "i8" ? m.i32.store8(0, 1, at, got) : elem === "u16" || elem === "i16" ? m.i32.store16(0, 2, at, got)
       : elem === "u32" || elem === "i32" ? m.i32.store(0, 4, at, got) : elem === "f32" ? m.f32.store(0, 4, at, got) : m.f64.store(0, 8, at, got);

@@ -543,6 +543,10 @@ export const LINK_FEATURE_REQUIREMENTS: readonly LinkFeatureRequirement[] = [
   // dyn model's console.log of a dyn value renders it through the inspect
   // unit (scr_insp_dyn_s), which the feature scan does not see from there.
   { feature: "hostIsland", requires: ["dynamic", "dynInvoke", "foreignFfi", "inspect"] },
+  // Atomics.notify wakes a waitAsync waiter by posting to its loop through the same remote queue
+  // (scr_atomics_wait.c calls scr_remote_post and scr_remote_hold), so the ELF and Mach-O links need the queue's unit
+  // whenever the wait unit links; COFF links it unconditionally (runtime-pack-matrix.mjs).
+  { feature: "atomicsWait", requires: ["foreignFfi"] },
   // A Console built with inspectOptions or colorMode formats through the
   // inspect unit's console entries, and colorMode 'auto' reads the
   // environment's color depth (scr_tty_colors.c).

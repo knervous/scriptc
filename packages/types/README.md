@@ -20,6 +20,8 @@ function isLetter(ch: number): NoThrow<boolean> {
 
 - `NoThrow<T>` on a function's return type: the function never throws. Callers need no exception checks.
 - `Int32` on a parameter, variable, class instance field or function result: every stored value is a signed 32-bit integer by construction (an integer literal in range, a bitwise result such as `x | 0`, `Math.imul`, another `Int32`, or arithmetic scriptc can bound). The slot is stored as a 32-bit integer.
+- `Uint32`, `Int8`, `Uint8`, `Int16`, `Uint16`: the same check for their ranges. As class instance fields the 8- and 16-bit types are stored packed (one or two bytes on WasmGC).
+- `Int64`, `Uint64` on a bigint slot: every stored value is a 64-bit integer by construction (an in-range literal, `BigInt.asIntN(64, x)` / `BigInt.asUintN(64, x)`, another slot of the type, or a 64-bit result of the int intrinsic library, `scriptw/int`).
 - `Int32[]` (also `readonly Int32[]`, `Array<Int32>`) on a parameter, variable, class instance field or function result of type `number[]`: every element stored into the array, through any reference, is an int32 by construction. Element reads that find a value are int32s, so integer arithmetic over them runs in 32-bit operations; holes and missing indices still read as `undefined`.
 - `Immutable<T>` on a parameter, variable, class instance field or function result: a deep read-only view, and no code writes to the value through any reference. A module constant built from literals becomes immortal data.
 - `Acyclic` on a class (`class C implements Acyclic`), interface (`interface I extends Acyclic`) or object type alias (`type T = Acyclic<{ ... }>`): no chain of references can lead from such an object back to itself. Its objects carry no cycle-collector header.

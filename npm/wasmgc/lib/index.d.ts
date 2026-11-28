@@ -15,6 +15,10 @@ export interface CompileOptions {
   /** Package export and import conditions to add, such as `dom-stream`. `wasmgc` is always on: a package that maps it
    * to TypeScript source (`"wasmgc": "./src/index.ts"`) is compiled into the module from that source. */
   conditions?: string[];
+  /** npm packages to compile into the module: their JavaScript is compiled with the program rather than loaded as npm
+   * JavaScript. A package the compiler cannot take this way either stays npm JavaScript (with a note on stderr) or
+   * fails the build with its diagnostics. */
+  compilePackages?: string[];
   /** With `browser`: how dynamic values are represented. `native` (the default) compiles them as WasmGC values, which
    * UI libraries and frameworks need; `engine` keeps them as engine values behind host calls, for the smallest module. */
   dynModel?: "native" | "engine";

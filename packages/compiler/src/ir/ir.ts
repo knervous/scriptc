@@ -1460,6 +1460,21 @@ export interface IrModule {
    * modules keep their custom sections (otherwise they carry none, and
    * debug sections cost nothing). */
   wasmCustomSections?: boolean;
+  /** The program's intrinsic libraries: modules whose leading comment is the
+   * pragma `@scriptc-intrinsics <library>/<version>` (packages/intrinsics,
+   * packages/simd). Recognised by content, never by file name. A backend may
+   * lower a call into one to instructions; any call it does not lower runs
+   * the module's own (exact) bodies. Absent when the program imports none. */
+  intrinsics?: IrIntrinsicModule[];
+}
+
+/** An intrinsic library module and the tag its members' IR names start with
+ * (`%m3.` for functions, `%%m3.` for class members). */
+export interface IrIntrinsicModule {
+  tag: string;
+  library: string;
+  version: number;
+  file: string;
 }
 
 /** A WebAssembly module whose bytes the build saw, validated within the
@@ -1500,6 +1515,11 @@ export interface IrContracts {
    * `s:${shapeId}\0${field}` (record fields) and `r:${function}` (results);
    * see int32-slots.ts int32ElementSlot. */
   int32Elements?: string[];
+  /** Class field families (`${family}\0${kind}`) whose contract type is
+   * narrower than int32 or unsigned (Int8, Uint8, Int16, Uint16, Uint32):
+   * proven like int32Fields, so a backend may store them packed (WasmGC:
+   * i8/i16 struct fields). Not in the IR codec. */
+  narrowFields?: string[];
   /** Functions that cannot throw (NoThrow). */
   noThrow?: string[];
   /** Acyclic classes and object types, as cycle-analysis units
