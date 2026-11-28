@@ -22,9 +22,8 @@ console.log(acc);
 // math: callbacks, values, two-argument members, and direct calls beside them.
 const angles = xs.map((x, i) => atan2(x, i + 1));
 console.log(angles.join(" "), xs.map(cos).join(" "), xs.map((x) => pow(Math.abs(x), 1.5)).join(" "));
-// (A member both passed to .map and stored in an array of functions hits a WasmGC limit that any imported function
-// does: SC3002 "method-style closure call". Here the array holds members .map does not take.)
-const unary: ((x: number) => number)[] = [exp, (x: number) => pow(x, 2)];
+// A member both passed to .map and stored in an array of functions (cos): the array's adapter over it.
+const unary: ((x: number) => number)[] = [exp, (x: number) => pow(x, 2), cos];
 console.log(unary.map((f) => f(0.25)).join(" "), cos(0.25), exp(-1));
 let wave = 0;
 for (let i = 0; i < 500; i++) wave += cos(i * 0.01) * exp(-i * 0.001);

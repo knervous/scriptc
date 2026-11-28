@@ -471,9 +471,21 @@ export function bytesRuntime(ctx: BytesContext) {
       const at = () => m.i32.add(base(m.local.get(b, B())), m.i32.trunc_u.f64(o()));
       const check = m.if(m.i32.or(m.f64.lt(o(), m.f64.const(0)), m.f64.gt(m.f64.add(o(), m.f64.const(spec.size)), m.f64.convert_u.i32(len(m.local.get(b, B()))))),
         ctx.rangeErrorText("Offset is outside the bounds of the DataView"));
-      if (getter) return m.block(null, [...pre, check, load(spec.kind, at(), 1)], f64);
-      const v = ctx.temp(f64);
-      return m.block(null, [...pre, m.local.set(v, ctx.expr(args[1]!)), check, store(spec.kind, at(), () => m.local.get(v, f64), 1)]);
+      // An offset that is an in-bounds int32 (a record view's `i * 20 + 4` over an integer index held as a double, a
+      // method parameter the i32 ABI does not narrow) is its own ToIndex: an integer bounds test and address, with no
+      // truncation, NaN test or double compare. Any other double takes the exact path below.
+      const raw = ctx.temp(f64), oi = ctx.temp(i32), rawV = () => m.local.get(raw, f64), oiV = () => m.local.get(oi, i32);
+      const inBounds = m.i32.and(m.i32.and(
+        m.f64.eq(m.f64.convert_s.i32(m.local.tee(oi, m.i32.trunc_s_sat.f64(rawV()), i32)), rawV()),
+        m.i32.ge_s(oiV(), m.i32.const(0))),
+        m.i32.le_u(m.i32.add(oiV(), m.i32.const(spec.size)), len(m.local.get(b, B()))));
+      const fastAt = () => m.i32.add(base(m.local.get(b, B())), oiV());
+      const exactPath = [m.local.set(off, m.f64.trunc(rawV())), m.if(m.f64.ne(o(), o()), m.local.set(off, m.f64.const(0))), check];
+      const head = [m.local.set(b, ctx.expr(recv)), m.local.set(raw, ctx.expr(args[0]!))];
+      if (getter) return m.block(null, [...head, m.if(inBounds, load(spec.kind, fastAt(), 1), m.block(null, [...exactPath, load(spec.kind, at(), 1)], f64))], f64);
+      const v = ctx.temp(f64), value = () => m.local.get(v, f64);
+      return m.block(null, [...head, m.local.set(v, ctx.expr(args[1]!)),
+        m.if(inBounds, store(spec.kind, fastAt(), value, 1), m.block(null, [...exactPath, store(spec.kind, at(), value, 1)]))]);
     }
     if (getter) {
       const le = leArg ? ctx.expr(leArg) : m.i32.const(0);

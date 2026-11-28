@@ -1,4 +1,4 @@
-/* Fixed-width integer contracts (ir/contract-check.ts): each program either
+/* Fixed-width integer contracts (contracts/check.ts): each program either
  * compiles, with the proven slots recorded for the backends, or is refused
  * with SC7002 naming the write (SC7003 for a contract it cannot check) that may break its contract. */
 import { mkdtemp, rm, writeFile } from "node:fs/promises";
@@ -35,14 +35,14 @@ const accepted: [string, string][] = [
   ["direct calls with proven arguments", "function f(a: Int32, b: Uint8): Int32 { return (a + b) | 0; } console.log(f(5, 200), f(-1 | 0, 7));"],
 ];
 const refused: [string, string, RegExp][] = [
-  ["division", "let x: Int32 = 1; x = x / 3; console.log(x);", /Int32 contract: the value assigned to 'x'/],
-  ["fractional argument", "function f(a: Int32): number { return a; } console.log(f(1.5));", /Int32 contract: argument 1 of f/],
-  ["unbounded increment", "let i: Int32 = 0; while (Math.random() < 2) { i++; if (i > 5) break; } console.log(i);", /Int32 contract/],
-  ["unsigned into signed", "const a: Uint32 = 0xffffffff >>> 0; const b: Int32 = a; console.log(b);", /Int32 contract: the (initial value of|value assigned to) 'b'/],
-  ["byte field from a number", "class P { r: Uint8 = 0; set(v: number) { this.r = v; } } const p = new P(); p.set(3); console.log(p.r);", /Uint8 contract: the value stored into field 'r'/],
-  ["bigint product", "let h: Uint64 = 1n; h = h * 3n; console.log(h);", /Uint64 contract/],
-  ["function value", "function f(a: Int32): Int32 { return a; } const g = [1, 2].map((v) => f(v | 0)); const h = f; console.log(g, h(2));", /function used as a value/],
-  ["return", "function half(a: Int32): Int32 { return a / 2; } console.log(half(4));", /Int32 contract: the value half returns/],
+  ["division", "let x: Int32 = 1; x = x / 3; console.log(x);", /the value stored into 'x' \(Int32\) is not provably an int32: 'x \/ 3'/],
+  ["fractional argument", "function f(a: Int32): number { return a; } console.log(f(1.5));", /the argument for 'a' \(Int32\) is not provably an int32: '1\.5'/],
+  ["unbounded increment", "let i: Int32 = 0; while (Math.random() < 2) { i++; if (i > 5) break; } console.log(i);", /'i' \(Int32\) is not provably an int32: 'i\+\+'/],
+  ["unsigned into signed", "const a: Uint32 = 0xffffffff >>> 0; const b: Int32 = a; console.log(b);", /the value stored into 'b' \(Int32\) is not provably an int32: 'a'/],
+  ["byte field from a number", "class P { r: Uint8 = 0; set(v: number) { this.r = v; } } const p = new P(); p.set(3); console.log(p.r);", /the value stored into 'P\.r' \(Uint8\) is not provably an integer in \[0, 255\]/],
+  ["bigint product", "let h: Uint64 = 1n; h = h * 3n; console.log(h);", /'h' \(Uint64\) is not provably a bigint in \[0, 2\^64 - 1\]: 'h \* 3n'/],
+  ["function value", "function f(a: Int32): Int32 { return a; } const g = [1, 2].map((v) => f(v | 0)); const h = f; console.log(g, h(2));", /the Int32 contract on 'a' cannot be checked: 'f' is used as a value/],
+  ["return", "function half(a: Int32): Int32 { return a / 2; } console.log(half(4));", /the value returned from 'half' \(Int32\) is not provably an int32/],
 ];
 
 describe("contracts accepted", () => {

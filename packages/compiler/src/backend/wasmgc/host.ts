@@ -69,6 +69,14 @@ const symbolIds = new Map<symbol, string>(), symbolsByName = new Map<string, sym
  * and the platform globals a native host does not supply (the scheduler's MessageChannel / setImmediate, requestIdleCallback, AbortController, queueMicrotask). */
 const NATIVE_ABSENT_GLOBALS = new Set(["Array", "Object", "Function", "Number", "String", "Boolean", "BigInt", "Symbol", "JSON",
   "MessageChannel", "setImmediate", "clearImmediate", "requestIdleCallback", "cancelIdleCallback", "AbortController", "queueMicrotask"]);
+/** The argument list of a call `f(...pre, ...spread)` with one spread source, with V8's call-spread TypeErrors: a
+ * nullish source names its spelling, any other non-iterable the iterator method. (A host arrow spreading two lists
+ * builds an array literal instead, whose TypeError is the array-spread text.) */
+const spreadArguments = (pre: unknown[], spread: any, spelling: string): unknown[] => {
+  if (spread === null || spread === undefined) throw new TypeError(`${spelling} is not iterable (cannot read property ${spread})`);
+  if (typeof spread[Symbol.iterator] !== "function") throw new TypeError("Spread syntax requires ...iterable[Symbol.iterator] to be a function");
+  return [...pre, ...spread];
+};
 const isPrimitiveReceiver = (o: unknown): boolean => { const t = typeof o; return t === "string" || t === "number" || t === "boolean" || t === "symbol" || t === "bigint"; };
 const NATIVE_SIM = typeof process !== "undefined" && process.env?.["SCRIPTC_WASMGC_NATIVE_SIM"] === "1";
 const symbolKey = (s: symbol): string => {
@@ -406,7 +414,7 @@ export function wasmGcHostImports(opts: WasmGcHostOptions = {}, state: WasmGcHos
     "js.global": (name: string) => (globalThis as any)[name],
     "js.get": (o: any, k: any) => pageGet(o, k), "js.set": (o: any, k: any, v: any) => { o[K(k)] = v; },
     "js.symbolKey": (s: symbol) => symbolKey(s), "js.symbolOf": (k: string) => K(k),
-    "js.callSpread": (f: any, pre: any[], spread: any) => f(...pre, ...spread),
+    "js.callSpread": (f: any, pre: any[], spread: any, spelling: string) => f(...spreadArguments(pre, spread, spelling)),
     // A method read off a page object that a typed record stands for: bound to the object, so the typed call reaches it with the right `this`.
     "js.getMethod": (o: any, k: any) => { const f = pageGet(o, k); return typeof f === "function" ? f.bind(o) : f; },
     // A page value that is plain data (a plain object): a union's record arm checks and copies it; anything else stays a page-backed record.
@@ -414,7 +422,7 @@ export function wasmGcHostImports(opts: WasmGcHostOptions = {}, state: WasmGcHos
     // buffer, Date, Map or any other object inside (a decode worker's reply carrying its pixels) is not: such a value
     // is read from the page as it is used instead.
     "js.isPlainData": (v: any) => { if (v === null || typeof v !== "object") return 0; const p = Object.getPrototypeOf(v); return (p === Object.prototype || p === null) && jsonFaithful(v, new Set()) ? 1 : 0; },
-    "js.callMethodSpread": (recv: any, name: string, pre: any[], spread: any) => recv[name](...pre, ...spread),
+    "js.callMethodSpread": (recv: any, name: string, pre: any[], spread: any, spelling: string) => recv[name](...spreadArguments(pre, spread, spelling)),
     "js.fromNum": (x: number) => x, "js.fromBool": (b: number) => b !== 0, "js.null": () => null,
     "js.toNum": strict("number"), "js.toBool": strict("boolean"),
     "js.parse": (text: string) => JSON.parse(text), "js.stringify": (v: unknown) => JSON.stringify(v),

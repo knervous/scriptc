@@ -9,9 +9,11 @@
  * The fork's reach rule is deliberately wider than the emitter's, so it can only keep more: a function is reached when
  * ANY string anywhere in a kept function (body, params, captures, jsEntry, ...) or in the module's metadata (classes,
  * globals, records, unions, lib exports, FFI imports, ...) spells its name, which covers calls, closures, retag helpers,
- * class prototype helpers, `Error.captureStackTrace` literals and every by-name lookup an IR node can carry; through the
+ * class prototype helpers, `Error.captureStackTrace` literals and every by-name lookup an IR node can carry (a dynFrom's
+ * display-only fnName aside); through the
  * names a `new` or a class value reaches by convention (implicitReferences); and from the module's entry, the names the
- * backend roots with no IR node naming them (backendRoots, native host or not) and the caller's extra roots (link
+ * backend roots with no IR node naming them (backendRoots, native host or not, the error readers and the class
+ * normalizer) and the caller's extra roots (link
  * exports). Functions outside `removable` are all kept and all reach, and so are class members, which dispatch reaches
  * by the `%<class>.<member>` convention. */
 import type { IrExpr, IrFunction, IrModule } from "./ir.js";
@@ -55,10 +57,15 @@ export function withoutUnreachedFunctions(mod: IrModule, removable: ReadonlySet<
     const node = value as Record<string, unknown>;
     if (node["kind"] === "new" || node["kind"] === "classRef")
       for (const implicit of implicitReferences(node as { kind?: unknown; className?: unknown })) reach(implicit.name);
-    for (const key in node) if (key !== "loc") walk(node[key]);
+    // A dynFrom's fnName is the display name inspect and call errors spell, not a reference.
+    const display = node["kind"] === "dynFrom";
+    for (const key in node) if (key !== "loc" && !(display && key === "fnName")) walk(node[key]);
   };
   reach(mod.entry);
   for (const name of backendRoots({ hostHandles: true })) reach(name);
+  // The emitters look these up by name when the module defines them, whether or not an expression calls them.
+  for (const property of ERROR_READER_PROPERTIES) reach(errorReaderName(property));
+  reach(CLASS_NORMALIZER);
   for (const name of roots) reach(name);
   for (const key in mod) if (key !== "functions") walk((mod as unknown as Record<string, unknown>)[key]);
   for (const fn of mod.functions) if (!candidates.has(fn.name)) walk(fn);

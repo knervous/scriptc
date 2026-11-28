@@ -1,5 +1,13 @@
 # Changelog
 
+## Unreleased
+
+- Every contract type in `@scriptc/types` is checked on WasmGC as natively, by the contract checker ported from upstream scriptc: `NoThrow` (SC7001), `Immutable` (SC7004, SC7005), `Acyclic` (SC7007), `ProgramLifetime` (SC7008) and `Int32[]`, beside the integer types. Before this, only the integer types were checked, and the other contracts compiled without being checked.
+- A contract written where it is not checked (a type alias, an interface member, a union such as `Int32 | undefined`, an array of an integer type other than `Int32`) fails the build with SC7006 instead of being ignored. A contract field of a generic class, or of a class whose instances reach `any` values, fails with SC7003.
+- Integer contract diagnostics use upstream scriptc's messages, which quote the value and suggest the conversion: `the value stored into 'x' (Int32) is not provably an int32: 'x / 3'`.
+- `Immutable<T>` over a class or object type compiles. It was refused as a value of the `@scriptc/types` package (SC2013).
+- A global `Int32` loop counter bounded by its loop condition (`for (; i < 10; i++)`) is accepted. It was refused with SC7002.
+
 ## 0.2.0 (2026-11-28)
 
 - Intrinsic libraries, as subpath exports: `scriptw/int` (fixed-width integers and bit operations), `scriptw/math` (deterministic math), `scriptw/layout` (fixed-layout records in linear memory), `scriptw/f16` (binary16 storage), `scriptw/atomics` (typed atomic cells) and `scriptw/simd` (the SIMD library). Each runs as exact JavaScript uncompiled; compiled, its calls lower to instructions on WasmGC and natively. The compiler recognises a library by a pragma in its source, wherever it is installed.

@@ -973,7 +973,7 @@ export class GcTypes {
   isAtomField(owner: { cls?: string; shape?: string }, field: string): boolean {
     return this.atomFields !== null && this.atomFields.has(owner.shape !== undefined ? `r:${owner.shape}.${field}` : `c:${owner.cls}.${field}`);
   }
-  /** Fixed-width integer class fields (ir/contract-check.ts proved every write), keyed `c:<class>.<field>` for every
+  /** Fixed-width integer class fields (contracts/check.ts proved every write), keyed `c:<class>.<field>` for every
    * class of a hierarchy that has the field: stored as i32, packed to i8/i16 for the 8- and 16-bit types. */
   narrowFields: ReadonlyMap<string, NarrowKind> | null = null;
   narrowField(owner: { cls?: string; shape?: string }, field: string): NarrowKind | null {

@@ -114,12 +114,15 @@ import { compilerProvenance, staleDist } from "../provenance.mjs";
 import { instrument } from "./fnprobe.mjs";
 import { judgeKnownDefect, parseKnownDefectExpect } from "./known-defect.mjs";
 import { fixtureDirs, fixtureIndex, reportsDir } from "./fixture-dirs.mjs";
+import { rerunWithWasmFlags, wasmNodeArgs } from "./node-flags.mjs";
 
 const phaseStart = performance.now();
 // Pinned runtime capability: retained byte views need resizable memory
-// buffers (Node 26+; Node 24 lacks Memory.prototype.toResizableBuffer).
+// buffers (Node 26 ships Memory.prototype.toResizableBuffer; Node 24 and 25
+// take --experimental-wasm-rab-integration, and the gate reruns with it).
+rerunWithWasmFlags();
 if (typeof WebAssembly.Memory.prototype.toResizableBuffer !== "function") {
-  console.error(`gate: this Node (${process.version}) lacks WebAssembly.Memory.prototype.toResizableBuffer; run the gate with Node 26+ (e.g. /opt/homebrew/bin/node)`);
+  console.error(`gate: this Node (${process.version}) lacks WebAssembly.Memory.prototype.toResizableBuffer; run the gate with Node 24 or later`);
   process.exit(2);
 }
 const here = path.dirname(fileURLToPath(import.meta.url));
@@ -234,7 +237,7 @@ const acc = { compileMs: 0, runMs: 0 };
 // Each fixture runs from its own directory.
 const run = (args, env, cwd) => {
   const t = performance.now();
-  const r = spawnSync(process.execPath, ["--import", prelude, ...args], { cwd, encoding: "utf8", timeout: 20000, ...(env ? { env: { ...process.env, ...env } } : {}) });
+  const r = spawnSync(process.execPath, [...wasmNodeArgs, "--import", prelude, ...args], { cwd, encoding: "utf8", timeout: 20000, ...(env ? { env: { ...process.env, ...env } } : {}) });
   acc.runMs += performance.now() - t;
   const outcome = r.error ? (r.error.code === "ETIMEDOUT" ? "timeout" : `spawn:${r.error.code}`) : r.signal ? `signal:${r.signal}` : `exit:${r.status}`;
   // The first error line, normalized (paths and wasm offsets differ by build).
@@ -362,7 +365,7 @@ async function fastPathHits(wasm, specs, cwd) {
   fs.writeFileSync(probe, bytes);
   fs.rmSync(counts, { force: true });
   const t = performance.now();
-  const r = spawnSync(process.execPath, ["--import", prelude, "--import", path.join(here, "fnprobe.mjs"), runner, probe], { cwd, encoding: "utf8", timeout: 20000,
+  const r = spawnSync(process.execPath, [...wasmNodeArgs, "--import", prelude, "--import", path.join(here, "fnprobe.mjs"), runner, probe], { cwd, encoding: "utf8", timeout: 20000,
     env: { ...process.env, FNPROBE_OUT: counts, FNPROBE_MAP: "" } });
   acc.runMs += performance.now() - t;
   let byName = {};
@@ -399,7 +402,7 @@ const lanes = Array.from({ length: Math.min(jobs, names.length) }, (_, i) => nam
 const results = [];
 const dispatchStart = performance.now();
 await Promise.all(lanes.map((lane) => new Promise((resolve) => {
-  const child = spawn("nice", ["-n", "10", process.execPath, fileURLToPath(import.meta.url), "--worker", ...(full ? ["--full"] : []), ...(strictRelease ? ["--strict-release"] : []), ...(production ? ["--production"] : []), ...(nativeSim ? ["--native-sim"] : []), ...(noBatch ? ["--no-batch"] : []), "--dyn", dynModel, ...(nativeAny ? ["--native-any"]:[]), ...(specialize ? ["--specialize", specialize] : []), ...(i31 ? ["--i31"] : []), ...(fuseCasts ? ["--fuse-casts"] : []), ...(inlineSlots !== null ? ["--inline-slots", String(inlineSlots)] : []), ...lane],
+  const child = spawn("nice", ["-n", "10", process.execPath, ...wasmNodeArgs, fileURLToPath(import.meta.url), "--worker", ...(full ? ["--full"] : []), ...(strictRelease ? ["--strict-release"] : []), ...(production ? ["--production"] : []), ...(nativeSim ? ["--native-sim"] : []), ...(noBatch ? ["--no-batch"] : []), "--dyn", dynModel, ...(nativeAny ? ["--native-any"]:[]), ...(specialize ? ["--specialize", specialize] : []), ...(i31 ? ["--i31"] : []), ...(fuseCasts ? ["--fuse-casts"] : []), ...(inlineSlots !== null ? ["--inline-slots", String(inlineSlots)] : []), ...lane],
     { cwd: here, stdio: ["ignore", "pipe", "pipe"] });
   let buf = "", err = "", done = false, grace;
   // A worker that reports nothing for GATE_STALL_MS (default 10 min) is killed and its unreported fixtures fail: a

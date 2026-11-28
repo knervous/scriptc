@@ -8868,7 +8868,8 @@ export function lowerBinary(lowerer: Lowerer, expr: ts.BinaryExpression): IrExpr
     if (left.type.kind === "jsval" || right.type.kind === "jsval") {
       return lowerAnyBinaryInIsland(lowerer, expr, left, right, loc);
     }
-    if (left.type.kind === "bigint" && right.type.kind === "bigint") {
+    /** A bigint operator over two bigint operands, or null for an operator bigints do not take here. */
+    const bigintBinary = (l: IrExpr, r: IrExpr): IrExpr | null => {
       const binary: Partial<Record<ts.SyntaxKind, "bigint.add" | "bigint.sub" | "bigint.mul" | "bigint.div" | "bigint.mod" | "bigint.pow" | "bigint.and" | "bigint.or" | "bigint.xor" | "bigint.shl" | "bigint.shr">> = {
         [ts.SyntaxKind.PlusToken]: "bigint.add",
         [ts.SyntaxKind.MinusToken]: "bigint.sub",
@@ -8883,12 +8884,12 @@ export function lowerBinary(lowerer: Lowerer, expr: ts.BinaryExpression): IrExpr
         [ts.SyntaxKind.GreaterThanGreaterThanToken]: "bigint.shr",
       };
       const fn = binary[op];
-      if (fn) return { kind: "libCall", fn, args: [left, right], type: BIGINT_T, loc };
+      if (fn) return { kind: "libCall", fn, args: [l, r], type: BIGINT_T, loc };
       if (
         op === ts.SyntaxKind.EqualsEqualsEqualsToken ||
         op === ts.SyntaxKind.ExclamationEqualsEqualsToken
       ) {
-        const equal: IrExpr = { kind: "libCall", fn: "bigint.eq", args: [left, right], type: BOOL, loc };
+        const equal: IrExpr = { kind: "libCall", fn: "bigint.eq", args: [l, r], type: BOOL, loc };
         return op === ts.SyntaxKind.ExclamationEqualsEqualsToken
           ? { kind: "unary", op: "!", operand: equal, type: BOOL, loc }
           : equal;
@@ -8897,13 +8898,69 @@ export function lowerBinary(lowerer: Lowerer, expr: ts.BinaryExpression): IrExpr
         op === ts.SyntaxKind.LessThanToken || op === ts.SyntaxKind.LessThanEqualsToken ||
         op === ts.SyntaxKind.GreaterThanToken || op === ts.SyntaxKind.GreaterThanEqualsToken
       ) {
-        const cmp: IrExpr = { kind: "libCall", fn: "bigint.cmp", args: [left, right], type: F64, loc };
+        const cmp: IrExpr = { kind: "libCall", fn: "bigint.cmp", args: [l, r], type: F64, loc };
         const zero: IrExpr = { kind: "numLit", value: 0, type: F64, loc };
         const cmpOp = op === ts.SyntaxKind.LessThanToken ? "<"
           : op === ts.SyntaxKind.LessThanEqualsToken ? "<="
           : op === ts.SyntaxKind.GreaterThanToken ? ">" : ">=";
         return { kind: "bin", op: cmpOp, left: cmp, right: zero, type: BOOL, loc };
       }
+      return null;
+    };
+    if (left.type.kind === "bigint" && right.type.kind === "bigint") {
+      const lowered = bigintBinary(left, right);
+      if (lowered) return lowered;
+    }
+    // A bigint binding the runtime-optional analysis widened to `bigint | undefined` (an argument a `.map` callback
+    // passes on, an unchecked array read) while the checker still types it `bigint`. Each operand is evaluated once;
+    // the bigint arm takes the bigint operator. The undefined arm answers as JavaScript does: `===`/`==` false (true when
+    // both are undefined), `!==`/`!=` the negation, relational comparisons false (ToNumeric gives NaN), and arithmetic
+    // and bitwise operators throw V8's TypeError, as `undefined * 1n` does (`undefined * undefined` would be NaN, which
+    // no bigint-typed expression holds).
+    const optionalBigintTag = (type: IrType): number => {
+      if (type.kind !== "union") return -1;
+      const arms = lowerer.unions.get(type.unionId)?.arms;
+      if (!arms || arms.length !== 2 || !arms.some((arm) => arm.kind === "undefinedT")) return -1;
+      return arms.findIndex((arm) => arm.kind === "bigint");
+    };
+    const leftTag = optionalBigintTag(left.type), rightTag = optionalBigintTag(right.type);
+    if ((leftTag >= 0 || left.type.kind === "bigint") && (rightTag >= 0 || right.type.kind === "bigint") && (leftTag >= 0 || rightTag >= 0)) {
+      const stmts: IrStmt[] = [];
+      const operand = (value: IrExpr, tag: number) => {
+        const local = lowerer.declareHiddenLocal("%bigintOperand", value.type);
+        stmts.push({ kind: "varDecl", localId: local.id, init: value, loc });
+        const ref = (): IrExpr => ({ kind: "varRef", localId: local.id, type: value.type, loc });
+        if (tag < 0) return { present: null, narrowed: ref };
+        const unionId = (value.type as IrType & { kind: "union" }).unionId;
+        return {
+          present: (): IrExpr => ({ kind: "unionIsTag", unionId, tag, negated: false, value: ref(), type: BOOL, loc }),
+          narrowed: (): IrExpr => ({ kind: "unionNarrow", unionId, tag, value: ref(), type: BIGINT_T, loc }),
+        };
+      };
+      const l = operand(left, leftTag), r = operand(right, rightTag);
+      const lowered = bigintBinary(l.narrowed(), r.narrowed());
+      // (`==` and `!=` lowered above: between bigints and undefined they are these.)
+      const equality = op === ts.SyntaxKind.EqualsEqualsEqualsToken || op === ts.SyntaxKind.ExclamationEqualsEqualsToken;
+      const negated = op === ts.SyntaxKind.ExclamationEqualsEqualsToken;
+      const both = (): IrExpr => l.present && r.present
+        ? { kind: "logical", op: "&&", left: l.present(), right: r.present(), type: BOOL, loc }
+        : (l.present ?? r.present)!();
+      let result: IrExpr | null = null;
+      if (equality) {
+        const positive: IrExpr = { kind: "libCall", fn: "bigint.eq", args: [l.narrowed(), r.narrowed()], type: BOOL, loc };
+        // Both undefined are equal; one undefined is not.
+        const absentEqual: IrExpr = l.present && r.present
+          ? { kind: "unary", op: "!", operand: { kind: "logical", op: "||", left: l.present(), right: r.present(), type: BOOL, loc }, type: BOOL, loc }
+          : { kind: "boolLit", value: false, type: BOOL, loc };
+        const eq: IrExpr = { kind: "ternary", cond: both(), then: positive, else_: absentEqual, type: BOOL, loc };
+        result = negated ? { kind: "unary", op: "!", operand: eq, type: BOOL, loc } : eq;
+      } else if (lowered && lowered.type.kind === "bool") {
+        result = { kind: "ternary", cond: both(), then: lowered, else_: { kind: "boolLit", value: false, type: BOOL, loc }, type: BOOL, loc };
+      } else if (lowered) {
+        result = { kind: "ternary", cond: both(), then: lowered,
+          else_: nodeThrowExpr(1, "", "Cannot mix BigInt and other types, use explicit conversions", BIGINT_T, loc), type: BIGINT_T, loc };
+      }
+      if (result) return { kind: "seqExpr", stmts, result, type: result.type, loc };
     }
     if (
       (left.type.kind === "bigint" && right.type.kind === "f64") ||

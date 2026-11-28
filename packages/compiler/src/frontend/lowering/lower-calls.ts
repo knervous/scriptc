@@ -4689,7 +4689,7 @@ export function lowerCall(lowerer: Lowerer, expr: ts.CallExpression): IrExpr {
         const pre = expr.arguments.slice(0, -1).map((a) => lowerer.jsvalIn(lowerer.lowerExpr(a), a));
         const spread = lowerer.jsvalIn(lowerer.lowerExpr(lastArg.expression), lastArg.expression);
         const result: IrExpr = {
-          kind: "jsOp", op: "callMethodSpread", name: expr.expression.name.text,
+          kind: "jsOp", op: "callMethodSpread", name: expr.expression.name.text, spreadName: lastArg.expression.getText(),
           args: [receiver, { kind: "jsOp", op: "arrLit", args: pre, type: JSVAL, loc }, spread], type: JSVAL, loc,
         };
         return islandPrimitiveExit(lowerer, expr, result);
@@ -6841,7 +6841,7 @@ function lowerOptionalStringNumber(
       const last = parts[parts.length - 1]!;
       // The spelling rides in `name` for V8's nullish spread-call
       // TypeError ("v is not iterable (cannot read property ...)").
-      return { kind: "jsOp", op: "callSpread", name: last.spreadOf!.getText(), args: [f, preArr, lowerer.coerceInto(last.spreadOf!, last.v, JSVAL)], type: JSVAL, loc };
+      return { kind: "jsOp", op: "callSpread", name: last.spreadOf!.getText(), spreadName: last.spreadOf!.getText(), args: [f, preArr, lowerer.coerceInto(last.spreadOf!, last.v, JSVAL)], type: JSVAL, loc };
     }
     // No lane fits (a spread source outside both tiers, a callee neither
     // boxable nor marshalable, mixed dyn/jsval spreads): fence HERE — the

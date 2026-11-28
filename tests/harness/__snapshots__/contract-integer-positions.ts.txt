@@ -1,0 +1,26 @@
+contract-integer-positions.ts:8:11 - error SC7006: the Uint32 contract is not checked in this position (Uint32 is checked on parameters, variables, class instance fields and function results)
+
+  7 | interface Header {
+  8 |   length: Uint32;
+    |           ^~~~~~
+  9 | }
+
+  hint: write Uint32 directly as the annotation of the declaration; type aliases, interface members, array elements (only Int32[] is checked) and types nested in other types are not followed
+
+contract-integer-positions.ts:11:14 - error SC7006: the Uint8 contract is not checked in this position (Uint8 is checked on parameters, variables, class instance fields and function results)
+
+  10 | 
+  11 | const bytes: Uint8[] = [1, 2];
+     |              ^~~~~
+  12 | let maybe: Uint8 | undefined = 1;
+
+  hint: write Uint8 directly as the annotation of the declaration; type aliases, interface members, array elements (only Int32[] is checked) and types nested in other types are not followed
+
+contract-integer-positions.ts:12:12 - error SC7006: the Uint8 contract is not checked in this position (Uint8 is checked on parameters, variables, class instance fields and function results)
+
+  11 | const bytes: Uint8[] = [1, 2];
+  12 | let maybe: Uint8 | undefined = 1;
+     |            ^~~~~
+  13 | const header: Header = { length: 3 };
+
+  hint: write Uint8 directly as the annotation of the declaration; type aliases, interface members, array elements (only Int32[] is checked) and types nested in other types are not followed

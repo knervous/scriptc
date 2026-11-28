@@ -9,7 +9,9 @@
  *   - `+` over a caught error's message once the module has closures (the
  *     ToPrimitive and function-to-host paths are native-dyn only);
  *   - Number(x) over dynamically held values;
- *   - a JavaScript function's own `this` binding, which the lane has no receiver for.
+ *   - a JavaScript function's own `this` binding, which the lane has no receiver for;
+ *   - typed records, arrays and tuples handed to untyped code (dyn reads saw none of their fields);
+ *   - a DataView held in a class field, read by methods over integer and double offsets.
  */
 import { execFile } from "node:child_process";
 import { mkdtemp, readFile, rm } from "node:fs/promises";
@@ -27,9 +29,13 @@ const repoRoot = fileURLToPath(new URL("../../..", import.meta.url));
 const programs = [
   "packages/compiler/test/fixtures/wasmgc-plain/fix-1127-class-method-interface.ts",
   "packages/compiler/test/fixtures/wasmgc-plain/js-function-this-unbound.ts",
+  "packages/compiler/test/fixtures/wasmgc-plain/typed-values-into-any.ts",
   "tests/corpus/4726-fix-1127-abstract-property-implementations.ts",
   "tests/corpus/4727-fix-1127-catch-message-concat-after-await.ts",
   "tests/corpus/4728-fix-1127-number-of-dynamic-values.ts",
+  "tests/corpus/4734-dataview-method-offsets.ts",
+  "tests/corpus/4735-bigint-callbacks-runtime-optional.ts",
+  "tests/corpus/4736-functions-mapped-and-stored.ts",
 ];
 
 async function runPlain(entry: string): Promise<{ stdout: string; stderr: string }> {

@@ -9,6 +9,7 @@
     "dependencies",
     "ffi",
     "native-objects",
+    "contracts",
     "wasm",
     "platforms",
     "---Reference---",

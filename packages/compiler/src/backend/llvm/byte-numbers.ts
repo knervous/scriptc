@@ -1,3 +1,4 @@
+// This file was modified from scriptc (Apache-2.0); see MODIFICATIONS.md.
 import { byteNumberRange, type ByteNumberAccess } from "../../ir/byte-numbers.js";
 import type { IrExpr } from "../../ir/ir.js";
 import type { LlValue, LlvmEmitterContext } from "./expr-context.js";
@@ -99,6 +100,32 @@ export function emitByteNumber(
       index = size === "i64" ? wide : B.tmp();
       if (size !== "i64") B.line(`${index} = trunc i64 ${wide} to ${size}`);
     } else {
+      // A double offset that is an in-bounds int32 (a record view's `i * 20 + 4` over an index a method receives as a
+      // double): the integer bounds test and address, with no truncation, NaN test or double compare. Any other double
+      // (a fraction, NaN, -0 aside, out of range) takes the exact path below. fptosi.sat keeps an out-of-range double
+      // defined; a negative int32 is above the capacity as unsigned.
+      host.declare("declare i32 @llvm.fptosi.sat.i32.f64(double)");
+      const head = B.newLabel("bytes.number.int"),
+        exactPath = B.newLabel("bytes.number.double"),
+        join = B.newLabel("bytes.number.indexed");
+      B.br(head);
+      B.startBlock(head);
+      const int = B.tmp(),
+        back = B.tmp(),
+        whole = B.tmp(),
+        wideInt = size === "i64" ? B.tmp() : int,
+        inCapacity = B.tmp(),
+        fastFits = B.tmp(),
+        fastRoom = B.tmp();
+      B.line(`${int} = call i32 @llvm.fptosi.sat.i32.f64(double ${offset.name})`);
+      B.line(`${back} = sitofp i32 ${int} to double`);
+      B.line(`${whole} = fcmp oeq double ${back}, ${offset.name}`);
+      if (size === "i64") B.line(`${wideInt} = sext i32 ${int} to i64`);
+      B.line(`${inCapacity} = icmp ule ${size} ${wideInt}, ${capacity}`);
+      B.line(`${fastFits} = and i1 ${whole}, ${inCapacity}`);
+      B.line(`${fastRoom} = and i1 ${fastFits}, ${room}`);
+      B.condBr(fastRoom, join, exactPath);
+      B.startBlock(exactPath);
       let normalized = offset.name;
       if (spec.dataView) {
         const nan = B.tmp(),
@@ -146,6 +173,17 @@ export function emitByteNumber(
         B.line(`${both} = and i1 ${fits}, ${safe}`);
         fits = both;
       }
+      B.br(join);
+      B.startBlock(join);
+      const joinedIndex = B.tmp(),
+        joinedFits = B.tmp(),
+        joinedRoom = B.tmp();
+      B.line(`${joinedIndex} = phi ${size} [ ${wideInt}, %${head} ], [ ${index}, %${convert} ]`);
+      B.line(`${joinedFits} = phi i1 [ true, %${head} ], [ ${fits}, %${convert} ]`);
+      B.line(`${joinedRoom} = phi i1 [ true, %${head} ], [ ${room}, %${convert} ]`);
+      index = joinedIndex;
+      fits = joinedFits;
+      room = joinedRoom;
     }
   }
   let valid = "true";

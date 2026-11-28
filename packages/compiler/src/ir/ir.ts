@@ -1438,7 +1438,7 @@ export interface IrModule {
   /** Object mode only: every module unit the lowering knew, declared or not reached (a recompile tells new units by it). */
   objectUnits?: string[];
   /** Contract types (@scriptc/types) the frontend verified against every
-   * write in the program (ir/contract-check.ts). Backends may rely on them
+   * write in the program (contracts/check.ts). Backends may rely on them
    * unconditionally. Absent when the program writes no contract. */
   contracts?: IrContracts;
   /** Local number arrays (`function\0local`) the backend may store as
@@ -4866,9 +4866,11 @@ export type IrExpr =
    * exceptions bridge into the exception cell, catchably) — backends'
    * may-throw analyses must seed on every jsOp like a `throw`. */
   /** `calleeName` (callMethod): the call's source text (`n.push`), for V8's "<callee> is not a function". */
+  /** `spreadName` (callSpread, callMethodSpread): the spread source's text (`...v`'s `v`), for V8's nullish spread-call
+   * TypeError ("v is not iterable (cannot read property null)"). */
   /** domReceiver: the receiver (args[0]) is statically a lib.dom interface, so on a
    * native host (hostHandles) it is always a page value. domInterface: that interface's name. */
-  | { kind: "jsOp"; op: IrJsOp; name?: string; calleeName?: string; domReceiver?: true; domInterface?: string; args: IrExpr[]; type: IrType; loc: SrcLoc }
+  | { kind: "jsOp"; op: IrJsOp; name?: string; calleeName?: string; spreadName?: string; domReceiver?: true; domInterface?: string; args: IrExpr[]; type: IrType; loc: SrcLoc }
   /** Island → static validated exit (--dynamic builds only): `value` is
    * jsval-typed, `type` is the static target. STRICT for primitives (a
    * non-number refuses to exit as number — no coercion); composite

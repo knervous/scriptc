@@ -1551,6 +1551,10 @@ function mapTypeInner(type: ts.Type, ctx: TypeMapperCtx): IrType | null {
   {
     const alias = widened.getAliasSymbol(), args = widened.getAliasTypeArguments();
     if (alias && args?.length === 1 && READONLY_IDENTITY_ALIASES.has(alias.name)) return mapTypeInner(args[0]!, ctx);
+    // Immutable<T> over a class, interface or object type (@scriptc/types):
+    // TypeScript drops the alias, leaving the package's mapped type.
+    const immutableSource = immutableSourceType(widened, ctx);
+    if (immutableSource !== null) return mapTypeInner(immutableSource, ctx);
     // The standard library's Readonly/Partial/Required over a page-owned or package-declared
     // type (GPUSamplerDescriptor, Vite's ImportMetaEnv): the page's object, still one, whatever
     // the modifier does to its members' optionality.
@@ -4314,6 +4318,43 @@ function mapBrandedPrimitiveIntersection(widened: ts.Type, ctx: TypeMapperCtx): 
  * whatever `Pick`/`Omit` reduce to. Their shape is computed by the checker,
  * not declared anywhere: the only declaration behind them is the utility
  * type's `{ [P in keyof T]: ... }` machinery in lib.es5.d.ts. */
+/** The declaration file of @scriptc/types (installed, pnpm-linked or the
+ * workspace package). */
+const CONTRACT_TYPES_FILE = /[\\/](?:@scriptc[\\/]types|packages[\\/]types)[\\/]index\.d\.ts$/;
+
+/** `Immutable<T>` over a class, interface or object literal type resolves to
+ * a mapped type declared in @scriptc/types; TypeScript drops the alias, but
+ * homomorphic mapped members keep their original declarations. The source
+ * type is the non-generic declaration that declares every member (the most
+ * derived class or interface). Null for every other type. Ported from
+ * upstream scriptc's type mapper. */
+function immutableSourceType(type: ts.Type, ctx: TypeMapperCtx): ts.Type | null {
+  if (!isMappedShape(type)) return null;
+  const { checker } = ctx;
+  const symbol = type.getSymbol();
+  const decl = symbol ? symbol.declarations[0] : undefined;
+  if (decl === undefined || !CONTRACT_TYPES_FILE.test(decl.path)) return null;
+  const props = checker.getPropertiesOfType(type);
+  const seen = new Set<ts.Node>();
+  for (const prop of props) {
+    const owner = checker.declarationsOf(prop)[0]?.parent;
+    if (owner === undefined || seen.has(owner)) continue;
+    seen.add(owner);
+    let source: ts.Type | null = null;
+    if (ts.isTypeLiteralNode(owner)) source = checker.getTypeFromTypeNode(owner);
+    else if (
+      (ts.isClassDeclaration(owner) || ts.isInterfaceDeclaration(owner)) &&
+      owner.name !== undefined &&
+      (owner.typeParameters?.length ?? 0) === 0
+    ) {
+      const ownerSymbol = checker.getSymbolAtLocation(owner.name);
+      if (ownerSymbol) source = checker.getDeclaredTypeOfSymbol(ownerSymbol);
+    }
+    if (source !== null && checker.getPropertiesOfType(source).length === props.length) return source;
+  }
+  return null;
+}
+
 function isMappedShape(t: ts.Type): boolean {
   return (
     (t.flags & ts.TypeFlags.Object) !== 0 &&

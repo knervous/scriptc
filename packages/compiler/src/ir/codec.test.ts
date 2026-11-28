@@ -18,19 +18,22 @@ import { deserializeModuleBytes } from "./serialize.js";
 
 // Programs with many node kinds: classes, closures, async, generators,
 // dynamic values, closures with jsword entries, streams, records, regexes,
-// lone surrogates and BigIntStats.
+// lone surrogates and BigInt statfs results. Most also carry the fork's own
+// IR fields (jsLength, paramModes, closedStringFields), which an encoding
+// generated from another ir.ts drops. Every program is one of this
+// repository's corpus programs.
 const PROGRAMS = [
   "1003-json-parse-unions.ts",
   "114-live-record-delete.ts",
   "1200-regex-test-basics.ts",
+  "1408-string-indexing.ts",
   "1631-inspect-arrays.ts",
-  "4900-console-instances.ts",
-  "4991-lone-surrogate-halves.ts",
-  "5612-readable-from-iterables.cjs",
-  "7018-bigint-stats.ts",
-  "7110-als-completion-callbacks.ts",
-  "7321-speculative-loop-bail-sites.ts",
-  "8601-dynamic-function-value-numbers.js",
+  "1637-inspect-dyn.ts",
+  "1747-stream-for-await-js.cjs",
+  "2213-async-local-storage.cjs",
+  "async-local-typed-results.ts",
+  "dynamic-function-descriptors.js",
+  "node24-fs-statfs.ts",
 ];
 
 /** Whether `a` and `b` hold the same data: the same keys with defined
@@ -250,4 +253,13 @@ test("bytes another layout wrote are refused", () => {
   bytes[at] = bytes[at] === 0x30 ? 0x31 : 0x30;
   expect(() => decodeFunctionBinary(bytes)).toThrow(/layout/);
   expect(() => decodeFunctionBinary(Buffer.from("{}"))).toThrow(/not an IR encoding/);
+});
+
+test("codec.generated.ts is generated from this ir.ts", async () => {
+  // A port that brings another repository's generated coders drops the
+  // fields only this ir.ts declares; regenerate with `pnpm generate:ir-codec`.
+  const script = join(import.meta.dirname, "../../../../scripts/generate-ir-codec.mjs");
+  const { generateIrCodec } = (await import(script)) as { generateIrCodec: () => string };
+  const current = await readFile(join(import.meta.dirname, "codec.generated.ts"), "utf8");
+  expect(current === generateIrCodec()).toBe(true);
 });

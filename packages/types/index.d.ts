@@ -4,9 +4,9 @@
  * Type aliases with no runtime semantics: import them with `import type`,
  * which TypeScript erases, so Node.js never loads this package and behaves
  * exactly as without the annotations. scriptc recognizes the aliases where
- * they are written (parameter, return, field, variable and property
- * annotations, `implements` and `extends` clauses, and type aliases) and
- * checks each one as an extra contract: the program either
+ * they are written (parameter, return, field and variable annotations,
+ * `implements` and `extends` clauses, and `Acyclic` object type aliases),
+ * reports one written anywhere else, and checks each one as an extra contract: the program either
  * compiles with identical behavior, plus the optimization the contract
  * enables, or fails with a diagnostic that explains why the contract does
  * not hold. */

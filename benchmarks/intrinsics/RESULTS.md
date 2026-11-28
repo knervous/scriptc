@@ -11,8 +11,8 @@ Times are milliseconds measured inside each program around the work only (no sta
 | lz4 | 322 (1.00×) ✓ | 289 (0.90×) ✓ | 354 (1.10×) ✓ | 319 (0.99×) ✓ | 223 (0.69×) ✓ | 222 (0.69×) ✓ |  |
 | bitset | 137 (1.00×) ✓ | 112 (0.81×) ✓ | 572 (4.18×) ✓ | 390 (2.85×) ✓ | 119 (0.87×) ✓ | 120 (0.88×) ✓ |  |
 | physics | 128 (1.00×) ✓ | 170 (1.33×) ✓ | 206 (1.61×) ✓ | 212 (1.66×) ✓ | 49.8 (0.39×) ✓ | 74.8 (0.58×) ✓ |  |
-| snapshot | 26.4 (1.00×) ✓ | 40.5 (1.53×) ✓ | 23.9 (0.91×) ✓ | 130 (4.94×) ✓ | 7.3 (0.28×) ✓ | 64.5 (2.44×) ✓ |  |
-| particles | 91.7 (1.00×) ✓ | 60.3 (0.66×) ✓ | 117 (1.27×) ✓ | 215 (2.34×) ✓ | 16.1 (0.18×) ✓ | 28.7 (0.31×) ✓ |  |
+| snapshot | 19.2 (1.00×) ✓ | 21.4 (1.11×) ✓ | 23.5 (1.22×) ✓ | 30.6 (1.59×) ✓ | 5.3 (0.28×) ✓ | 22.2 (1.16×) ✓ |  |
+| particles | 53.9 (1.00×) ✓ | 41.1 (0.76×) ✓ | 83.2 (1.54×) ✓ | 98.7 (1.83×) ✓ | 11.8 (0.22×) ✓ | 21.4 (0.40×) ✓ |  |
 | f16-mesh | 39.2 (1.00×) ✓ | 407 (10.39×) ✓ | n/a | 344 (8.78×) ✓ | n/a | 106 (2.70×) ✓ | js+fallback (engine): 66.3 (1.69×) ✓ |
 | blur | 258 (1.00×) ✓ | 147 (0.57×) ✓ | 776 (3.01×) ✓ | 809 (3.14×) ✓ | 76.7 (0.30×) ✓ | 90.5 (0.35×) ✓ | js threads=shared: 79.0 (0.31×) ✓<br>js threads=off (task ring): 167 (0.65×) ✓ |
 
@@ -68,8 +68,8 @@ Times are milliseconds measured inside each program around the work only (no sta
 | lz4 | 8.6 KiB | 8.4 KiB | 425.5 KiB | 425.0 KiB |
 | bitset | 2.9 KiB | 2.6 KiB | 391.2 KiB | 381.2 KiB |
 | physics | 17.3 KiB | 20.0 KiB | 377.1 KiB | 470.1 KiB |
-| snapshot | 6.8 KiB | 7.2 KiB | 435.2 KiB | 423.6 KiB |
-| particles | 3.7 KiB | 4.0 KiB | 356.3 KiB | 406.5 KiB |
+| snapshot | 6.8 KiB | 8.2 KiB | 435.2 KiB | 425.4 KiB |
+| particles | 3.8 KiB | 4.2 KiB | 356.3 KiB | 406.5 KiB |
 | f16-mesh | n/a | 8.6 KiB | n/a | 435.8 KiB |
 | blur | 2.6 KiB | 3.3 KiB | 390.8 KiB | 402.2 KiB |
 
@@ -94,9 +94,10 @@ Times are milliseconds measured inside each program around the work only (no sta
   - The library costs about 1.3× V8's built-in Math as plain JavaScript (one call per function, typed-array word access), and nothing on WasmGC, where it calls the same in-module routines `Math` uses.
   - Natively it runs at 0.58× of JavaScript, against 0.39× for `Math`: the runtime's C port is faster than the generated TypeScript bodies compiled.
 - **layout (snapshot, particles).** Two effects pull in opposite directions.
-  - Zero copy wins where it removes work: in particles the simulation writes the upload buffer in place, and the JavaScript lane is 0.66× the objects-plus-DataView baseline.
-  - Compiled, both layout apps are slower than their object baselines: 130 against 24 ms (snapshot, WasmGC) and 64.5 against 7.3 ms (native). The cause is the generated class's `DataView` held in a class field. A probe of the same accessors, 2000 records × 500 rounds, took 34.4 ms through a field-held DataView and 8.9 ms through a module-level one on WasmGC; natively, 3.0 ms (generated class), 20.6 ms (`RecordView`) and 0.7 ms (a local DataView).
-  - The accessors do compile to fixed-offset loads and stores. The overhead is the view object's base, length and bounds held behind a field on every access. Caching them, or lowering the generated accessors to direct memory operations, is the next layout item.
+  - Zero copy wins where it removes work: in particles the simulation writes the upload buffer in place, and the JavaScript lane is 0.76× the objects-plus-DataView baseline.
+  - The generated class's accessors (`getX(i)` over a `DataView` in a class field) took a record index as a double. On WasmGC a class method had no i32 parameters, so every access ran ToIndex on a double offset (truncation, a NaN test, double bounds compares); the field load itself was not the cost. A probe of the same accessors, 2000 records × 500 rounds, took 17.1 ms as methods against 6.2 ms as free functions with an i32 index, and 13.8 ms for those functions with the i32 ABI off. Natively, a method no call site could narrow got no i32 entry, and its access took the same double path.
+  - The accessors now take the integer path. On WasmGC a class method that reads or writes typed-array or DataView storage gets an i32 entry for its direct calls whose index is a proven int32 (other calls, virtual dispatch and dyn code run a double-ABI copy of the body), and a double offset that is an in-bounds int32 takes an integer bounds test on both backends. Snapshot went from 95.6 to 30.6 ms on WasmGC (23.5 ms for the object baseline) and from 43.3 to 22.2 ms natively; particles from 190 to 98.7 ms on WasmGC. Measured in this run before the change (same machine): snapshot wasmgc 95.6, native 43.3; particles wasmgc 190, native 20.4.
+  - Both apps are still slower compiled than their object baselines (snapshot natively 22.2 against 5.3 ms). Natively the accessors keep a double index wherever one call site cannot prove an int32 (`rng.below(N)` in snapshot), as the WasmGC lane did before its double-ABI copy; a dual entry there, or lowering the generated accessors to direct memory operations, is the next layout item.
 - **f16 (f16-mesh).**
   - The engine's `Float16Array` (the `js` lane) is the fastest conversion: V8 converts in C++. The library's JavaScript entry uses it (`js+fallback (engine)`, 1.7×).
   - The software path in plain JavaScript is 10×, and WasmGC's conversion in wasm is 8.8×. It works on the double's bits with `i64.reinterpret`; a first version through a Float64Array scratch word took 1072 ms.

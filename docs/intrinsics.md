@@ -59,28 +59,30 @@ On WasmGC, a 64-bit call nested in another 64-bit call stays in an i64, and a bi
 
 ### Contract types
 
-`scriptw/int` and `@scriptc/types` declare `Int32`, `Uint32`, `Int8`, `Uint8`, `Int16`, `Uint16`, `Int64` and `Uint64`. Each is an alias that TypeScript erases (`number`, or `bigint` for the 64-bit types). The compiler checks them: every value written to an annotated local, parameter, result or class instance field must be a value of the type (`packages/compiler/src/ir/contract-check.ts`).
+`scriptw/int` and `@scriptc/types` declare `Int32`, `Uint32`, `Int8`, `Uint8`, `Int16`, `Uint16`, `Int64` and `Uint64`. Each is an alias that TypeScript erases (`number`, or `bigint` for the 64-bit types). The compiler checks them with the rest of the contract types (`NoThrow`, `Immutable`, `Acyclic`, `ProgramLifetime`, `Int32[]`), in the contract checker ported from upstream scriptc (`packages/compiler/src/contracts/check.ts`, `docs/content/docs/contracts.mdx`). It runs on the lowered program before any backend, so WasmGC and native builds check the same contracts. Every value written to an annotated local, parameter, result or class instance field must be a value of the type.
 
-- **Number types.** The proof assumes every contract slot holds its type and shows that each write stays in range. It uses the integer range analysis with the contract slots as facts. A write is accepted when it is:
+- **Number types.** Upstream's Int32 check, extended to each kind's range. The proof assumes every contract slot holds its type and shows that each write stays in range. It uses the integer range analysis with the contract slots as facts. A write is accepted when it is:
   - an in-range literal;
   - a bitwise result (`x | 0`, `x & 0xff`, `x >>> 0`, `>> k`), `Math.imul` or `Math.clz32`;
-  - a length (taken as `[0, 2^31 - 1]`: every compiled representation stores lengths in 32 signed bits);
-  - another slot of a type in range, or an `int` result;
+  - a length (taken as `[0, 2^31 - 1]`: every compiled representation stores lengths in 32 signed bits; upstream's analysis bounds an array length as a uint32 and refuses it for `Int32`);
+  - another slot of a type in range, or an `int` result (`clz`, `ctz` and `popcnt` in `[0, 32]`, their 64-bit forms in `[0, 64]`);
   - arithmetic the analysis bounds, such as `i + 1` under `i < xs.length`.
-- **Bigint types.** A write is accepted when it is an in-range literal, `BigInt.asIntN(64, x)` or `BigInt.asUintN(64, x)`, a 64-bit `int` result, or another slot of the same type.
-- **Arguments.** A function whose parameters carry a contract must be called directly: as a declared function, a method or a constructor. Using it as a value is refused, because its callers could not be checked.
-- **Refusal.** Anything else fails the build with SC7002, naming the write and how to make it provable (SC7003 when the contract cannot be checked, such as a contract parameter of a function used as a value). The codes follow upstream scriptc's contract checker:
+- **Bigint types.** A write is accepted when it is an in-range literal, `BigInt.asIntN(64, x)` or `BigInt.asUintN(64, x)`, a 64-bit `int` result, another slot of the same type, or `&`, `|`, `^` and `>>` of such values.
+- **Slots it cannot check** (SC7003): a parameter of a function used as a value, a field of a generic class or of a class whose instances reach `any` values, a binding that is not a plain `number` or `bigint`.
+- **Positions.** A contract written anywhere but a parameter, variable, field or result annotation (a type alias, an interface member, `Int32 | undefined`, `Uint8[]`) is reported with SC7006. Only `Int32` is checked as an array element type.
+- **Generated helpers.** The fork lowers some array methods (`fill`, `map`, ...) and inspection into generated helper functions. A helper's number parameters take the join of its call sites' argument ranges, so `xs.fill(0)` on an `Int32[]` is proven, and a diagnostic inside a helper is reported at the call.
+- **Refusal.** Anything else fails the build with SC7002, with upstream's message and a hint that shows the conversion:
 
 ```text
-SC7002 Int32 contract: the value assigned to 'x' is not provably a signed 32-bit integer
-  hint: wrap it with `| 0`, or bound it so the range is provable (a loop test, a mask)
-SC7002 Uint8 contract: the value stored into field 'r' is not provably an integer in [0, 255]
-  hint: narrow it explicitly, for example `x & 0xff` or toUint8() from the int library
+error SC7002: the value stored into 'x' (Int32) is not provably an int32: 'x / 3'
+  hint: make the int32 conversion explicit, for example 'x = (x / 3) | 0', so Node computes the same value
+error SC7002: the value stored into 'Pixel.b' (Uint8) is not provably an integer in [0, 255]: 'rgb % 256'
+  hint: make the Uint8 conversion explicit, for example '(rgb % 256) & 0xff', so Node computes the same value
 ```
 
-Proven slots inside the int32 range become `IrModule.contracts` facts (`int32Locals`, `int32Params`, `int32Returns`, `int32Fields`), which the native backend's int32 slot analysis consumes. On WasmGC, contract class fields are stored as `i32`: `Int8` and `Uint8` fields as packed `i8` struct fields, `Int16` and `Uint16` fields as packed `i16` (read with `struct.get_s` or `struct.get_u`). Contracts written in an intrinsic library are its own stated facts, established by its tests, and are not re-proven.
+Proven slots inside the int32 range become `IrModule.contracts` facts (`int32Locals`, `int32Params`, `int32Returns`, `int32Fields`), which the native backend's int32 slot analysis consumes. On WasmGC, contract class fields are stored as `i32`: `Int8` and `Uint8` fields as packed `i8` struct fields, `Int16` and `Uint16` fields as packed `i16` (read with `struct.get_s` or `struct.get_u`); the narrow kinds reach the backend as `narrowFields`. Contracts written in an intrinsic library module (any `@scriptc-intrinsics` pragma) are its own stated facts, established by its tests, and are not re-proven.
 
-Before this layer, this tree did not check contract types at all. A program with `let x: Int32 = 1; x = x / 3` compiled on both backends and printed `0.3333333333333333`; it is now refused.
+The first intrinsic layer added an interim checker for the integer types only (`ir/contract-check.ts`, now removed). Before it, this tree checked no contract types at all: a program with `let x: Int32 = 1; x = x / 3` compiled on both backends and printed `0.3333333333333333`.
 
 ## math: deterministic math
 
@@ -179,8 +181,13 @@ These are designed but not built:
   - `4732-intrinsics-f16-layout-atomics.ts`.
 
   Each matches Node on WasmGC, native and native with AddressSanitizer. The native runs used LLVM 22.1.8 and Zig 0.16.0 on linux-x64.
+- **Contract checker:**
+  - `4733-contract-types-both-backends.ts` (Immutable over a class, `fill` on an `Int32[]`, a module-level `Int32` counter, the fixed-width types), with 4630, 4631, 4632, 4638, 4640, 4641 and 4642, matches Node natively and with AddressSanitizer. 4633 and 4634 stop before the checker (an inspection the fork does not lower, and `@scriptc/threads`, which the fork does not have).
+  - On WasmGC, 4630, 4631, 4632, 4640, 4641, 4642 and 4733 match Node. 4633 and 4638 stop on WasmGC coverage the fork does not have yet, before the checker runs.
+  - Upstream's 4636, 4637 and 4639 are not ported: they stop on the fork's frontend (an inspection, `worker_threads`), and 4639 traps natively with the checker off too.
 - **Unit and package tests:**
-  - `packages/compiler/test/contract-check.test.ts`: 15 accept and refuse cases;
+  - `packages/compiler/test/contract-check.test.ts`: 15 accept and refuse cases for the integer types;
+  - `packages/compiler/test/int32-array-contracts.test.ts` and the 21 `tests/diagnostics/contract-*` programs, ported from upstream with their snapshots;
   - `packages/compiler/src/backend/wasmgc/capabilities.test.ts`: the math mode, the key and the record;
   - `packages/intrinsics/test/fallbacks.test.ts`: f16 engine against software, math against V8, the generated layout class, the pragma.
 - **The installed package:** `npm/wasmgc/test/samples/intrinsics.ts` imports every subpath. It runs under Node and through `scriptw run`, and native builds match.

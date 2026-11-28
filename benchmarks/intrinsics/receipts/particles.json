@@ -1,10 +1,10 @@
 {
   "app": "particles",
-  "node": "v24.22.3",
+  "node": "v24.22.1",
   "platform": "linux-x64",
   "cpus": 4,
-  "cpu": "Intel(R) Xeon(R) Processor @ 2.10GHz",
-  "date": "2026-11-28T09:03:06.002Z",
+  "cpu": "Intel(R) Xeon(R) Processor @ 2.30GHz",
+  "date": "2026-11-28T12:08:46.926Z",
   "results": [
     "vertex bytes 640000 frames 120 hash 4115759411"
   ],
@@ -12,46 +12,46 @@
     "js": {
       "match": true,
       "times": {
-        "time": 91.7
+        "time": 53.9
       }
     },
     "js+fallback": {
       "match": true,
       "times": {
-        "time": 60.3
+        "time": 41.1
       }
     },
     "wasmgc-base": {
       "match": true,
       "times": {
-        "time": 116.5
+        "time": 83.2
       },
-      "bytes": 3815,
-      "compileMs": 1018
+      "bytes": 3866,
+      "compileMs": 707
     },
     "wasmgc": {
       "match": true,
       "times": {
-        "time": 214.5
+        "time": 98.7
       },
-      "bytes": 4108,
-      "compileMs": 1017
+      "bytes": 4316,
+      "compileMs": 749
     },
     "native-base": {
       "match": true,
       "times": {
-        "time": 16.1
+        "time": 11.8
       },
       "bytes": 364840,
-      "compileMs": 992
+      "compileMs": 849
     },
     "native": {
       "match": true,
       "times": {
-        "time": 28.7
+        "time": 21.4
       },
       "bytes": 416272,
-      "compileMs": 1115
+      "compileMs": 915
     }
   }
 }

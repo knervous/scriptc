@@ -222,7 +222,7 @@ export interface IntegerSlotFacts {
   field?: (className: string, field: string) => IntegerRange | null;
   call?: (callee: string) => IntegerRange | null;
   boxed?: (localId: string) => IntegerRange | null;
-  /** Locals and globals an Int32 contract covers (ir/contract-check.ts):
+  /** Locals and globals an Int32 contract covers (contracts/check.ts):
    * every write anywhere is proven int32, so every read is one. */
   locals?: (localId: string) => IntegerRange | null;
   /** Number arrays whose every present element is an int32 (Int32[]

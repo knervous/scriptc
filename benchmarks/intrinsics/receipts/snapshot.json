@@ -1,10 +1,10 @@
 {
   "app": "snapshot",
-  "node": "v24.22.3",
+  "node": "v24.22.1",
   "platform": "linux-x64",
   "cpus": 4,
-  "cpu": "Intel(R) Xeon(R) Processor @ 2.10GHz",
-  "date": "2026-11-28T09:03:00.910Z",
+  "cpu": "Intel(R) Xeon(R) Processor @ 2.30GHz",
+  "date": "2026-11-28T12:08:43.052Z",
   "results": [
     "packets 300 bytes 1125685 per packet 3752 hash 3139431730 mirror equal"
   ],
@@ -12,46 +12,46 @@
     "js": {
       "match": true,
       "times": {
-        "time": 26.4
+        "time": 19.2
       }
     },
     "js+fallback": {
       "match": true,
       "times": {
-        "time": 40.5
+        "time": 21.4
       }
     },
     "wasmgc-base": {
       "match": true,
       "times": {
-        "time": 23.9
+        "time": 23.5
       },
-      "bytes": 6944,
-      "compileMs": 1213
+      "bytes": 7012,
+      "compileMs": 1255
     },
     "wasmgc": {
       "match": true,
       "times": {
-        "time": 130.4
+        "time": 30.6
       },
-      "bytes": 7417,
-      "compileMs": 1199
+      "bytes": 8406,
+      "compileMs": 977
     },
     "native-base": {
       "match": true,
       "times": {
-        "time": 7.3
+        "time": 5.3
       },
       "bytes": 445664,
-      "compileMs": 1083
+      "compileMs": 1066
     },
     "native": {
       "match": true,
       "times": {
-        "time": 64.5
+        "time": 22.2
       },
-      "bytes": 433792,
-      "compileMs": 1291
+      "bytes": 435648,
+      "compileMs": 1159
     }
   }
 }

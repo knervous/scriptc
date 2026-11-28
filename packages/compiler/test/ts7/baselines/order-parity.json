@@ -16576,6 +16576,186 @@
     "<repo>/tests/corpus/object-is-union-operands.ts"
    ],
    "diags": []
+  },
+  "<repo>/tests/corpus/4638-contract-program-lifetime-arrays.ts": {
+   "order": [
+    "<repo>/tests/corpus/4638-contract-program-lifetime-arrays.ts"
+   ],
+   "diags": []
+  },
+  "<repo>/tests/corpus/4729-intrinsics-int.ts": {
+   "order": [
+    "<repo>/packages/intrinsics/int.ts",
+    "<repo>/tests/corpus/4729-intrinsics-int.ts"
+   ],
+   "diags": []
+  },
+  "<repo>/tests/corpus/4730-intrinsics-int-fields.ts": {
+   "order": [
+    "<repo>/packages/intrinsics/int.ts",
+    "<repo>/tests/corpus/4730-intrinsics-int-fields.ts"
+   ],
+   "diags": []
+  },
+  "<repo>/tests/corpus/4731-intrinsics-strict-math.ts": {
+   "order": [
+    "<repo>/packages/intrinsics/math.ts",
+    "<repo>/tests/corpus/4731-intrinsics-strict-math.ts"
+   ],
+   "diags": []
+  },
+  "<repo>/tests/corpus/4732-intrinsics-f16-layout-atomics.ts": {
+   "order": [
+    "<repo>/packages/intrinsics/f16.ts",
+    "<repo>/packages/intrinsics/layout.ts",
+    "<repo>/packages/intrinsics/atomics.ts",
+    "<repo>/tests/corpus/4732-intrinsics-f16-layout-atomics.ts"
+   ],
+   "diags": []
+  },
+  "<repo>/tests/corpus/4733-contract-types-both-backends.ts": {
+   "order": [
+    "<repo>/tests/corpus/4733-contract-types-both-backends.ts"
+   ],
+   "diags": []
+  },
+  "<repo>/tests/diagnostics/contract-acyclic-positions.ts": {
+   "order": [
+    "<repo>/tests/diagnostics/contract-acyclic-positions.ts"
+   ],
+   "diags": []
+  },
+  "<repo>/tests/diagnostics/contract-acyclic.ts": {
+   "order": [
+    "<repo>/tests/diagnostics/contract-acyclic.ts"
+   ],
+   "diags": []
+  },
+  "<repo>/tests/diagnostics/contract-immutable-dynamic-receiver.ts": {
+   "order": [
+    "<repo>/tests/diagnostics/contract-immutable-dynamic-receiver.ts"
+   ],
+   "diags": []
+  },
+  "<repo>/tests/diagnostics/contract-immutable-element-reads.ts": {
+   "order": [
+    "<repo>/tests/diagnostics/contract-immutable-element-reads.ts"
+   ],
+   "diags": []
+  },
+  "<repo>/tests/diagnostics/contract-immutable-import-unresolved/main.ts": {
+   "order": [
+    "<repo>/tests/diagnostics/contract-immutable-import-unresolved/main.ts"
+   ],
+   "diags": []
+  },
+  "<repo>/tests/diagnostics/contract-immutable-path-alias/main.ts": {
+   "order": [
+    "<repo>/tests/diagnostics/contract-immutable-path-alias/main.ts"
+   ],
+   "diags": []
+  },
+  "<repo>/tests/diagnostics/contract-immutable-push-alias.ts": {
+   "order": [
+    "<repo>/tests/diagnostics/contract-immutable-push-alias.ts"
+   ],
+   "diags": []
+  },
+  "<repo>/tests/diagnostics/contract-immutable-reexport/main.ts": {
+   "order": [
+    "<repo>/tests/diagnostics/contract-immutable-reexport/main.ts"
+   ],
+   "diags": []
+  },
+  "<repo>/tests/diagnostics/contract-immutable-spread-copy.ts": {
+   "order": [
+    "<repo>/tests/diagnostics/contract-immutable-spread-copy.ts"
+   ],
+   "diags": []
+  },
+  "<repo>/tests/diagnostics/contract-immutable-stored-call.ts": {
+   "order": [
+    "<repo>/tests/diagnostics/contract-immutable-stored-call.ts"
+   ],
+   "diags": []
+  },
+  "<repo>/tests/diagnostics/contract-immutable-unresolved-alias/main.ts": {
+   "order": [
+    "<repo>/tests/diagnostics/contract-immutable-unresolved-alias/main.ts"
+   ],
+   "diags": []
+  },
+  "<repo>/tests/diagnostics/contract-immutable.ts": {
+   "order": [
+    "<repo>/tests/diagnostics/contract-immutable.ts"
+   ],
+   "diags": []
+  },
+  "<repo>/tests/diagnostics/contract-int32-array-aliases.ts": {
+   "order": [
+    "<repo>/tests/diagnostics/contract-int32-array-aliases.ts"
+   ],
+   "diags": []
+  },
+  "<repo>/tests/diagnostics/contract-int32-arrays.ts": {
+   "order": [
+    "<repo>/tests/diagnostics/contract-int32-arrays.ts"
+   ],
+   "diags": []
+  },
+  "<repo>/tests/diagnostics/contract-int32-escapes.ts": {
+   "order": [
+    "<repo>/tests/diagnostics/contract-int32-escapes.ts"
+   ],
+   "diags": []
+  },
+  "<repo>/tests/diagnostics/contract-int32.ts": {
+   "order": [
+    "<repo>/tests/diagnostics/contract-int32.ts"
+   ],
+   "diags": []
+  },
+  "<repo>/tests/diagnostics/contract-integer-kinds.ts": {
+   "order": [
+    "<repo>/tests/diagnostics/contract-integer-kinds.ts"
+   ],
+   "diags": []
+  },
+  "<repo>/tests/diagnostics/contract-integer-positions.ts": {
+   "order": [
+    "<repo>/tests/diagnostics/contract-integer-positions.ts"
+   ],
+   "diags": []
+  },
+  "<repo>/tests/diagnostics/contract-nothrow-handlers.ts": {
+   "order": [
+    "<repo>/tests/diagnostics/contract-nothrow-handlers.ts"
+   ],
+   "diags": []
+  },
+  "<repo>/tests/diagnostics/contract-nothrow.ts": {
+   "order": [
+    "<repo>/tests/diagnostics/contract-nothrow.ts"
+   ],
+   "diags": []
+  },
+  "<repo>/tests/diagnostics/contract-positions.ts": {
+   "order": [
+    "<repo>/tests/diagnostics/contract-positions.ts"
+   ],
+   "diags": []
+  },
+  "<repo>/tests/diagnostics/contract-program-lifetime-positions.ts": {
+   "order": [
+    "<repo>/tests/diagnostics/contract-program-lifetime-positions.ts"
+   ],
+   "diags": []
+  },
+  "<repo>/tests/diagnostics/contract-program-lifetime.ts": {
+   "order": [
+    "<repo>/tests/diagnostics/contract-program-lifetime.ts"
+   ],
+   "diags": []
   }
  }
 }

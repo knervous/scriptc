@@ -2,7 +2,7 @@
 
 This tree is a derivative of scriptc (https://github.com/vercel-labs/scriptc), licensed under the Apache License, Version 2.0 (LICENSE). It is compared here with upstream commit `97248e92994ff55f7009e0057700241b9109a35e`. The LLVM backend (`packages/compiler/src/backend/llvm`), the IR (`packages/compiler/src/ir`), the runtime (`packages/runtime` and the runtime and LLVM packs) and `native/llvm-codegen` track upstream at that commit, with the changes listed below. The frontend (`packages/compiler/src/frontend`), the compiler's unit and integration tests, the test corpus and fixtures, the compatibility inventory and the documentation are this fork's own and follow an earlier upstream state, so upstream's newer tests and documentation are not included.
 
-As section 4(b) of the license requires, the files below carry changes. 1119 files are modified from that upstream commit and 3447 files are new; 23326 upstream files are not part of this tree (see "Removed files"). Each modified source file of the compiler, the runtime and the repository tooling also says so in its first comment line.
+As section 4(b) of the license requires, the files below carry changes. 1132 files are modified from that upstream commit and 3461 files are new; 23267 upstream files are not part of this tree (see "Removed files"). Each modified source file of the compiler, the runtime and the repository tooling also says so in its first comment line.
 
 ## Modified files
 
@@ -20,6 +20,7 @@ As section 4(b) of the license requires, the files below carry changes. 1119 fil
 - `README.md`
 - `RELEASING.md`
 - `docs/content/docs/cli.mdx`
+- `docs/content/docs/contracts.mdx`
 - `docs/content/docs/coverage.mdx`
 - `docs/content/docs/dependencies.mdx`
 - `docs/content/docs/ffi.mdx`
@@ -113,6 +114,7 @@ As section 4(b) of the license requires, the files below carry changes. 1119 fil
 - `packages/compiler/src/backend/linker.ts`
 - `packages/compiler/src/backend/llvm/alloc.ts`
 - `packages/compiler/src/backend/llvm/blocks.ts`
+- `packages/compiler/src/backend/llvm/byte-numbers.ts`
 - `packages/compiler/src/backend/llvm/classes.ts`
 - `packages/compiler/src/backend/llvm/common.ts`
 - `packages/compiler/src/backend/llvm/dense-array-access.ts`
@@ -186,8 +188,11 @@ As section 4(b) of the license requires, the files below carry changes. 1119 fil
 - `packages/compiler/src/cli/wasi-runner.ts`
 - `packages/compiler/src/compat/fetch-profile.ts`
 - `packages/compiler/src/compile-types.ts`
+- `packages/compiler/src/contracts/check.ts`
+- `packages/compiler/src/contracts/int32-elements.ts`
 - `packages/compiler/src/coverage/report.ts`
 - `packages/compiler/src/coverage/surface-manifest.ts`
+- `packages/compiler/src/diagnostics/codes.ts`
 - `packages/compiler/src/diagnostics/diagnostic.ts`
 - `packages/compiler/src/diagnostics/render.ts`
 - `packages/compiler/src/errors.ts`
@@ -204,11 +209,13 @@ As section 4(b) of the license requires, the files below carry changes. 1119 fil
 - `packages/compiler/src/frontend/builtin-modules.ts`
 - `packages/compiler/src/frontend/cjs-resolve.ts`
 - `packages/compiler/src/frontend/cjs-syntax.ts`
+- `packages/compiler/src/frontend/contract-types.ts`
 - `packages/compiler/src/frontend/dts-paths.ts`
 - `packages/compiler/src/frontend/fork-target.ts`
 - `packages/compiler/src/frontend/function-completion.ts`
 - `packages/compiler/src/frontend/helper-tokens.test.ts`
 - `packages/compiler/src/frontend/helper-tokens.ts`
+- `packages/compiler/src/frontend/heritage-elements.ts`
 - `packages/compiler/src/frontend/inferred-js-diagnostics.test.ts`
 - `packages/compiler/src/frontend/inferred-js-diagnostics.ts`
 - `packages/compiler/src/frontend/input-tracker.test.ts`
@@ -671,6 +678,7 @@ As section 4(b) of the license requires, the files below carry changes. 1119 fil
 - `scripts/gen-grapheme-tables.mjs`
 - `scripts/gen-text-decoder-labels.mts`
 - `scripts/gen-text-decoder-tables.mjs`
+- `scripts/generate-ir-codec.mjs`
 - `scripts/generate-ir-fields.mjs`
 - `scripts/generate-ts7-ast-schema.mjs`
 - `scripts/generate-ts7-ast-views.mjs`
@@ -932,6 +940,11 @@ As section 4(b) of the license requires, the files below carry changes. 1119 fil
 - `tests/harness/__snapshots__/collection-iterator-helpers.ts.txt`
 - `tests/harness/__snapshots__/component-fences.ts.txt`
 - `tests/harness/__snapshots__/comptime.ts.txt`
+- `tests/harness/__snapshots__/contract-int32-array-aliases.ts.txt`
+- `tests/harness/__snapshots__/contract-int32-arrays.ts.txt`
+- `tests/harness/__snapshots__/contract-int32-escapes.ts.txt`
+- `tests/harness/__snapshots__/contract-int32.ts.txt`
+- `tests/harness/__snapshots__/contract-nothrow.ts.txt`
 - `tests/harness/__snapshots__/coverage-dynamic-mix.txt`
 - `tests/harness/__snapshots__/coverage-import-fences.txt`
 - `tests/harness/__snapshots__/coverage-js-builtin-callable-alias.txt`
@@ -2497,7 +2510,6 @@ As section 4(b) of the license requires, the files below carry changes. 1119 fil
 - `packages/compiler/src/frontend/browser-target.ts`
 - `packages/compiler/src/frontend/comptime-node.test.ts`
 - `packages/compiler/src/frontend/comptime-node.ts`
-- `packages/compiler/src/frontend/contract-annotations.ts`
 - `packages/compiler/src/frontend/lowering/checked-arm-extraction.ts`
 - `packages/compiler/src/frontend/lowering/construction-exposure.ts`
 - `packages/compiler/src/frontend/lowering/containers/bytes-is-view.test.ts`
@@ -2529,7 +2541,6 @@ As section 4(b) of the license requires, the files below carry changes. 1119 fil
 - `packages/compiler/src/ir/char-unit-locals-wasmgc.test.ts`
 - `packages/compiler/src/ir/char-unit-locals-wasmgc.ts`
 - `packages/compiler/src/ir/constant-globals-wasmgc.ts`
-- `packages/compiler/src/ir/contract-check.ts`
 - `packages/compiler/src/ir/date-host.ts`
 - `packages/compiler/src/ir/fork-lib-calls.ts`
 - `packages/compiler/src/ir/fresh-locals.ts`
@@ -2580,10 +2591,12 @@ As section 4(b) of the license requires, the files below carry changes. 1119 fil
 - `packages/compiler/test/fixtures/wasmgc-plain/fix-1127-class-method-interface.ts`
 - `packages/compiler/test/fixtures/wasmgc-plain/js-function-this-unbound-helper.js`
 - `packages/compiler/test/fixtures/wasmgc-plain/js-function-this-unbound.ts`
+- `packages/compiler/test/fixtures/wasmgc-plain/typed-values-into-any.ts`
 - `packages/compiler/test/native-entry-thread-locals.test.ts`
 - `packages/compiler/test/npm-fetch-analysis.test.ts`
 - `packages/compiler/test/npm-fetch-cases.ts`
 - `packages/compiler/test/npm-static-defined-branches.test.ts`
+- `packages/compiler/test/npm-static-plain-lane.test.ts`
 - `packages/compiler/test/profile-specialization.test.ts`
 - `packages/compiler/test/strict-frontend.test.ts`
 - `packages/compiler/test/strict-nan.test.ts`
@@ -2975,7 +2988,11 @@ As section 4(b) of the license requires, the files below carry changes. 1119 fil
 - `tests/corpus/4730-intrinsics-int-fields.ts`
 - `tests/corpus/4731-intrinsics-strict-math.ts`
 - `tests/corpus/4732-intrinsics-f16-layout-atomics.ts`
+- `tests/corpus/4733-contract-types-both-backends.ts`
 - `tests/corpus/4733-intrinsics-closures-and-values.ts`
+- `tests/corpus/4734-dataview-method-offsets.ts`
+- `tests/corpus/4735-bigint-callbacks-runtime-optional.ts`
+- `tests/corpus/4736-functions-mapped-and-stored.ts`
 - `tests/corpus/760-any-arithmetic.ts`
 - `tests/corpus/763-any-flow.ts`
 - `tests/corpus/968-jsval-lift.ts`
@@ -2999,6 +3016,8 @@ As section 4(b) of the license requires, the files below carry changes. 1119 fil
 - `tests/diagnostics/cjs-require-cycle/b.js`
 - `tests/diagnostics/cjs-require-cycle/main.js`
 - `tests/diagnostics/cjs-require-cycle/package.json`
+- `tests/diagnostics/contract-integer-kinds.ts`
+- `tests/diagnostics/contract-integer-positions.ts`
 - `tests/diagnostics/cycle-tdz-read/a.ts`
 - `tests/diagnostics/cycle-tdz-read/b.ts`
 - `tests/diagnostics/cycle-tdz-read/main.ts`
@@ -3140,6 +3159,8 @@ As section 4(b) of the license requires, the files below carry changes. 1119 fil
 - `tests/harness/__snapshots__/checker-panic-infinity.ts.txt`
 - `tests/harness/__snapshots__/checker-panic-tuple.ts.txt`
 - `tests/harness/__snapshots__/cjs-require-cycle/main.js.txt`
+- `tests/harness/__snapshots__/contract-integer-kinds.ts.txt`
+- `tests/harness/__snapshots__/contract-integer-positions.ts.txt`
 - `tests/harness/__snapshots__/coverage-dynamic-mix-dynamic.txt`
 - `tests/harness/__snapshots__/coverage-npm-lazy-builtin.txt`
 - `tests/harness/__snapshots__/coverage-npm-lazy-traps.txt`
@@ -4013,6 +4034,10 @@ As section 4(b) of the license requires, the files below carry changes. 1119 fil
 - `tests/wasmgc-browser/fixtures/page-buffer-source-positions.ts`
 - `tests/wasmgc-browser/fixtures/page-callback-bytes-promise.ts`
 - `tests/wasmgc-browser/fixtures/page-callback-queues-microtask.ts`
+- `tests/wasmgc-browser/fixtures/page-callee-spread-non-iterable-host-handles.ts`
+- `tests/wasmgc-browser/fixtures/page-callee-spread-non-iterable.ts`
+- `tests/wasmgc-browser/fixtures/page-callee-spread-strings-host-handles.ts`
+- `tests/wasmgc-browser/fixtures/page-callee-spread-strings.ts`
 - `tests/wasmgc-browser/fixtures/page-closure-globals-null-string.ts`
 - `tests/wasmgc-browser/fixtures/page-data-into-interface-layouts.ts`
 - `tests/wasmgc-browser/fixtures/page-interface-method-receiver.ts`
@@ -4532,6 +4557,8 @@ As section 4(b) of the license requires, the files below carry changes. 1119 fil
 - `tests/wasmgc-browser/known-defect.mjs`
 - `tests/wasmgc-browser/known-defect.test.mjs`
 - `tests/wasmgc-browser/make-fixture-profile.mjs`
+- `tests/wasmgc-browser/node-flags.mjs`
+- `tests/wasmgc-browser/node-flags.test.mjs`
 - `tests/wasmgc-browser/paged-escape-census.mjs`
 - `tests/wasmgc-browser/prelude.mjs`
 - `tests/wasmgc-browser/release-contract.mjs`
@@ -4578,29 +4605,29 @@ As section 4(b) of the license requires, the files below carry changes. 1119 fil
 
 ## Removed files
 
-These 23326 files are in upstream commit `97248e92994ff55f7009e0057700241b9109a35e` and not in this tree. Most were added upstream after the state this fork's frontend and tests follow; the rest were removed by the fork. By directory:
+These 23267 files are in upstream commit `97248e92994ff55f7009e0057700241b9109a35e` and not in this tree. Most were added upstream after the state this fork's frontend and tests follow; the rest were removed by the fork. By directory:
 
 <table>
 <tr><th>Directory</th><th>Files</th></tr>
-<tr><td><code>packages/compiler/</code></td><td>9206</td></tr>
-<tr><td><code>tests/corpus/</code></td><td>8326</td></tr>
+<tr><td><code>packages/compiler/</code></td><td>9200</td></tr>
+<tr><td><code>tests/corpus/</code></td><td>8325</td></tr>
 <tr><td><code>tests/fixtures/</code></td><td>3320</td></tr>
-<tr><td><code>tests/harness/</code></td><td>677</td></tr>
-<tr><td><code>tests/diagnostics/</code></td><td>463</td></tr>
+<tr><td><code>tests/harness/</code></td><td>656</td></tr>
+<tr><td><code>tests/diagnostics/</code></td><td>434</td></tr>
 <tr><td><code>benchmarks/startup/</code></td><td>403</td></tr>
 <tr><td><code>tests/fuzz/</code></td><td>152</td></tr>
 <tr><td><code>benchmarks/runtime/</code></td><td>146</td></tr>
-<tr><td><code>docs/content/</code></td><td>133</td></tr>
+<tr><td><code>docs/content/</code></td><td>132</td></tr>
 <tr><td><code>tests/coverage-fixtures/</code></td><td>107</td></tr>
 <tr><td><code>internal/compatibility/</code></td><td>92</td></tr>
-<tr><td><code>scripts/</code></td><td>68</td></tr>
+<tr><td><code>scripts/</code></td><td>67</td></tr>
 <tr><td><code>tests/corpus-node-islands-order/</code></td><td>37</td></tr>
 <tr><td><code>tests/library-mode/</code></td><td>23</td></tr>
 <tr><td>26 other directories</td><td>173</td></tr>
 </table>
 
 <details>
-<summary>All 23326 removed paths</summary>
+<summary>All 23267 removed paths</summary>
 
 - `.agents/skills/scriptc-dev-loop/SKILL.md`
 - `.agents/skills/technical-writer/SKILL.md`
@@ -5197,7 +5224,6 @@ These 23326 files are in upstream commit `97248e92994ff55f7009e0057700241b9109a3
 - `benchmarks/startup/unused/patterns.ts`
 - `benchmarks/startup/unused/squares.ts`
 - `benchmarks/startup/unused/units.ts`
-- `docs/content/docs/contracts.mdx`
 - `docs/content/docs/dual-run.mdx`
 - `docs/content/docs/experimental.mdx`
 - `docs/content/docs/node-development-loop.mdx`
@@ -5530,15 +5556,12 @@ These 23326 files are in upstream commit `97248e92994ff55f7009e0057700241b9109a3
 - `packages/compiler/src/cli/command.test.ts`
 - `packages/compiler/src/cli/mcp.test.ts`
 - `packages/compiler/src/cli/mcp.ts`
-- `packages/compiler/src/contracts/check.ts`
-- `packages/compiler/src/contracts/int32-elements.ts`
 - `packages/compiler/src/coverage/verdict-cache.test.ts`
 - `packages/compiler/src/coverage/verdict-cache.ts`
 - `packages/compiler/src/coverage/verdict-semantic.ts`
 - `packages/compiler/src/coverage/verdict-startup.ts`
 - `packages/compiler/src/diagnostics/build-warnings.ts`
 - `packages/compiler/src/diagnostics/codes.test.ts`
-- `packages/compiler/src/diagnostics/codes.ts`
 - `packages/compiler/src/diagnostics/crash-site.test.ts`
 - `packages/compiler/src/diagnostics/crash-site.ts`
 - `packages/compiler/src/diagnostics/diagnostic.test.ts`
@@ -5565,7 +5588,6 @@ These 23326 files are in upstream commit `97248e92994ff55f7009e0057700241b9109a3
 - `packages/compiler/src/frontend/class-statics-position.ts`
 - `packages/compiler/src/frontend/comptime.test.ts`
 - `packages/compiler/src/frontend/comptime.ts`
-- `packages/compiler/src/frontend/contract-types.ts`
 - `packages/compiler/src/frontend/decl-projection.test.ts`
 - `packages/compiler/src/frontend/decl-projection.ts`
 - `packages/compiler/src/frontend/default-library.ts`
@@ -5584,7 +5606,6 @@ These 23326 files are in upstream commit `97248e92994ff55f7009e0057700241b9109a3
 - `packages/compiler/src/frontend/find-package-json.ts`
 - `packages/compiler/src/frontend/fork-target.test.ts`
 - `packages/compiler/src/frontend/heritage-elements.test.ts`
-- `packages/compiler/src/frontend/heritage-elements.ts`
 - `packages/compiler/src/frontend/import-elision.ts`
 - `packages/compiler/src/frontend/import-type-indexed-access.ts`
 - `packages/compiler/src/frontend/js-inference.ts`
@@ -6182,7 +6203,6 @@ These 23326 files are in upstream commit `97248e92994ff55f7009e0057700241b9109a3
 - `packages/compiler/test/import-elision.test.ts`
 - `packages/compiler/test/in-runtime-key-emission.test.ts`
 - `packages/compiler/test/inline-array-fields.test.ts`
-- `packages/compiler/test/int32-array-contracts.test.ts`
 - `packages/compiler/test/int32-dynamic-exposure.test.ts`
 - `packages/compiler/test/int32-element-array-emission.test.ts`
 - `packages/compiler/test/int32-global-emission.test.ts`
@@ -14747,7 +14767,6 @@ These 23326 files are in upstream commit `97248e92994ff55f7009e0057700241b9109a3
 - `scripts/gen-idna-tables.mjs`
 - `scripts/gen-readline-width-table.mjs`
 - `scripts/gen-timezone-names.mjs`
-- `scripts/generate-ir-codec.mjs`
 - `scripts/llvm-helper-inputs.mjs`
 - `scripts/llvm-name-normalized-diff.mjs`
 - `scripts/lowering-order.mjs`
@@ -14842,7 +14861,6 @@ These 23326 files are in upstream commit `97248e92994ff55f7009e0057700241b9109a3
 - `tests/corpus/4635-contract-program-lifetime-layouts.ts`
 - `tests/corpus/4636-contract-program-lifetime-references.ts`
 - `tests/corpus/4637-contract-program-lifetime-workers.ts`
-- `tests/corpus/4638-contract-program-lifetime-arrays.ts`
 - `tests/corpus/4639-contract-program-lifetime-maps.ts`
 - `tests/corpus/4730-touint32-large-magnitudes.ts`
 - `tests/corpus/4731-string-mixed-ascii-slices.ts`
@@ -23357,35 +23375,6 @@ These 23326 files are in upstream commit `97248e92994ff55f7009e0057700241b9109a3
 - `tests/diagnostics/console-values.ts`
 - `tests/diagnostics/constructor-returns-instance-into-a-local-class.ts`
 - `tests/diagnostics/constructor-returns-object.ts`
-- `tests/diagnostics/contract-acyclic-positions.ts`
-- `tests/diagnostics/contract-acyclic.ts`
-- `tests/diagnostics/contract-immutable-dynamic-receiver.ts`
-- `tests/diagnostics/contract-immutable-element-reads.ts`
-- `tests/diagnostics/contract-immutable-import-unresolved/main.ts`
-- `tests/diagnostics/contract-immutable-import-unresolved/tsconfig.json`
-- `tests/diagnostics/contract-immutable-import-unresolved/types.d.ts`
-- `tests/diagnostics/contract-immutable-path-alias/main.ts`
-- `tests/diagnostics/contract-immutable-path-alias/tsconfig.json`
-- `tests/diagnostics/contract-immutable-path-alias/types/frozen.ts`
-- `tests/diagnostics/contract-immutable-push-alias.ts`
-- `tests/diagnostics/contract-immutable-reexport/frozen-alias.ts`
-- `tests/diagnostics/contract-immutable-reexport/frozen-namespace.ts`
-- `tests/diagnostics/contract-immutable-reexport/frozen.ts`
-- `tests/diagnostics/contract-immutable-reexport/main.ts`
-- `tests/diagnostics/contract-immutable-spread-copy.ts`
-- `tests/diagnostics/contract-immutable-stored-call.ts`
-- `tests/diagnostics/contract-immutable-unresolved-alias/main.ts`
-- `tests/diagnostics/contract-immutable-unresolved-alias/tsconfig.json`
-- `tests/diagnostics/contract-immutable.ts`
-- `tests/diagnostics/contract-int32-array-aliases.ts`
-- `tests/diagnostics/contract-int32-arrays.ts`
-- `tests/diagnostics/contract-int32-escapes.ts`
-- `tests/diagnostics/contract-int32.ts`
-- `tests/diagnostics/contract-nothrow-handlers.ts`
-- `tests/diagnostics/contract-nothrow.ts`
-- `tests/diagnostics/contract-positions.ts`
-- `tests/diagnostics/contract-program-lifetime-positions.ts`
-- `tests/diagnostics/contract-program-lifetime.ts`
 - `tests/diagnostics/create-require-held-loader-members.ts`
 - `tests/diagnostics/create-require-resolve-choice.ts`
 - `tests/diagnostics/cycle-default-export/a.ts`
@@ -27272,27 +27261,6 @@ These 23326 files are in upstream commit `97248e92994ff55f7009e0057700241b9109a3
 - `tests/harness/__snapshots__/console-values.ts.txt`
 - `tests/harness/__snapshots__/constructor-returns-instance-into-a-local-class.ts.txt`
 - `tests/harness/__snapshots__/constructor-returns-object.ts.txt`
-- `tests/harness/__snapshots__/contract-acyclic-positions.ts.txt`
-- `tests/harness/__snapshots__/contract-acyclic.ts.txt`
-- `tests/harness/__snapshots__/contract-immutable-dynamic-receiver.ts.txt`
-- `tests/harness/__snapshots__/contract-immutable-element-reads.ts.txt`
-- `tests/harness/__snapshots__/contract-immutable-import-unresolved/main.ts.txt`
-- `tests/harness/__snapshots__/contract-immutable-path-alias/main.ts.txt`
-- `tests/harness/__snapshots__/contract-immutable-push-alias.ts.txt`
-- `tests/harness/__snapshots__/contract-immutable-reexport/main.ts.txt`
-- `tests/harness/__snapshots__/contract-immutable-spread-copy.ts.txt`
-- `tests/harness/__snapshots__/contract-immutable-stored-call.ts.txt`
-- `tests/harness/__snapshots__/contract-immutable-unresolved-alias/main.ts.txt`
-- `tests/harness/__snapshots__/contract-immutable.ts.txt`
-- `tests/harness/__snapshots__/contract-int32-array-aliases.ts.txt`
-- `tests/harness/__snapshots__/contract-int32-arrays.ts.txt`
-- `tests/harness/__snapshots__/contract-int32-escapes.ts.txt`
-- `tests/harness/__snapshots__/contract-int32.ts.txt`
-- `tests/harness/__snapshots__/contract-nothrow-handlers.ts.txt`
-- `tests/harness/__snapshots__/contract-nothrow.ts.txt`
-- `tests/harness/__snapshots__/contract-positions.ts.txt`
-- `tests/harness/__snapshots__/contract-program-lifetime-positions.ts.txt`
-- `tests/harness/__snapshots__/contract-program-lifetime.ts.txt`
 - `tests/harness/__snapshots__/coverage-divergences.txt`
 - `tests/harness/__snapshots__/coverage-dynamic-tier.txt`
 - `tests/harness/__snapshots__/coverage-explain-dynamic.txt`

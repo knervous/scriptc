@@ -1,0 +1,2599 @@
+// This file was modified from scriptc (Apache-2.0); see MODIFICATIONS.md.
+/* Contract types (@scriptc/types), the IR side. The frontend collects the
+ * written annotations (frontend/contract-types.ts) keyed by the source
+ * locations the lowering stamps on IR functions, bindings and classes; this
+ * pass binds them to IR names and checks each contract against every write
+ * in the whole program:
+ *
+ * - NoThrow<T>: the function is outside the may-throw fixpoint
+ *   (backend/may-throw.ts, where handlers discharge what they catch), or
+ *   the diagnostic names the throwing path.
+ * - Int32: every value stored into the slot is an int32 by construction,
+ *   proven by the same integer range analysis the int32 storage uses,
+ *   assuming every Int32 slot holds an int32 (sound by induction: every
+ *   write is checked under that assumption).
+ * - Int32[]: every element stored into an array that can reach the slot is
+ *   an int32 (contracts/int32-elements.ts), so present element reads
+ *   through slots only such arrays reach are int32s.
+ * - Acyclic: the class or object type cannot lie on a reference cycle, by
+ *   the cycle analysis that decides tracing (backend/cycle-analysis.ts), or
+ *   the diagnostic shows the cycle.
+ * - Immutable<T>: no mutation can reach a value that may come from an
+ *   Immutable slot, values stored into Immutable slots are fresh (nothing
+ *   else references them), and such values never escape to code the IR
+ *   cannot see. Module constants built from fresh literals become immortal.
+ * - ProgramLifetime (class marker): the class is a hierarchy root in an
+ *   executable; its hierarchy is then never freed and takes no reference
+ *   counts (classes.ts programLifetimeClass).
+ *
+ * Verified facts land on the IR as `contracts` (IrContracts). */
+import type { DiagnosticCode } from "../diagnostics/codes.js";
+import type { ScrDiagnostic } from "../diagnostics/diagnostic.js";
+import type {
+  IrClassDef,
+  IrContracts,
+  IrExpr,
+  IrFunction,
+  IrModule,
+  IrStmt,
+  IrType,
+  SrcLoc,
+} from "../ir/ir.js";
+import { isRefCounted, typeKey } from "../ir/ir.js";
+import { ALWAYS_THROW_LIB_FNS } from "../ir/builtin-effects.js";
+import { everyExprChild, everyStmtChild } from "../ir/traverse.js";
+import { moduleFunctionReferences } from "../ir/function-references.js";
+import {
+  analyzeIntegerRanges,
+  INT32_RANGE,
+  integerArithmeticRange,
+  withinInt32,
+  type IntegerRange,
+  type IntegerRanges,
+  type IntegerSlotFacts,
+} from "../ir/integer-ranges.js";
+import { findInitializerBindings, withInitializerBindings } from "../ir/initializer-bindings.js";
+import { unshareNodes } from "../ir/unshare.js";
+import { dynamicallyStoredFamilies, functionCallFacts, Int32Slots } from "../ir/int32-slots.js";
+import { computeMayThrow, type MayThrowReason } from "../backend/may-throw.js";
+import {
+  computeTraced,
+  explainCycle,
+  type CycleEdgeLabel,
+  type CycleExplanation,
+  type CycleStep,
+} from "../backend/cycle-analysis.js";
+import { SourceLocations } from "../backend/source-locations.js";
+import { Int32ElementContracts } from "./int32-elements.js";
+import {
+  contractLocKey,
+  isIntegerMarker,
+  type ContractAnnotations,
+  type ContractNote,
+  type IntegerMarker,
+} from "../frontend/contract-types.js";
+import { intrinsicMemberName, intrinsicModule, isIntrinsicMember } from "../ir/intrinsic-libraries.js";
+import { planInlineArrays } from "../ir/inline-arrays.js";
+import { checkInlineArraySources } from "../ir/inline-array-sources.js";
+
+/** The largest array index: 2^32 - 2 (ECMA-262 array index). */
+const MAX_ARRAY_INDEX = 2 ** 32 - 2;
+
+export interface ContractCheckResult {
+  diagnostics: ScrDiagnostic[];
+  /** Performance warnings: InlineArray fields that keep ordinary arrays
+   * (SC6105). */
+  warnings: ScrDiagnostic[];
+  contracts: IrContracts | null;
+}
+
+/** Walk every expression and statement of a function body, parents first. */
+function walk(
+  body: readonly IrStmt[],
+  visit: { expr?: (e: IrExpr) => void; stmt?: (s: IrStmt) => void },
+): void {
+  const expr = (e: IrExpr): boolean => {
+    visit.expr?.(e);
+    return everyExprChild(e, expr, stmt);
+  };
+  const stmt = (s: IrStmt): boolean => {
+    visit.stmt?.(s);
+    return everyStmtChild(s, expr, stmt);
+  };
+  for (const s of body) stmt(s);
+}
+
+/** Whether two expressions name the same storage place (`xs`, `this.rows`,
+ * `b.rows`) without evaluating anything. */
+function samePlace(a: IrExpr, b: IrExpr): boolean {
+  if (a.kind === "varRef" && b.kind === "varRef") return a.localId === b.localId;
+  if (a.kind === "fieldGet" && b.kind === "fieldGet")
+    return a.className === b.className && a.field === b.field && samePlace(a.obj, b.obj);
+  if (a.kind === "recordGet" && b.kind === "recordGet")
+    return a.field === b.field && samePlace(a.obj, b.obj);
+  return false;
+}
+
+/** The element type of an array value, or undefined for anything else. */
+function arrayElement(type: IrType): IrType | undefined {
+  return type.kind === "array" ? type.elem : undefined;
+}
+
+/** Whether values of `type` cannot be shared between two containers:
+ * primitives, including strings, which are immutable. A copy whose
+ * elements are all this kind shares no mutable storage with its source. */
+function cannotAlias(type: IrType): boolean {
+  return !isRefCounted(type) || type.kind === "string";
+}
+
+/** Whether reading an element of an Immutable array can yield an Immutable
+ * value. Only an element whose type can reference an object can be one: a
+ * number, string or boolean element of an Immutable array carries nothing
+ * writable, so an ordinary indexed read of a `number[]` yields a plain value
+ * (even though the read's `number | undefined` result is a refcounted box). */
+function immutableElement(type: IrType, arrayDerived: boolean): boolean {
+  const elem = arrayElement(type);
+  return arrayDerived && elem !== undefined && !cannotAlias(elem);
+}
+
+/** Visit the `varRef`s that a stored value carries into the container
+ * without handing them to other code: the value itself and the structural
+ * slots a construction puts it in (array and record literals, Map and Set
+ * seeds, and the wrappers that pass a value through unchanged). A call's
+ * arguments are deliberately not visited: the callee may keep them, so
+ * `out.push(stash(out))` is an escape of `out`, not part of the stored
+ * value. */
+function storedReads(e: IrExpr, visit: (ref: IrExpr) => void): void {
+  switch (e.kind) {
+    case "varRef":
+      visit(e);
+      return;
+    case "arrayLit":
+      for (const elem of e.elems) storedReads(elem, visit);
+      return;
+    case "recordLit":
+      for (const field of e.fields) storedReads(field.value, visit);
+      return;
+    case "mapNew":
+      for (const pair of e.seed ?? []) {
+        storedReads(pair.key, visit);
+        storedReads(pair.value, visit);
+      }
+      return;
+    case "setNew":
+      if (e.seed !== undefined) storedReads(e.seed, visit);
+      return;
+    case "upcast":
+    case "downcast":
+    case "unionWrap":
+    case "unionRetype":
+    case "unionNarrow":
+      storedReads(e.value, visit);
+      return;
+    case "ternary":
+      storedReads(e.then, visit);
+      storedReads(e.else_, visit);
+      return;
+    // `(stmts..., value)` runs its statements for their effect — each is
+    // checked as a use on its own — and stores `result`.
+    case "seqExpr":
+      storedReads(e.result, visit);
+      return;
+    default:
+      return;
+  }
+}
+
+function baseName(file: string): string {
+  const slash = Math.max(file.lastIndexOf("/"), file.lastIndexOf("\\"));
+  return slash >= 0 ? file.slice(slash + 1) : file;
+}
+
+export interface ContractCheckOptions {
+  /** A library build (the checker may run before the library section is
+   * set on the module). */
+  library?: boolean;
+  /** Files of intrinsic library modules: their functions' integer
+   * contracts are stated facts, recorded but not re-proven. */
+  trustedFiles?: ReadonlySet<string>;
+}
+
+export function checkContracts(
+  mod: IrModule,
+  annotations: ContractAnnotations,
+  sourceTexts: ReadonlyMap<string, string>,
+  options: ContractCheckOptions = {},
+): ContractCheckResult {
+  // Range proofs are keyed by node identity: check the module emission sees.
+  const checker = new ContractChecker(
+    withHelperLocations(unshareNodes(mod)),
+    annotations,
+    sourceTexts,
+    options,
+  );
+  return checker.run();
+}
+
+/** Whether `fn` is a helper the lowering generated (array and inspection
+ * helpers such as `%arr.fill.<key>`): it has no source position of its own. */
+export function isGeneratedHelper(fn: IrFunction): boolean {
+  return fn.loc.start === 0 && fn.loc.end === 0 && /^%[a-z]+\./.test(fn.name) && !fn.name.startsWith("%init");
+}
+
+/** The fork lowers some array and inspection operations into generated
+ * helper functions with no source position. A diagnostic inside one names
+ * the code that calls it: each position-less node of a helper takes the
+ * location of the helper's first call. Returns the (unshared) module with
+ * those helpers' bodies copied. */
+function withHelperLocations(mod: IrModule): IrModule {
+  const helpers = new Set(mod.functions.filter(isGeneratedHelper).map((fn) => fn.name));
+  if (helpers.size === 0) return mod;
+  const sites = new Map<string, SrcLoc>();
+  for (const fn of mod.functions)
+    if (!helpers.has(fn.name))
+      walk(fn.body, {
+        expr: (e) => {
+          if (e.kind === "call" && helpers.has(e.callee) && !sites.has(e.callee) && e.loc.end > e.loc.start)
+            sites.set(e.callee, e.loc);
+        },
+      });
+  // Helpers called only from other helpers take their caller's site.
+  for (let changed = true; changed; ) {
+    changed = false;
+    for (const fn of mod.functions) {
+      const site = sites.get(fn.name);
+      if (!helpers.has(fn.name) || site === undefined) continue;
+      walk(fn.body, {
+        expr: (e) => {
+          if (e.kind === "call" && helpers.has(e.callee) && !sites.has(e.callee)) {
+            sites.set(e.callee, site);
+            changed = true;
+          }
+        },
+      });
+    }
+  }
+  const relocate = (v: unknown, site: SrcLoc): unknown => {
+    if (Array.isArray(v)) return v.map((x) => relocate(x, site));
+    if (!v || typeof v !== "object") return v;
+    const o = v as Record<string, unknown>;
+    const out: Record<string, unknown> = {};
+    for (const k of Object.keys(o)) {
+      const loc = o[k] as SrcLoc | undefined;
+      out[k] =
+        k === "loc" && loc && loc.start === 0 && loc.end === 0
+          ? site
+          : k === "loc" || k === "type" || k === "source"
+            ? o[k]
+            : relocate(o[k], site);
+    }
+    return out;
+  };
+  return {
+    ...mod,
+    functions: mod.functions.map((fn) => {
+      const site = helpers.has(fn.name) ? sites.get(fn.name) : undefined;
+      return site === undefined ? fn : { ...fn, body: relocate(fn.body, site) as IrStmt[] };
+    }),
+  };
+}
+
+class ContractChecker {
+  readonly diagnostics: ScrDiagnostic[] = [];
+  readonly warnings: ScrDiagnostic[] = [];
+  private readonly reported = new Set<string>();
+  private readonly positions: SourceLocations;
+  readonly functions = new Map<string, IrFunction>();
+  readonly classes = new Map<string, IrClassDef>();
+  private readonly fnByLoc = new Map<string, IrFunction[]>();
+  private readonly localsByLoc = new Map<string, { fn: IrFunction; localId: string }[]>();
+  private readonly globalsByLoc = new Map<string, string[]>();
+  private readonly classesByLoc = new Map<string, IrClassDef[]>();
+  private readonly contracts: IrContracts = {};
+  /** Whether any verified fact was recorded. */
+  private recorded = false;
+
+  constructor(
+    readonly mod: IrModule,
+    readonly notes: ContractAnnotations,
+    readonly sources: ReadonlyMap<string, string>,
+    readonly options: ContractCheckOptions = {},
+  ) {
+    this.positions = new SourceLocations(sources);
+    for (const fn of mod.functions) {
+      this.functions.set(fn.name, fn);
+      // Synthetic dynamic-class helpers (%dyn.*) carry the location of the
+      // code that first needed them, which is not their declaration.
+      if (!fn.name.startsWith("%dyn.") && !isGeneratedHelper(fn))
+        push(this.fnByLoc, contractLocKey(fn.loc), fn);
+      for (const local of fn.locals)
+        if (local.source)
+          push(this.localsByLoc, contractLocKey(local.source.loc), { fn, localId: local.id });
+    }
+    for (const g of mod.globals ?? [])
+      if (g.source) push(this.globalsByLoc, contractLocKey(g.source.loc), g.id);
+    for (const cls of mod.classes ?? []) {
+      this.classes.set(cls.name, cls);
+      push(this.classesByLoc, contractLocKey(cls.loc), cls);
+    }
+  }
+
+  /** Whether the program is a library build. */
+  get library(): boolean {
+    return this.mod.lib !== undefined || this.options.library === true;
+  }
+
+  /** Whether `fn` belongs to an intrinsic library module. */
+  trusted(fn: IrFunction): boolean {
+    return this.options.trustedFiles?.has(fn.loc.file) === true;
+  }
+
+  /* ── reporting ── */
+
+  where(loc: SrcLoc | null): string {
+    if (loc === null) return "?";
+    const pos = this.positions.position(loc);
+    return pos ? `${baseName(pos.file)}:${pos.line}:${pos.column}` : baseName(loc.file);
+  }
+
+  text(loc: SrcLoc, max = 60): string {
+    const source = this.sources.get(loc.file);
+    if (source === undefined || loc.end <= loc.start) return "";
+    const raw = source.slice(loc.start, loc.end).replace(/\s+/g, " ").trim();
+    return raw.length > max ? `${raw.slice(0, max - 3)}...` : raw;
+  }
+
+  report(code: DiagnosticCode, loc: SrcLoc, message: string, hint: string): void {
+    const key = `${code}\0${contractLocKey(loc)}\0${message}`;
+    if (this.reported.has(key)) return;
+    this.reported.add(key);
+    this.diagnostics.push({ code, loc, message, hint });
+  }
+
+  displayName(fnName: string): string {
+    const fn = this.functions.get(fnName);
+    const method = /^%(.*)\.([^.]+)$/.exec(fnName);
+    if (method && !fnName.startsWith("%fn") && !fnName.startsWith("%init")) {
+      const cls = this.classes.get(method[1]!);
+      const owner = cls?.jsName ?? method[1]!;
+      return `${owner}.${method[2]}`;
+    }
+    if (fn?.sourceName !== undefined && fn.sourceName !== "<anonymous>") return fn.sourceName;
+    if (fn !== undefined && /^%fn\.[0-9a-f]{12}$/.test(fnName))
+      return `the function at ${this.where(fn.loc)}`;
+    return fnName.replace(/^%/, "");
+  }
+
+  /** A short TypeScript-like spelling of an IR type, for messages. */
+  typeText(t: IrType): string {
+    switch (t.kind) {
+      case "f64":
+        return "number";
+      case "bool":
+        return "boolean";
+      case "undefinedT":
+        return "undefined";
+      case "nullT":
+        return "null";
+      case "object":
+        return this.classes.get(t.className)?.jsName ?? t.className.replace(/^%(m\d+\.)?/, "");
+      case "union": {
+        const def = this.mod.unions?.find((u) => u.id === t.unionId);
+        return def ? def.arms.map((a) => this.typeText(a)).join(" | ") : "a union";
+      }
+      default:
+        return t.kind;
+    }
+  }
+
+  /** Why a throwing parameter access exists although the source type looks
+   * safe: the frontend compiles a parameter as `T | undefined` (or null)
+   * when a caller can pass a missing value, typically a non-null asserted
+   * element read `xs[i]!`, so the TypeError Node raises inside the callee
+   * happens there too. Names the parameter and the first such call. */
+  private widenedParams(fnName: string | undefined): string {
+    const fn = fnName === undefined ? undefined : this.functions.get(fnName);
+    if (fn === undefined) return "";
+    const nullable = (t: IrType): boolean =>
+      t.kind === "undefinedT" ||
+      t.kind === "nullT" ||
+      (t.kind === "union" &&
+        this.mod.unions
+          ?.find((u) => u.id === t.unionId)
+          ?.arms.some((a) => a.kind === "undefinedT" || a.kind === "nullT") === true);
+    const params = fn.params.filter((p) => nullable(p.type));
+    if (params.length === 0) return "";
+    const p = params[0]!;
+    const index = fn.params.indexOf(p);
+    let site: SrcLoc | null = null;
+    for (const caller of this.mod.functions) {
+      if (site !== null) break;
+      walk(caller.body, {
+        expr: (e) => {
+          if (site !== null || e.kind !== "call" || e.callee !== fn.name) return;
+          const arg = e.args[index];
+          if (arg !== undefined && nullable(arg.type)) site = arg.loc;
+        },
+      });
+    }
+    const name = p.name;
+    const because = site !== null ? `: the argument at ${this.where(site)} can be missing` : "";
+    return ` (parameter '${name}' is compiled as ${this.typeText(p.type)}${because})`;
+  }
+
+  /* ── binding annotations to IR ── */
+
+  bindingsOf(key: string): { fn: IrFunction | null; id: string }[] {
+    const locals = (this.localsByLoc.get(key) ?? []).map((l) => ({ fn: l.fn, id: l.localId }));
+    const globals = (this.globalsByLoc.get(key) ?? []).map((id) => ({ fn: null, id }));
+    return [...locals, ...globals];
+  }
+
+  functionsAt(key: string): readonly IrFunction[] {
+    return this.fnByLoc.get(key) ?? [];
+  }
+
+  classesAt(key: string): readonly IrClassDef[] {
+    return this.classesByLoc.get(key) ?? [];
+  }
+
+  run(): ContractCheckResult {
+    this.checkProgramLifetime();
+    this.checkInlineArrays();
+    this.checkSingleOwner();
+    this.checkNoThrow();
+    this.checkAcyclic();
+    const elements = new Int32ElementContracts(this);
+    elements.analyze();
+    const integers = new IntegerContracts(this, elements);
+    integers.run();
+    const immutable = new ImmutableContracts(this);
+    immutable.run();
+    if (this.diagnostics.length > 0)
+      return { diagnostics: this.diagnostics, warnings: this.warnings, contracts: null };
+    const c = this.contracts;
+    return { diagnostics: [], warnings: this.warnings, contracts: this.recorded ? c : null };
+  }
+
+  record(field: keyof IrContracts, values: readonly string[]): void {
+    const list = [...new Set(values)].sort();
+    if (list.length === 0) return;
+    this.contracts[field] = list;
+    this.recorded = true;
+  }
+
+  /* ── ProgramLifetime ── */
+
+  /** `class C implements ProgramLifetime`: a memory-only promise, so no
+   * program behavior depends on it except that instances are never freed.
+   * Checked: the class is the root of its hierarchy (every subclass, and so
+   * every value of any static type in the hierarchy, is then program-
+   * lifetime, which is what lets the backend elide reference counting on
+   * those static types); and the build is an executable (library hosts own
+   * the lifetimes of the objects they receive). Publication to other
+   * threads needs no check: an instance carries a reference count of its
+   * own until publication marks it like any other object it reaches
+   * (classes.ts programLifetimeRc). Static code has no WeakRef, and a
+   * FinalizationRegistry never runs its cleanup callbacks; weak collections
+   * stay correct because an entry keyed by an object that is never freed is
+   * never observable as removed. */
+  private checkProgramLifetime(): void {
+    if (this.notes.classes.size === 0) return;
+    const roots: string[] = [];
+    for (const [key, note] of this.notes.classes)
+      for (const cls of this.classesAt(key)) {
+        if (cls.base !== undefined) {
+          const base = this.classes.get(cls.base);
+          const baseName = base?.jsName ?? cls.base.replace(/^%(m\d+\.)?/, "");
+          this.report(
+            "SC7008",
+            note.loc,
+            `'${note.name}' is declared ProgramLifetime but extends '${baseName}'`,
+            base === undefined || base.runtime === true
+              ? "ProgramLifetime applies to classes the program owns end to end; built-in bases (errors, emitters, streams) keep runtime state that is released with the object"
+              : `declare ProgramLifetime on the root class '${baseName}' instead; it applies to every subclass`,
+          );
+          continue;
+        }
+        if (this.library) {
+          this.report(
+            "SC7008",
+            note.loc,
+            `'${note.name}' is declared ProgramLifetime in a library build`,
+            "a library's host decides when the objects it receives are released; ProgramLifetime is checked in executables only",
+          );
+          continue;
+        }
+        roots.push(cls.name);
+      }
+    if (roots.length === 0) return;
+    this.record("programLifetime", roots);
+  }
+
+  /* ── InlineArray ── */
+
+  /** `readonly f: InlineArray<C>` (experimental, ir/inline-arrays.ts): the
+   * field's elements may live in the instance itself, which only a field
+   * written once from a constructor argument and never again can have.
+   * Checked: the class and C are ProgramLifetime classes, the constructor of
+   * the declaring class writes the field once from one of its parameters,
+   * every subclass constructor passes it one of its own through super(...),
+   * nothing else writes the field, no read of it is compared by identity
+   * (two reads need not give the same array), and no instance of the
+   * hierarchy is constructed through a class value. A field whose instances
+   * become dynamic values that generic code may read it through keeps an
+   * ordinary array, with a warning (SC6105). */
+  private checkInlineArrays(): void {
+    if (this.notes.inlineArrays.size === 0) return;
+    const roots = new Set(this.contracts.programLifetime ?? []);
+    const lifetime = (className: string): boolean => {
+      let cls = this.classes.get(className);
+      while (cls?.base !== undefined) cls = this.classes.get(cls.base);
+      return cls !== undefined && roots.has(cls.name);
+    };
+    const entries: string[] = [];
+    const notes = new Map<string, ContractNote>();
+    for (const [key, note] of this.notes.inlineArrays) {
+      const at = key.lastIndexOf("\0");
+      const field = key.slice(at + 1);
+      for (const cls of this.classesAt(key.slice(0, at))) {
+        if (!lifetime(cls.name)) {
+          this.report(
+            "SC7009",
+            note.loc,
+            `'${note.name}' is an InlineArray field of a class that is not ProgramLifetime`,
+            "declare the root class of the hierarchy `implements ProgramLifetime`: inline elements live in the instance, which is never freed",
+          );
+          continue;
+        }
+        const entry = `${cls.name}\0${field}`;
+        entries.push(entry);
+        notes.set(entry, note);
+      }
+    }
+    if (entries.length === 0) return;
+    const plan = planInlineArrays(
+      { ...this.mod, contracts: { ...this.mod.contracts, inlineArrays: entries } },
+      lifetime,
+    );
+    for (const r of plan.rejected) {
+      const note = notes.get(`${r.declaringClass}\0${r.field}`)!;
+      const at = r.loc === undefined ? "" : ` (at ${this.where(r.loc)})`;
+      // A dynamic view reads the field as Node.js does when the elements
+      // stay in an ordinary array.
+      if (r.ordinary) {
+        this.warnings.push({
+          code: "SC6105",
+          loc: note.loc,
+          message: `'${note.name}' keeps its elements in an ordinary array: ${r.reason}${at}`,
+          hint: "read the field in typed code only, and keep the class's instances out of dynamic code that reads it, to keep the elements in the instance",
+        });
+        continue;
+      }
+      this.report(
+        "SC7009",
+        note.loc,
+        `'${note.name}' cannot keep its InlineArray contract: ${r.reason}${at}`,
+        "write the field once in the constructor from one of its parameters (subclasses pass theirs through super(...)), never again, and keep the class's instances out of class values",
+      );
+    }
+    // Where the arrays come from and who writes them (ir/inline-array-sources.ts).
+    for (const issue of checkInlineArraySources(this.mod, plan)) {
+      const note = notes.get(`${issue.declaringClass}\0${issue.field}`)!;
+      const from = issue.origin === undefined ? "" : ` (from ${this.where(issue.origin)})`;
+      this.report(
+        "SC7009",
+        issue.loc,
+        `'${note.name}' (InlineArray): ${issue.reason}${from}`,
+        "an InlineArray field holds its array for good: build a new array for each constructor call, and never write to an array a field holds",
+      );
+    }
+    const kept = new Set<string>();
+    for (const cls of plan.classes.values()) kept.add(`${cls.declaringClass}\0${cls.field}`);
+    this.record("inlineArrays", [...kept]);
+  }
+
+  /* ── SingleOwner ── */
+
+  /** `class C implements SingleOwner` (experimental, backend/tree-classes.ts):
+   * instances carry no reference count, and releasing the owner frees the
+   * nodes it holds. The proof runs in the backend, which sees every use
+   * (tree-classes.ts); this records the marked classes and reports the builds
+   * in which the proof does not run: a library's host owns the lifetimes of
+   * the objects it receives, so the class keeps its count there. */
+  private checkSingleOwner(): void {
+    if (this.notes.singleOwner.size === 0) return;
+    const marked: string[] = [];
+    for (const [key, note] of this.notes.singleOwner)
+      for (const cls of this.classesAt(key)) {
+        if (this.library) {
+          this.report(
+            "SC7010",
+            note.loc,
+            `'${note.name}' is declared SingleOwner in a library build`,
+            "a library's host owns the lifetimes of the objects it receives; SingleOwner is checked in executables only",
+          );
+          continue;
+        }
+        marked.push(cls.name);
+      }
+    this.record("singleOwner", marked);
+  }
+
+  /* ── Acyclic ── */
+
+  private checkAcyclic(): void {
+    if (this.notes.acyclic.length === 0) return;
+    const traced = computeTraced(this.mod);
+    const proven: string[] = [];
+    // Object types are structural in the IR: name a record by the
+    // interface or alias that declared it Acyclic.
+    for (const { note, unit } of this.notes.acyclic)
+      if (unit != null && unit.startsWith("record:")) this.unitNames.set(unit, note.name);
+    for (const { note, classKey, unit } of this.notes.acyclic) {
+      // A class may lower to several IR classes (generic instantiations);
+      // an unused type has no unit and no values, so it holds trivially.
+      const units =
+        classKey !== undefined
+          ? this.classesAt(classKey).map((cls) => `object:${cls.name}`)
+          : unit != null
+            ? [unit]
+            : [];
+      for (const key of units) {
+        const isTraced = key.startsWith("union:")
+          ? traced.unions.has(key.slice("union:".length))
+          : traced.shapes.has(key);
+        if (!isTraced) {
+          proven.push(key);
+          continue;
+        }
+        const why = explainCycle(this.mod, key);
+        this.report(
+          "SC7007",
+          note.loc,
+          `'${note.name}' is declared Acyclic but can lie on a reference cycle: ${why ? this.cycleText(key, why) : "the cycle analysis traces it"}`,
+          why ? this.cycleHint(why) : "remove Acyclic",
+        );
+        break;
+      }
+    }
+    this.record("acyclic", proven);
+  }
+
+  private readonly unitNames = new Map<string, string>();
+
+  /** A unit key's spelling: a class name, a record's declared name or
+   * `{ a, b }`, the arms of a union. */
+  unitText(key: string): string {
+    const named = this.unitNames.get(key);
+    if (named !== undefined) return named;
+    const colon = key.indexOf(":");
+    const kind = key.slice(0, colon),
+      id = key.slice(colon + 1);
+    if (kind === "object" || kind === "subtree")
+      return this.typeText({ kind: "object", className: id });
+    if (kind === "union") return this.typeText({ kind: "union", unionId: id });
+    const record = this.mod.records?.find((r) => r.id === id);
+    return record ? `{ ${record.fields.map((f) => f.name).join(", ")} }` : "an object";
+  }
+
+  private fieldText(field: string): string {
+    if (field === "%dynProperties") return "(dynamic properties)";
+    if (field === "<listeners>") return "(event listeners)";
+    if (field === "<class>") return "(class object)";
+    if (field === "<overflow>") return "[key]";
+    return field;
+  }
+
+  /** The path as `A.f → B.g → A`, folding union and subclass hops into the
+   * field that reaches them. */
+  private stepsText(steps: readonly CycleStep[], end: string): string {
+    const parts: string[] = [];
+    // A slot of class type C holding a subclass D reads `D (as a C)`.
+    let asBase: string | null = null;
+    const unit = (key: string): string => {
+      const text = this.unitText(key);
+      const suffix = asBase !== null && asBase !== text ? ` (as a ${asBase})` : "";
+      asBase = null;
+      return `${text}${suffix}`;
+    };
+    for (const step of steps) {
+      if (step.label.kind === "subclass") {
+        asBase ??= this.unitText(step.from);
+        continue;
+      }
+      if (step.label.kind === "field")
+        parts.push(`${unit(step.from)}.${this.fieldText(step.label.field)}`);
+    }
+    parts.push(unit(end));
+    return parts.join(" → ");
+  }
+
+  private cycleText(key: string, why: CycleExplanation): string {
+    switch (why.kind) {
+      case "hierarchy":
+        return `its subclass '${this.unitText(why.member)}' shares its object layout, and ${this.cycleText(why.member, why.because)}`;
+      case "intrinsic": {
+        const holds =
+          why.holds === "func"
+            ? "a function"
+            : why.holds === "dyn"
+              ? "a dynamic value"
+              : why.holds === "caught"
+                ? "a caught exception"
+                : why.holds === "promise"
+                  ? "a promise"
+                  : why.holds === "weakKey"
+                    ? "the value of a WeakMap or WeakSet entry it is the key of"
+                    : "a class object";
+        const field =
+          why.field === "%dynProperties"
+            ? `${this.unitText(why.owner)} instances reach dynamic code, whose properties`
+            : why.field === ""
+              ? this.unitText(why.owner)
+              : `${this.unitText(why.owner)}.${this.fieldText(why.field)}`;
+        const path = why.steps.length > 0 ? `${this.stepsText(why.steps, why.owner)}, and ` : "";
+        return `${path}${field} can hold ${holds}, which can reference any object, including a ${this.unitText(key)}`;
+      }
+      case "cycle": {
+        const mutable = why.steps.find(
+          (s): s is CycleStep & { label: CycleEdgeLabel & { kind: "field" } } =>
+            s.label.kind === "field" && (s.label.mutable || s.label.via !== undefined),
+        );
+        let reason = "";
+        if (mutable) {
+          const where = `${this.unitText(mutable.from)}.${this.fieldText(mutable.label.field)}`;
+          if (mutable.label.via !== undefined)
+            reason = ` (${where} is ${mutable.label.via === "array" ? "an array" : `a ${mutable.label.via === "map" ? "Map" : "Set"}`}, whose contents can change)`;
+          else {
+            const write = this.writeOutsideConstructor(mutable.from, mutable.label.field);
+            reason = ` (${where} can be assigned after construction${write !== null ? `, as at ${this.where(write)}` : ""})`;
+          }
+        }
+        return `${this.stepsText(why.steps, key)}${reason}`;
+      }
+    }
+  }
+
+  private cycleHint(why: CycleExplanation): string {
+    const inner = why.kind === "hierarchy" ? why.because : why;
+    if (inner.kind === "intrinsic" && inner.holds === "weakKey")
+      return "the value of a weak entry can hold the entry's own key; key the collection by another object, or remove Acyclic";
+    if (inner.kind === "intrinsic")
+      return "a function, dynamic or promise field can capture the object itself; store plain data instead, or remove Acyclic";
+    if (
+      inner.kind === "cycle" &&
+      !inner.steps.some(
+        (s) => s.label.kind === "field" && s.label.mutable && s.label.via === undefined,
+      )
+    )
+      return "an array, Map or Set can come to hold an object that refers back; make the element type unable to reach this type, or remove Acyclic";
+    return "assign the reference only in the constructor (before `this` escapes), so a new object can only point to older ones, or remove Acyclic";
+  }
+
+  /** The first store into the field outside its own class's constructors. */
+  private writeOutsideConstructor(unit: string, field: string): SrcLoc | null {
+    const colon = unit.indexOf(":");
+    const kind = unit.slice(0, colon),
+      id = unit.slice(colon + 1);
+    let found: SrcLoc | null = null;
+    for (const fn of this.mod.functions) {
+      if (found !== null) break;
+      const ctor = /^%(.*)\.constructor$/.exec(fn.name)?.[1];
+      const self = ctor !== undefined ? fn.params[0]?.localId : undefined;
+      walk(fn.body, {
+        stmt: (s) => {
+          if (found !== null) return;
+          if (kind === "record" && s.kind === "recordSet" && s.shapeId === id && s.field === field)
+            found = s.loc;
+          else if (
+            kind !== "record" &&
+            s.kind === "fieldSet" &&
+            s.field === field &&
+            this.sameHierarchy(s.className, id) &&
+            !(self !== undefined && s.obj.kind === "varRef" && s.obj.localId === self)
+          )
+            found = s.loc;
+        },
+      });
+    }
+    return found;
+  }
+
+  private sameHierarchy(a: string, b: string): boolean {
+    const root = (name: string): string => {
+      let cur = name;
+      for (let cls = this.classes.get(cur); cls?.base !== undefined; cls = this.classes.get(cur))
+        cur = cls.base;
+      return cur;
+    };
+    return root(a) === root(b);
+  }
+
+  /* ── NoThrow ── */
+
+  private checkNoThrow(): void {
+    const targets: { fn: IrFunction; note: ContractNote }[] = [];
+    for (const [key, list] of this.notes.functions)
+      for (const note of list)
+        if (note.marker === "NoThrow")
+          for (const fn of this.fnByLoc.get(key) ?? []) targets.push({ fn, note });
+    if (targets.length === 0) return;
+    // Target-independent: the native stack guard (Linux, macOS) counts, so a
+    // contract holds on every platform. Every function on a call cycle counts
+    // as checking it, a superset of the functions the backend picks, so the
+    // answer does not depend on that choice.
+    const mt = computeMayThrow(this.mod, { stackChecks: "everyCycleMember", explain: true });
+    const proven: string[] = [];
+    for (const { fn, note } of targets) {
+      if (fn.async === true || fn.generator !== undefined) {
+        this.report(
+          "SC7001",
+          note.loc,
+          `'${note.name}' is declared NoThrow, but async functions and generators report errors through promises and resumption, which the contract does not cover`,
+          "remove NoThrow from async functions and generators",
+        );
+        continue;
+      }
+      if (!mt.fns.has(fn.name)) {
+        proven.push(fn.name);
+        continue;
+      }
+      const steps: string[] = [];
+      // The function's own stack guard throws on entry, outside any handler.
+      const ownStackGuard = mt.stackChecks?.has(fn.name) === true;
+      const seen = new Set<string>();
+      let current: string | undefined = fn.name;
+      while (current !== undefined && !seen.has(current) && steps.length < 8) {
+        seen.add(current);
+        const reason: MayThrowReason | undefined = mt.why?.get(current);
+        if (reason === undefined) break;
+        if (reason.kind === "seed") {
+          steps.push(`${reason.what} at ${this.where(reason.loc)}${this.widenedParams(current)}`);
+          current = undefined;
+        } else if (reason.kind === "call") {
+          steps.push(`calls '${this.displayName(reason.callee)}' at ${this.where(reason.loc)}`);
+          current = reason.callee;
+        } else {
+          steps.push(
+            reason.target === ""
+              ? `calls a function value at ${this.where(reason.loc)} (dynamic callbacks may throw)`
+              : `calls a function value at ${this.where(reason.loc)}, and the function value '${this.displayName(reason.target)}' may throw`,
+          );
+          current = reason.target === "" ? undefined : reason.target;
+        }
+      }
+      this.report(
+        "SC7001",
+        note.loc,
+        `'${note.name}' is declared NoThrow but may throw: ${steps.join(" → ")}`,
+        ownStackGuard
+          ? "remove the recursion or remove NoThrow; a recursive function's stack guard throws on entry, outside any try/catch"
+          : this.mod.workers === true
+            ? "remove the throwing operation from the path (or the recursion), or remove NoThrow; in worker programs try/catch does not discharge the contract, since a termination request unwinds through catch"
+            : "remove the throwing operation from the path (or the recursion), catch it with try/catch, or remove NoThrow",
+      );
+    }
+    this.record("noThrow", proven);
+  }
+}
+
+/** The explicit form of a written expression for an integer contract: `x++`
+ * and compound assignments become an assignment of the wrapped result. */
+function integerRewrite(text: string, kind: IntegerMarker): string {
+  const step = /^(.+?)\s*(\+\+|--)$/.exec(text) ?? /^(\+\+|--)\s*(.+)$/.exec(text);
+  if (step) {
+    const target = step[1] === "++" || step[1] === "--" ? step[2]! : step[1]!;
+    const op = (step[1] === "++" || step[1] === "--" ? step[1] : step[2]!)[0]!;
+    return `${target} = ${wrapped(`${target} ${op} ${isBigKind(kind) ? "1n" : "1"}`, kind, true)}`;
+  }
+  const compound = /^([^=]+?)\s*(\*\*|>>>|<<|>>|[-+*/%&|^])=\s*(.+)$/.exec(text);
+  if (compound)
+    return `${compound[1]} = ${wrapped(`${compound[1]} ${compound[2]} ${compound[3]}`, kind, true)}`;
+  const assignment = /^([^=<>!]+?)\s*=\s*([^=].*)$/.exec(text);
+  if (assignment) return `${assignment[1]} = ${wrapped(assignment[2]!, kind, false)}`;
+  return wrapped(text, kind, false);
+}
+
+/** `text` converted to `kind` the way Node computes it: `text | 0` for
+ * Int32 (parenthesized unless `text` binds tighter than `|` for sure: a
+ * name, member chain, literal or call without nested parentheses). */
+function wrapped(text: string, kind: IntegerMarker, compound: boolean): string {
+  const simple = !compound && /^[\w$.]+(\([^()]*\))?$/.test(text);
+  const operand = simple ? text : `(${text})`;
+  switch (kind) {
+    case "Int32":
+      return `${operand} | 0`;
+    case "Uint32":
+      return `${operand} >>> 0`;
+    case "Uint8":
+      return `${operand} & 0xff`;
+    case "Uint16":
+      return `${operand} & 0xffff`;
+    case "Int8":
+      return `(${operand} << 24) >> 24`;
+    case "Int16":
+      return `(${operand} << 16) >> 16`;
+    case "Int64":
+      return `BigInt.asIntN(64, ${text})`;
+    case "Uint64":
+      return `BigInt.asUintN(64, ${text})`;
+  }
+}
+
+function push<K, V>(map: Map<K, V[]>, key: K, value: V): void {
+  const list = map.get(key);
+  if (list) list.push(value);
+  else map.set(key, [value]);
+}
+
+/* ─────────────────────────── integer contracts ─────────────────────────── */
+
+type NumberKind = Exclude<IntegerMarker, "Int64" | "Uint64">;
+type BigKind = "Int64" | "Uint64";
+const isBigKind = (k: IntegerMarker): k is BigKind => k === "Int64" || k === "Uint64";
+
+const NUMBER_RANGES: Readonly<Record<NumberKind, IntegerRange>> = {
+  Int8: { min: -128, max: 127 },
+  Uint8: { min: 0, max: 255 },
+  Int16: { min: -32768, max: 32767 },
+  Uint16: { min: 0, max: 65535 },
+  Int32: INT32_RANGE,
+  Uint32: { min: 0, max: 4294967295 },
+};
+const BIG_RANGES: Readonly<Record<BigKind, readonly [bigint, bigint]>> = {
+  Int64: [-(1n << 63n), (1n << 63n) - 1n],
+  Uint64: [0n, (1n << 64n) - 1n],
+};
+/** What a value of each kind is, for messages. Int32 keeps upstream's text. */
+const DESCRIBE: Readonly<Record<IntegerMarker, string>> = {
+  Int8: "an integer in [-128, 127]",
+  Uint8: "an integer in [0, 255]",
+  Int16: "an integer in [-32768, 32767]",
+  Uint16: "an integer in [0, 65535]",
+  Int32: "an int32",
+  Uint32: "an unsigned 32-bit integer",
+  Int64: "a bigint in [-2^63, 2^63 - 1]",
+  Uint64: "a bigint in [0, 2^64 - 1]",
+};
+/** Kinds whose every value is an int32: the backends' int32 slot facts. */
+const INT32_KINDS: ReadonlySet<IntegerMarker> = new Set(["Int8", "Uint8", "Int16", "Uint16", "Int32"]);
+const within = (r: IntegerRange | null | undefined, k: NumberKind): boolean =>
+  r !== null && r !== undefined && r.min >= NUMBER_RANGES[k].min && r.max <= NUMBER_RANGES[k].max;
+
+/* A string, array or typed array length is an int32 in compiled code: every
+ * representation stores it in 32 signed bits, and @scriptc/types documents a
+ * length as an Int32 value. The range analysis bounds an array length as a
+ * uint32, so the checker analyses a copy of each function in which every
+ * length read is a call of LENGTH (its receiver kept as the argument, so
+ * evaluation is unchanged), whose result the facts bound to [0, 2^31 - 1]. */
+const LENGTH = "%contract.length";
+const LENGTH_RANGE: IntegerRange = { min: 0, max: 2147483647 };
+function withLengthBounds(fn: IrFunction, copies: Map<unknown, unknown>): IrFunction {
+  const swap = (v: unknown): unknown => {
+    if (Array.isArray(v)) return v.map(swap);
+    if (!v || typeof v !== "object") return v;
+    const o = v as Record<string, unknown>;
+    let out: Record<string, unknown>;
+    if (
+      typeof o.kind === "string" &&
+      o.kind.endsWith("Intrinsic") &&
+      o.method === "length" &&
+      Array.isArray(o.args) &&
+      o.args.length === 0 &&
+      o.receiver
+    )
+      out = { kind: "call", callee: LENGTH, args: [swap(o.receiver)], type: o.type, loc: o.loc };
+    else {
+      out = {};
+      for (const k of Object.keys(o))
+        out[k] = k === "loc" || k === "type" || k === "source" ? o[k] : swap(o[k]);
+    }
+    copies.set(o, out);
+    return out;
+  };
+  return { ...fn, body: swap(fn.body) as IrStmt[] };
+}
+
+/** Fixed-width integer contracts: upstream scriptc's Int32, extended to
+ * Uint32, Int8, Uint8, Int16, Uint16 (numbers, by the integer range
+ * analysis) and Int64, Uint64 (bigints, by construction). Each slot keeps
+ * the note that declared it; the note's marker is the slot's kind. */
+class IntegerContracts {
+  private readonly slots: Int32Slots;
+  /** Field families, with the note that declared them. */
+  private readonly fields = new Map<string, ContractNote>();
+  private readonly params = new Map<string, ContractNote>(); // fn\0localId
+  private readonly returns = new Map<string, ContractNote>(); // fn
+  private readonly locals = new Map<string, ContractNote>(); // fn\0localId or \0globalId
+
+  constructor(
+    private readonly c: ContractChecker,
+    private readonly elements: Int32ElementContracts,
+  ) {
+    this.slots = new Int32Slots(c.classes);
+  }
+
+  run(): void {
+    if (!this.bind()) return;
+    const scalars = this.fields.size + this.params.size + this.returns.size + this.locals.size;
+    if (scalars === 0 && !this.elements.active) return;
+    this.structural();
+    this.writes();
+    const int32 = (m: Map<string, ContractNote>): string[] =>
+      [...m].filter(([, note]) => INT32_KINDS.has(note.marker as IntegerMarker)).map(([key]) => key);
+    this.c.record("int32Fields", int32(this.fields));
+    this.c.record("int32Params", int32(this.params));
+    this.c.record("int32Returns", int32(this.returns));
+    this.c.record("int32Locals", int32(this.locals));
+    this.c.record("int32Elements", [...this.elements.int32Slots]);
+    // Fields narrower than int32, or unsigned: a backend may store them
+    // packed (WasmGC: i8 and i16 struct fields, i32 for Uint32).
+    this.c.record(
+      "narrowFields",
+      [...this.fields]
+        .filter(([, note]) => note.marker !== "Int32" && !isBigKind(note.marker as IntegerMarker))
+        .map(([family, note]) => `${family}\0${note.marker}`),
+    );
+  }
+
+  private kind(note: ContractNote): IntegerMarker {
+    return note.marker as IntegerMarker;
+  }
+
+  private refuse(note: ContractNote, why: string, hint: string): void {
+    this.c.report(
+      "SC7003",
+      note.loc,
+      `the ${note.marker} contract on '${note.name}' cannot be checked: ${why}`,
+      hint,
+    );
+  }
+
+  /** The IR type a slot of `kind` must have. */
+  private slotType(kind: IntegerMarker): "f64" | "bigint" {
+    return isBigKind(kind) ? "bigint" : "f64";
+  }
+
+  private bind(): boolean {
+    const c = this.c;
+    for (const [key, list] of c.notes.functions)
+      for (const note of list) {
+        if (!isIntegerMarker(note.marker) || note.elements === true) continue;
+        const kind = this.kind(note);
+        for (const fn of c.functionsAt(key)) {
+          if (fn.async === true || fn.generator !== undefined) {
+            this.refuse(
+              note,
+              "async functions and generators return promises or iterators",
+              "annotate the awaited value where it is stored instead",
+            );
+            continue;
+          }
+          if (fn.returnType.kind !== this.slotType(kind)) {
+            this.refuse(
+              note,
+              `the result is not a plain ${isBigKind(kind) ? "bigint" : "number"}`,
+              `write ${kind} only on a ${isBigKind(kind) ? "bigint" : "number"} result`,
+            );
+            continue;
+          }
+          this.returns.set(fn.name, note);
+        }
+      }
+    for (const [key, note] of c.notes.bindings) {
+      if (!isIntegerMarker(note.marker) || note.elements === true) continue;
+      const kind = this.kind(note);
+      for (const b of c.bindingsOf(key)) {
+        const type = b.fn
+          ? b.fn.locals.find((l) => l.id === b.id)?.type
+          : c.mod.globals?.find((g) => g.id === b.id)?.type;
+        if (type?.kind !== this.slotType(kind)) {
+          this.refuse(
+            note,
+            `the binding is not a plain ${isBigKind(kind) ? "bigint" : "number"} (optional and union types are not ${kind} slots, nor are the parameters of a function used as a value, which a caller may call with any arguments)`,
+            `declare it as a required ${kind}`,
+          );
+          continue;
+        }
+        if (b.fn === null) {
+          this.locals.set(`\0${b.id}`, note);
+          continue;
+        }
+        this.locals.set(`${b.fn.name}\0${b.id}`, note);
+        if (b.fn.params.some((p) => p.localId === b.id))
+          this.params.set(`${b.fn.name}\0${b.id}`, note);
+      }
+    }
+    for (const [key, note] of c.notes.fields) {
+      if (!isIntegerMarker(note.marker) || note.elements === true) continue;
+      const kind = this.kind(note);
+      const cut = key.lastIndexOf("\0");
+      const field = key.slice(cut + 1);
+      for (const cls of c.classesAt(key.slice(0, cut))) {
+        const def = cls.fields.find((f) => f.name === field);
+        if (!def) {
+          this.refuse(
+            note,
+            `the compiled class has no field '${field}'`,
+            "annotate an ordinary instance field",
+          );
+          continue;
+        }
+        if (def.type.kind !== this.slotType(kind)) {
+          this.refuse(
+            note,
+            `the field is not a plain ${isBigKind(kind) ? "bigint" : "number"}`,
+            `declare the field as a required ${kind}`,
+          );
+          continue;
+        }
+        const family = this.slots.family(cls.name, field);
+        if (family !== null) this.fields.set(family, note);
+      }
+    }
+    // Captured bindings: every capture of a contract local shares its box.
+    this.propagateCaptures();
+    return true;
+  }
+
+  private propagateCaptures(): void {
+    const c = this.c;
+    for (let changed = true; changed;) {
+      changed = false;
+      for (const fn of c.mod.functions)
+        walk(fn.body, {
+          expr: (e) => {
+            if (e.kind !== "closure") return;
+            const lifted = c.functions.get(e.fnName);
+            e.captures.forEach((id, i) => {
+              const inner = lifted?.captures?.[i];
+              if (!inner) return;
+              const outerKey = `${fn.name}\0${id}`;
+              const innerKey = `${lifted!.name}\0${inner.localId}`;
+              const outer = this.locals.get(outerKey);
+              const innerNote = this.locals.get(innerKey);
+              if (outer && !innerNote) {
+                this.locals.set(innerKey, outer);
+                changed = true;
+              } else if (innerNote && !outer) {
+                this.locals.set(outerKey, innerNote);
+                changed = true;
+              }
+            });
+          },
+        });
+    }
+  }
+
+  /** Slots whose writes the IR does not show. */
+  private structural(): void {
+    const c = this.c;
+    const mod = c.mod;
+    if (this.fields.size > 0) {
+      const dynamic = dynamicallyStoredFamilies(mod, this.slots);
+      for (const [family, note] of this.fields) {
+        const owner = family.slice(0, family.indexOf("\0"));
+        let generic = false;
+        for (
+          let cls = c.classes.get(owner);
+          cls;
+          cls = cls.base ? c.classes.get(cls.base) : undefined
+        )
+          if (
+            cls.runtime === true ||
+            cls.genericOf !== undefined ||
+            (cls.base && !c.classes.has(cls.base))
+          )
+            generic = true;
+        for (const cls of c.classes.values())
+          if (cls.genericOf !== undefined && (cls.genericOf === owner || cls.name === owner))
+            generic = true;
+        if (generic)
+          this.refuse(
+            note,
+            "the class is generic or extends a runtime-provided class",
+            "move the field to a non-generic class",
+          );
+        else if (dynamic.has(family))
+          this.refuse(
+            note,
+            "instances of the class reach dynamic code (any or unknown casts) where a store to the field is not checked",
+            `keep instances of this class out of any-typed values, or remove ${note.marker}`,
+          );
+      }
+    }
+    if (this.params.size > 0) {
+      const children = new Map<string, string[]>();
+      for (const cls of c.classes.values()) if (cls.base) push(children, cls.base, cls.name);
+      const subtree = (name: string): string[] => {
+        const out: string[] = [];
+        const stack = [name];
+        while (stack.length) {
+          const next = stack.pop()!;
+          out.push(next);
+          for (const child of children.get(next) ?? []) stack.push(child);
+        }
+        return out;
+      };
+      const calls = functionCallFacts(mod, c.classes, subtree);
+      for (const [key, note] of this.params) {
+        const fnName = key.slice(0, key.indexOf("\0"));
+        const kind = this.kind(note);
+        if (calls.valueEscaped.has(fnName))
+          this.refuse(
+            note,
+            `'${c.displayName(fnName)}' is used as a value (callback, class value or export), so its callers are not all visible`,
+            `wrap it in a function that takes a ${isBigKind(kind) ? "bigint" : "number"} and passes \`${wrapped("x", kind, false)}\``,
+          );
+        else if (calls.runtimeVirtual(fnName))
+          this.refuse(
+            note,
+            "the runtime calls this method",
+            `remove ${kind} from runtime-dispatched methods`,
+          );
+      }
+    }
+  }
+
+  /** The range a number contract slot holds, or null for none (a bigint
+   * contract, or no contract). */
+  private range(note: ContractNote | undefined): IntegerRange | null {
+    if (note === undefined) return null;
+    const kind = this.kind(note);
+    return isBigKind(kind) ? null : NUMBER_RANGES[kind];
+  }
+
+  /** The int library's counts are finer than their Int32 annotation. */
+  private countRange(callee: string): IntegerRange | null {
+    const lib = intrinsicModule(this.c.mod, "int");
+    if (!lib || !isIntrinsicMember(lib, callee)) return null;
+    const name = intrinsicMemberName(lib, callee);
+    if (/^(clz|ctz|popcnt)$/.test(name)) return { min: 0, max: 32 };
+    if (/^(clz|ctz|popcnt)64$/.test(name)) return { min: 0, max: 64 };
+    return null;
+  }
+
+  /** Generated helpers' parameter ranges, joined over their call sites. */
+  private readonly helperParams = new Map<string, Map<string, IntegerRange>>();
+
+  private integerFacts(fnName: string): IntegerSlotFacts {
+    const params = new Map<string, IntegerRange>(this.helperParams.get(fnName) ?? []);
+    for (const [key, note] of this.params) {
+      const range = key.startsWith(`${fnName}\0`) ? this.range(note) : null;
+      if (range !== null) params.set(key.slice(fnName.length + 1), range);
+    }
+    return {
+      params,
+      field: (className, field) => {
+        const family = this.slots.family(className, field);
+        return family !== null ? this.range(this.fields.get(family)) : null;
+      },
+      call: (callee) =>
+        callee === LENGTH
+          ? LENGTH_RANGE
+          : (this.countRange(callee) ?? this.range(this.returns.get(callee))),
+      boxed: (localId) => this.range(this.locals.get(`${fnName}\0${localId}`)),
+      locals: (localId) =>
+        this.range(this.locals.get(`${fnName}\0${localId}`) ?? this.locals.get(`\0${localId}`)),
+      elements: (arr) => this.elements.readsInt32(fnName, arr),
+    };
+  }
+
+  /** Whether a bigint value is a value of `kind` by construction: an
+   * in-range literal, BigInt.asIntN/asUintN with a width that fits, a 64-bit
+   * int library result of the kind, another slot of the kind, or bitwise
+   * operations that keep their operands' range. */
+  private bigOk(fnName: string, e: IrExpr, kind: BigKind): boolean {
+    const literal = (x: IrExpr): bigint | null => {
+      if (x.kind !== "libCall" || x.fn !== "bigint.parse" || x.args[0]?.kind !== "strLit") return null;
+      try {
+        return BigInt(x.args[0].value);
+      } catch {
+        return null;
+      }
+    };
+    switch (e.kind) {
+      case "libCall": {
+        const value = literal(e);
+        if (value !== null) return value >= BIG_RANGES[kind][0] && value <= BIG_RANGES[kind][1];
+        if ((e.fn === "bigint.asIntN" || e.fn === "bigint.asUintN") && e.args[0]?.kind === "numLit") {
+          const n = e.args[0].value;
+          const signed = e.fn === "bigint.asIntN";
+          return kind === "Int64"
+            ? signed
+              ? n >= 1 && n <= 64
+              : n >= 0 && n <= 63
+            : !signed && n >= 0 && n <= 64;
+        }
+        // A non-negative pair stays below 2^64 under `^` and `|`, a signed
+        // pair in the int64 range (two's complement); `&` with one
+        // non-negative operand is non-negative; `>>` only moves toward zero.
+        if ((e.fn === "bigint.xor" || e.fn === "bigint.or") && e.args.length === 2)
+          return this.bigOk(fnName, e.args[0]!, kind) && this.bigOk(fnName, e.args[1]!, kind);
+        if (e.fn === "bigint.and" && e.args.length === 2)
+          return kind === "Uint64"
+            ? this.bigOk(fnName, e.args[0]!, kind) || this.bigOk(fnName, e.args[1]!, kind)
+            : this.bigOk(fnName, e.args[0]!, kind) && this.bigOk(fnName, e.args[1]!, kind);
+        if (e.fn === "bigint.shr" && e.args.length === 2) {
+          const shift = literal(e.args[1]!);
+          return shift !== null && shift >= 0n && this.bigOk(fnName, e.args[0]!, kind);
+        }
+        return false;
+      }
+      case "varRef": {
+        const note = this.locals.get(`${fnName}\0${e.localId}`) ?? this.locals.get(`\0${e.localId}`);
+        return note?.marker === kind;
+      }
+      case "fieldGet": {
+        const family = this.slots.family(e.className, e.field);
+        return family !== null && this.fields.get(family)?.marker === kind;
+      }
+      case "call":
+        return this.returns.get(e.callee)?.marker === kind;
+      case "ternary":
+        return this.bigOk(fnName, e.then, kind) && this.bigOk(fnName, e.else_, kind);
+      case "assignExpr":
+      case "upcast":
+      case "downcast":
+        return this.bigOk(fnName, e.value, kind);
+      default:
+        return false;
+    }
+  }
+
+  private writes(): void {
+    const c = this.c;
+    const methodImpls = new Map<string, string[]>();
+    for (const cls of c.classes.values())
+      for (const m of cls.methods ?? []) push(methodImpls, m, `%${cls.name}.${m}`);
+    const bindings = findInitializerBindings(c.mod);
+    const fail = (note: ContractNote, value: IrExpr | null, at: SrcLoc, what: string): void => {
+      const kind = this.kind(note);
+      const shown = value ? c.text(value.loc) : "";
+      const conversion = kind === "Int32" ? "int32 conversion" : `${kind} conversion`;
+      c.report(
+        "SC7002",
+        at,
+        `${what} '${note.name}' (${kind}) is not provably ${DESCRIBE[kind]}${shown ? `: '${shown}'` : ""}`,
+        shown
+          ? `make the ${conversion} explicit, for example '${integerRewrite(shown, kind)}', so Node computes the same value`
+          : `make the ${conversion} explicit with '${wrapped("x", kind, false).replace(/^x /, "")}', so Node computes the same value`,
+      );
+    };
+    const elementFunctions = this.elements.functionsWithWrites();
+    const elementRanges = new Map<string, (e: IrExpr) => IntegerRange | null>();
+    // A generated helper (contracts/check.ts isGeneratedHelper) is checked
+    // after its callers: while every reference to it is a direct call, each
+    // number parameter holds the join of its call sites' argument ranges.
+    const helpers = new Set(c.mod.functions.filter(isGeneratedHelper).map((fn) => fn.name));
+    const escaped = new Set<string>(helpers.size > 0 ? moduleFunctionReferences(c.mod) : []);
+    const argRanges = new Map<string, (IntegerRange | null)[]>();
+    const joinArgs = (callee: string, args: readonly IrExpr[], rangeOf: (e: IrExpr) => IntegerRange | null): void => {
+      if (!helpers.has(callee) || escaped.has(callee)) return;
+      const target = c.functions.get(callee);
+      if (target === undefined) return;
+      const prev = argRanges.get(callee);
+      const next = target.params.map((p, i) => {
+        const arg = args[i];
+        const r = arg !== undefined && p.type.kind === "f64" && arg.type.kind === "f64" ? rangeOf(arg) : null;
+        if (prev === undefined) return r;
+        const q = prev[i] ?? null;
+        return r === null || q === null ? null : { min: Math.min(r.min, q.min), max: Math.max(r.max, q.max) };
+      });
+      argRanges.set(callee, next);
+    };
+    const ordered = [
+      ...c.mod.functions.filter((fn) => !helpers.has(fn.name)),
+      ...c.mod.functions.filter((fn) => helpers.has(fn.name)),
+    ];
+    let helpersSeeded = false;
+    for (const fn of ordered) {
+      if (!helpersSeeded && helpers.has(fn.name)) {
+        helpersSeeded = true;
+        for (const [name, ranges] of argRanges) {
+          const target = c.functions.get(name)!;
+          const facts = new Map<string, IntegerRange>();
+          ranges.forEach((r, i) => {
+            if (r !== null) facts.set(target.params[i]!.localId, r);
+          });
+          if (facts.size > 0) this.helperParams.set(name, facts);
+        }
+      }
+      // An int intrinsic library's annotations are its stated facts,
+      // established by its tests: its own bodies are not re-proven.
+      if (c.trusted(fn)) continue;
+      // The analysis runs over a copy whose lengths are bounded: `copies`
+      // maps each original node to its copy.
+      const copies = new Map<unknown, unknown>();
+      const bounded = withLengthBounds(fn, copies);
+      const numeric = withInitializerBindings(bounded, bindings.get(fn.name) ?? []);
+      const ranges = analyzeIntegerRanges(numeric, this.integerFacts(fn.name));
+      const rangeOf = (e: IrExpr): IntegerRange | null =>
+        ranges.get((copies.get(e) as IrExpr | undefined) ?? e) ?? null;
+      if (elementFunctions.has(fn.name)) elementRanges.set(fn.name, rangeOf);
+      // Number slots accept exactly what the integer range analysis proves
+      // (int32-slots.ts stores pinned int32 slots from proven writes).
+      const ok = (e: IrExpr, kind: IntegerMarker): boolean =>
+        isBigKind(kind)
+          ? e.type.kind === "bigint" && this.bigOk(fn.name, e, kind)
+          : e.type.kind === "f64" && within(rangeOf(e), kind);
+      const localNote = (id: string): ContractNote | undefined =>
+        this.locals.get(`${fn.name}\0${id}`) ?? this.locals.get(`\0${id}`);
+      const checkArgs = (callee: string, args: IrExpr[], offset: number, at: SrcLoc): void => {
+        const target = c.functions.get(callee);
+        if (!target) return;
+        target.params.forEach((param, i) => {
+          const note = this.params.get(`${callee}\0${param.localId}`);
+          if (!note) return;
+          const arg = args[i - offset];
+          if (i < offset) return;
+          if (arg === undefined) fail(note, null, at, "a call passes no argument for");
+          else if (!ok(arg, this.kind(note))) fail(note, arg, arg.loc, "the argument for");
+        });
+      };
+      const incDecStored = (e: IrExpr, prefix: boolean, op: "+" | "-", kind: IntegerMarker): boolean => {
+        if (isBigKind(kind)) return false;
+        const result = rangeOf(e);
+        if (!result) return false;
+        if (prefix) return within(result, kind);
+        return within(integerArithmeticRange(op, result, { min: 1, max: 1 }), kind);
+      };
+      walk(fn.body, {
+        stmt: (s) => {
+          if (s.kind === "varDecl" || s.kind === "assign") {
+            const note = localNote(s.localId);
+            const value = s.kind === "varDecl" ? s.init : s.value;
+            if (note && value && !ok(value, this.kind(note)))
+              fail(note, value, value.loc, "the value stored into");
+          } else if (s.kind === "forOf" || (s.kind === "tryCatch" && s.catchLocalId !== null)) {
+            const id = s.kind === "forOf" ? s.localId : s.catchLocalId!;
+            const note = localNote(id);
+            if (note)
+              fail(
+                note,
+                null,
+                s.loc,
+                s.kind === "forOf"
+                  ? "a for-of loop element stored into"
+                  : "a caught value stored into",
+              );
+          } else if (s.kind === "fieldSet") {
+            const family = this.slots.family(s.className, s.field);
+            const note = family !== null ? this.fields.get(family) : undefined;
+            if (note && !ok(s.value, this.kind(note)))
+              fail(note, s.value, s.value.loc, "the value stored into");
+          } else if (s.kind === "return") {
+            const note = this.returns.get(fn.name);
+            if (note && (!s.value || !ok(s.value, this.kind(note))))
+              fail(note, s.value, s.value?.loc ?? s.loc, "the value returned from");
+          }
+        },
+        expr: (e) => {
+          if (e.kind === "assignExpr") {
+            const note = localNote(e.localId);
+            if (note && !ok(e.value, this.kind(note)))
+              fail(note, e.value, e.value.loc, "the value stored into");
+          } else if (e.kind === "incDec") {
+            const note = localNote(e.localId);
+            const kind = note === undefined ? undefined : this.kind(note);
+            if (note && kind && !incDecStored(e, e.prefix, e.op, kind))
+              c.report(
+                "SC7002",
+                e.loc,
+                `'${c.text(e.loc)}' can step '${note.name}' (${kind}) outside the ${rangeName(kind)} range`,
+                isBigKind(kind)
+                  ? `write '${note.name} = ${wrapped(`${note.name} ${e.op} 1n`, kind, true)}'`
+                  : `bound the value by a ${kind} comparison in the loop condition, or write '${note.name} = ${wrapped(`${note.name} ${e.op} 1`, kind, true)}'`,
+              );
+          } else if (e.kind === "fieldIncDec") {
+            const family = this.slots.family(e.className, e.field);
+            const note = family !== null ? this.fields.get(family) : undefined;
+            if (note) {
+              const kind = this.kind(note);
+              const target = c.text(e.obj.loc);
+              const field = `${target}.${e.field}`;
+              c.report(
+                "SC7002",
+                e.loc,
+                `'${c.text(e.loc)}' can step the ${kind} field '${note.name}' outside the ${rangeName(kind)} range`,
+                `write '${field} = ${wrapped(`${field} ${e.op} ${isBigKind(kind) ? "1n" : "1"}`, kind, true)}'`,
+              );
+            }
+          } else if (e.kind === "call") {
+            checkArgs(e.callee, e.args, 0, e.loc);
+            joinArgs(e.callee, e.args, rangeOf);
+          }
+          else if (e.kind === "new") checkArgs(`%${e.className}.constructor`, e.args, 1, e.loc);
+          else if (e.kind === "virtualCall")
+            for (const impl of methodImpls.get(e.method) ?? []) checkArgs(impl, e.args, 0, e.loc);
+        },
+      });
+    }
+    this.elements.checkWrites((fn, value) => {
+      const proven = (e: IrExpr): boolean =>
+        e.type.kind === "f64" && withinInt32(elementRanges.get(fn.name)?.(e));
+      return proven(value) || this.elements.provenElement(fn, value, proven);
+    });
+  }
+}
+
+/** `int32` for Int32 (upstream's wording), the kind's name otherwise. */
+function rangeName(kind: IntegerMarker): string {
+  return kind === "Int32" ? "int32" : kind;
+}
+
+/* ───────────────────────────── Immutable ───────────────────────────── */
+
+/** Read-only and searching array intrinsics: the receiver is not written,
+ * and arguments are compared or copied out, never stored. */
+const ARR_READS = new Set([
+  "length",
+  "getNumber",
+  "indexEq",
+  "indexOf",
+  "includes",
+  "nextPresent",
+  "join",
+  "slice",
+  "flatCopy",
+  "flatOne",
+  "toReversed",
+  "toSpliced",
+  "toSortedPrimitive",
+  "concatSpread",
+]);
+const MAP_READS = new Set([
+  "get",
+  "has",
+  "size",
+  "iterCount",
+  "iterStart",
+  "iterLive",
+  "iterKey",
+  "iterValue",
+  "iterEnter",
+  "iterExit",
+  "clone",
+  "keySet",
+  "valueSet",
+]);
+const SET_READS = new Set([
+  "has",
+  "size",
+  "iterCount",
+  "iterStart",
+  "iterLive",
+  "iterKey",
+  "iterEnter",
+  "iterExit",
+  "clone",
+]);
+/** Element reads whose result can be part of the receiver's graph. */
+const MAP_ELEMENT_READS = new Set(["get", "iterKey", "iterValue"]);
+const SET_ELEMENT_READS = new Set(["iterKey"]);
+/** Copies: a fresh container holding the receiver's elements. */
+const ARR_COPIES = new Set([
+  "slice",
+  "flatCopy",
+  "flatOne",
+  "toReversed",
+  "toSpliced",
+  "concatSpread",
+  "toSortedPrimitive",
+]);
+/** Array intrinsics that move their evaluated arguments into the receiver's
+ * element storage: appends, splice insertions and a fill value. Each stored
+ * value becomes part of the receiver, so it must itself be fresh for the
+ * receiver to stay fresh. */
+const ARR_STORES: ReadonlySet<string> = new Set([
+  "push",
+  "unshift",
+  "pushSpread",
+  "unshiftSpread",
+  "spliceInsert",
+  "fill",
+]);
+const COLLECTION_COPIES = new Set(["clone", "keySet", "valueSet"]);
+/** Expression kinds whose result is the same value as their child. */
+const PASS_THROUGH = new Set<IrExpr["kind"]>([
+  "upcast",
+  "downcast",
+  "unionWrap",
+  "unionRetype",
+  "unionNarrow",
+  "ternary",
+  "logical",
+  "nullish",
+  "orDefault",
+  "seqExpr",
+  "chainRecv",
+  "optChain",
+  "assignExpr",
+]);
+/** Observations: the value is inspected, never stored or written. */
+const OBSERVE = new Set<IrExpr["kind"]>([
+  "toBool",
+  "strEq",
+  "unionEq",
+  "unionFuncEq",
+  "unionIsTag",
+  "unionDisc",
+  "instanceOf",
+  "instanceOfValue",
+  "dynScalarEq",
+  "fieldAbsent",
+  "recordHas",
+  "recordOvfHas",
+  "recordNullProto",
+  "arrayHas",
+  "arrayState",
+  "jsonStringify",
+  "toString",
+  "strConcat",
+  "bin",
+  "unary",
+  "unionKeyGet",
+  "recordKeyGet",
+  "recordOvfKeys",
+]);
+/** Library calls that only read their arguments (console output). */
+const LIB_READS = /^(console\.|inspect\.|json\.stringify)/;
+
+class ImmutableContracts {
+  /** Annotated slots: storing into them requires a fresh or immutable value. */
+  private readonly annotated = new Map<string, ContractNote>();
+  /** Slots that may hold an immutable value (annotated plus inferred). */
+  private readonly mayHold = new Set<string>();
+  /** The first store that made an inferred slot hold an immutable value. */
+  private readonly via = new Map<string, string>();
+  /** Functions whose results are fresh (factory functions). */
+  private readonly freshFns = new Set<string>();
+  private readonly methodImpls = new Map<string, string[]>();
+  private readonly slots: Int32Slots;
+  /** freshLocalsOf results, valid once the factory set is final. */
+  private readonly freshLocalsCache = new Map<string, Set<string>>();
+  private factoriesFinal = false;
+
+  constructor(private readonly c: ContractChecker) {
+    this.slots = new Int32Slots(c.classes);
+    for (const cls of c.classes.values())
+      for (const m of cls.methods ?? []) push(this.methodImpls, m, `%${cls.name}.${m}`);
+  }
+
+  private refuse(note: ContractNote, why: string, hint: string): void {
+    this.c.report(
+      "SC7005",
+      note.loc,
+      `the Immutable contract on '${note.name}' cannot be checked: ${why}`,
+      hint,
+    );
+  }
+
+  run(): void {
+    this.bind();
+    if (this.annotated.size === 0) return;
+    for (const key of this.annotated.keys()) this.mayHold.add(key);
+    this.computeFreshFunctions();
+    // Grow the may-hold set to a fixpoint, then report from the final pass.
+    for (let round = 0; round < 64; round++) {
+      const before = this.mayHold.size;
+      this.pass(false);
+      if (this.mayHold.size === before) break;
+    }
+    this.pass(true);
+    this.immortalGlobals();
+  }
+
+  private bind(): void {
+    const c = this.c;
+    for (const [key, note] of c.notes.bindings) {
+      if (note.marker !== "Immutable") continue;
+      for (const b of c.bindingsOf(key))
+        this.annotated.set(b.fn ? `l:${b.fn.name}\0${b.id}` : `g:${b.id}`, note);
+    }
+    for (const [key, list] of c.notes.functions)
+      for (const note of list)
+        if (note.marker === "Immutable")
+          for (const fn of c.functionsAt(key)) this.annotated.set(`r:${fn.name}`, note);
+    for (const [key, note] of c.notes.fields) {
+      if (note.marker !== "Immutable") continue;
+      const cut = key.lastIndexOf("\0");
+      const field = key.slice(cut + 1);
+      for (const cls of c.classesAt(key.slice(0, cut))) {
+        const family = this.slots.family(cls.name, field);
+        if (family === null)
+          this.refuse(
+            note,
+            `the compiled class has no field '${field}'`,
+            "annotate an ordinary instance field",
+          );
+        else this.annotated.set(`f:${family}`, note);
+      }
+    }
+  }
+
+  private localSlot(fn: IrFunction, id: string): string {
+    return id.startsWith("%g.") ? `g:${id}` : `l:${fn.name}\0${id}`;
+  }
+  private fieldSlot(className: string, field: string): string | null {
+    const family = this.slots.family(className, field);
+    return family === null ? null : `f:${family}`;
+  }
+
+  /** A factory: every return is fresh, built from literals, its own fresh
+   * locals, and values the program already declared Immutable (which no
+   * write can reach, so passing one in cannot make the result shared). */
+  private computeFreshFunctions(): void {
+    const c = this.c;
+    for (let changed = true; changed;) {
+      changed = false;
+      for (const fn of c.mod.functions) {
+        if (this.freshFns.has(fn.name) || fn.async || fn.generator || fn.captures?.length) continue;
+        if (!isRefCounted(fn.returnType) || fn.returnType.kind === "string") continue;
+        const freshLocals = this.freshLocalsOf(fn);
+        const declared = (e: IrExpr): boolean => this.declaredImmutable(fn, e);
+        let returns = 0;
+        let ok = true;
+        walk(fn.body, {
+          stmt: (s) => {
+            if (s.kind !== "return") return;
+            returns++;
+            if (!s.value || !this.fresh(s.value, freshLocals, declared)) ok = false;
+          },
+        });
+        if (ok && returns > 0) {
+          this.freshFns.add(fn.name);
+          changed = true;
+        }
+      }
+    }
+    this.factoriesFinal = true;
+  }
+
+  /** Whether `e` names an annotation the program wrote as Immutable: a
+   * parameter, variable, module constant or instance field. */
+  private declaredImmutable(fn: IrFunction, e: IrExpr): boolean {
+    if (e.kind === "varRef") return this.annotated.has(this.localSlot(fn, e.localId));
+    if (e.kind === "fieldGet") {
+      const slot = this.fieldSlot(e.className, e.field);
+      return slot !== null && this.annotated.has(slot);
+    }
+    return false;
+  }
+
+  /** Locals of `fn` that only ever hold fresh values and are used only as
+   * intrinsic receivers, field-write targets, element writes and returns:
+   * the value leaves the function only by `return`. */
+  private freshLocalsOf(fn: IrFunction): Set<string> {
+    const cached = this.factoriesFinal ? this.freshLocalsCache.get(fn.name) : undefined;
+    if (cached !== undefined) return cached;
+    const result = this.computeFreshLocals(fn);
+    if (this.factoriesFinal) this.freshLocalsCache.set(fn.name, result);
+    return result;
+  }
+
+  private computeFreshLocals(fn: IrFunction): Set<string> {
+    const candidates = new Set(
+      fn.locals.filter((l) => !l.boxed && isRefCounted(l.type)).map((l) => l.id),
+    );
+    for (const p of fn.params) candidates.delete(p.localId);
+    const allowed = new Set<IrExpr>();
+    let ranges: IntegerRanges | undefined;
+    // An element write at a negative, fractional or too-large index adds an
+    // ordinary property instead, and publication refuses arrays that carry
+    // properties: only writes at provable array indexes keep a value fresh.
+    // Writing at the array's own `length` appends, and typed-array writes
+    // never add properties.
+    const appendsTo = (arr: IrExpr, index: IrExpr): boolean =>
+      index.kind === "arrIntrinsic" &&
+      index.method === "length" &&
+      index.args.length === 0 &&
+      samePlace(arr, index.receiver);
+    const arrayIndex = (arr: IrExpr, index: IrExpr): boolean => {
+      if (appendsTo(arr, index)) return true;
+      ranges ??= analyzeIntegerRanges(fn);
+      const range = ranges.get(index);
+      return (
+        range !== null && range !== undefined && range.min >= 0 && range.max <= MAX_ARRAY_INDEX
+      );
+    };
+    // Every write that puts a value into a container: element writes,
+    // field writes, appends and insertions, and Map/Set entries. The values
+    // become part of the container, so a local that receives one only stays
+    // fresh when the value is fresh too. `spread` marks a store that copies
+    // a source container's elements instead (`push(...xs)`): only the
+    // element values join the receiver, so a primitive element type needs
+    // nothing of the source, while object elements stay shared and the
+    // source must be fresh.
+    const stores: { target: IrExpr; values: readonly IrExpr[]; spread?: boolean }[] = [];
+    const uses = new Map<string, IrExpr[]>();
+    const inits = new Map<string, IrExpr>();
+    const temporaries = new Set(fn.locals.filter((l) => l.source === undefined).map((l) => l.id));
+    walk(fn.body, {
+      stmt: (s) => {
+        if (s.kind === "varDecl" && s.init !== undefined && s.init !== null)
+          inits.set(s.localId, s.init);
+        if (s.kind === "arraySet") stores.push({ target: s.arr, values: [s.value] });
+        if (s.kind === "fieldSet" || s.kind === "recordSet")
+          stores.push({ target: s.obj, values: [s.value] });
+      },
+      expr: (e) => {
+        if (e.kind === "varRef") {
+          const list = uses.get(e.localId);
+          if (list === undefined) uses.set(e.localId, [e]);
+          else list.push(e);
+          return;
+        }
+        if (e.kind === "arrIntrinsic" && ARR_STORES.has(e.method))
+          stores.push({
+            target: e.receiver,
+            values: e.args,
+            ...(e.method === "pushSpread" || e.method === "unshiftSpread" ? { spread: true } : {}),
+          });
+        else if (e.kind === "mapIntrinsic" && e.method === "set")
+          stores.push({ target: e.receiver, values: e.args.slice(0, 2) });
+        else if (e.kind === "setIntrinsic" && e.method === "add")
+          stores.push({ target: e.receiver, values: e.args.slice(0, 1) });
+      },
+    });
+    // A store target is a local the store reaches directly or through its
+    // own storage (`box.items`, `rows[0]`), or through a compiler temporary
+    // (`%pushTarget.0 = out`, then a push on the temporary). Resolve the
+    // chain back to the local the value becomes part of.
+    const aliases = new Map<string, string>();
+    const candidateOf = (target: IrExpr): string | null => {
+      let targetExpr: IrExpr = target;
+      for (let steps = 0; steps < 12; steps++) {
+        if (
+          targetExpr.kind === "fieldGet" ||
+          targetExpr.kind === "recordGet" ||
+          targetExpr.kind === "arrayGet"
+        ) {
+          targetExpr = targetExpr.kind === "arrayGet" ? targetExpr.arr : targetExpr.obj;
+          continue;
+        }
+        if (targetExpr.kind !== "varRef") return null;
+        const init = inits.get(targetExpr.localId);
+        if (temporaries.has(targetExpr.localId) && init !== undefined) {
+          targetExpr = init;
+          continue;
+        }
+        let id = targetExpr.localId;
+        for (let hops = 0; hops < 8; hops++) {
+          const alias = aliases.get(id);
+          if (alias === undefined) break;
+          id = alias;
+        }
+        return candidates.has(id) ? id : null;
+      }
+      return null;
+    };
+    for (let changed = true; changed;) {
+      changed = false;
+      // The positions in which a local does not escape: reads through its
+      // own array, map or set, writes into its own storage, and returns.
+      // Rebuilt every round because the stored-value rule below depends on
+      // which locals are still candidates.
+      allowed.clear();
+      aliases.clear();
+      walk(fn.body, {
+        stmt: (s) => {
+          if (s.kind === "return" && s.value?.kind === "varRef") allowed.add(s.value);
+          if ((s.kind === "fieldSet" || s.kind === "recordSet") && s.obj.kind === "varRef")
+            allowed.add(s.obj);
+          if (s.kind === "bytesSet" && s.arr.kind === "varRef") allowed.add(s.arr);
+          if (
+            (s.kind === "arraySet" || s.kind === "arraySetUndefined") &&
+            s.arr.kind === "varRef" &&
+            arrayIndex(s.arr, s.index)
+          )
+            allowed.add(s.arr);
+        },
+        expr: (e) => {
+          if (
+            (e.kind === "arrIntrinsic" || e.kind === "mapIntrinsic" || e.kind === "setIntrinsic") &&
+            e.receiver.kind === "varRef"
+          )
+            allowed.add(e.receiver);
+          if ((e.kind === "arrayGet" || e.kind === "arrayHas") && e.arr.kind === "varRef")
+            allowed.add(e.arr);
+          if ((e.kind === "fieldGet" || e.kind === "recordGet") && e.obj.kind === "varRef")
+            allowed.add(e.obj);
+        },
+      });
+      // `out.push(v)` reaches the array through a compiler temporary
+      // (`%pushTarget.0 = out`) that is the write target. A temporary whose
+      // every use is one of the allowed positions is the array itself, so
+      // naming it is not an escape. A value stored into a candidate is now
+      // part of that candidate, so a read that structurally builds the value
+      // is not an escape either — but the arguments of a call inside the
+      // value are handed to code that may keep them, so they stay escapes.
+      // Both add to `allowed`, so they reach a fixpoint.
+      for (let grew = true; grew;) {
+        grew = false;
+        for (const id of temporaries) {
+          if (aliases.has(id)) continue;
+          const init = inits.get(id);
+          if (init === undefined || init.kind !== "varRef") continue;
+          if (!(uses.get(id) ?? []).every((use) => allowed.has(use))) continue;
+          aliases.set(id, init.localId);
+          if (!allowed.has(init)) {
+            allowed.add(init);
+            grew = true;
+          }
+        }
+        for (const store of stores) {
+          if (candidateOf(store.target) === null) continue;
+          for (const value of store.values)
+            storedReads(value, (ref) => {
+              if (allowed.has(ref)) return;
+              allowed.add(ref);
+              grew = true;
+            });
+        }
+      }
+      walk(fn.body, {
+        stmt: (s) => {
+          const value = s.kind === "varDecl" ? s.init : s.kind === "assign" ? s.value : undefined;
+          const target = s.kind === "varDecl" || s.kind === "assign" ? s.localId : "";
+          if (value && candidates.has(target) && !this.fresh(value, candidates)) {
+            candidates.delete(target);
+            changed = true;
+          }
+          if (s.kind === "forOf" && candidates.delete(s.localId)) changed = true;
+        },
+        expr: (e) => {
+          if (e.kind === "varRef" && candidates.has(e.localId) && !allowed.has(e)) {
+            candidates.delete(e.localId);
+            changed = true;
+          }
+          if ((e.kind === "assignExpr" || e.kind === "incDec") && candidates.delete(e.localId))
+            changed = true;
+        },
+      });
+      // A stored value that is not a primitive, a fresh construction or a
+      // value the program declared Immutable leaves the receiver reachable
+      // from the value's other references, so the receiver stops being
+      // fresh: `shared[0]!` pushed into a new array is a shared object.
+      const declared = (e: IrExpr): boolean => this.declaredImmutable(fn, e);
+      for (const store of stores) {
+        const id = candidateOf(store.target);
+        if (id === null) continue;
+        const elem = arrayElement(store.target.type);
+        if (store.spread && elem !== undefined && cannotAlias(elem)) continue;
+        if (store.values.every((value) => this.fresh(value, candidates, declared))) continue;
+        candidates.delete(id);
+        changed = true;
+      }
+    }
+    return candidates;
+  }
+
+  /** A value nothing else references: a literal, a fresh construction or
+   * factory result, a primitive, or a value that is already immutable. */
+  private fresh(
+    e: IrExpr,
+    freshLocals: ReadonlySet<string>,
+    derived?: (e: IrExpr) => boolean,
+  ): boolean {
+    if (!isRefCounted(e.type) || e.type.kind === "string") return true;
+    if (derived?.(e)) return true;
+    switch (e.kind) {
+      case "strLit":
+      case "unitLit":
+        return true;
+      case "varRef":
+        return freshLocals.has(e.localId);
+      case "arrayLit": {
+        // A spread copies the source's elements: primitive elements cannot
+        // alias anything, while object elements stay shared with the source.
+        const spreads = new Set(e.spreads ?? []);
+        return e.elems.every((x, i) =>
+          spreads.has(i)
+            ? this.copyOfFresh(x, freshLocals, derived)
+            : this.fresh(x, freshLocals, derived),
+        );
+      }
+      case "recordLit":
+        return e.fields.every((f) => this.fresh(f.value, freshLocals, derived));
+      case "mapNew":
+        return (e.seed ?? []).every(
+          (p) =>
+            this.fresh(p.key, freshLocals, derived) && this.fresh(p.value, freshLocals, derived),
+        );
+      case "setNew":
+        return e.seed === undefined || this.fresh(e.seed, freshLocals, derived);
+      case "new":
+        return (
+          this.constructorKeepsThis(e.className) &&
+          e.args.every((a) => this.fresh(a, freshLocals, derived))
+        );
+      case "call": {
+        if (!this.freshFns.has(e.callee)) return false;
+        // A factory result of primitive elements keeps no mutable reference
+        // to its arguments: only element values are copied into it.
+        const elem = arrayElement(e.type);
+        if (elem !== undefined && cannotAlias(elem)) return true;
+        return e.args.every((a) => this.fresh(a, freshLocals, derived));
+      }
+      case "arrIntrinsic":
+        return this.intrinsicFresh(e, freshLocals, derived);
+      case "upcast":
+      case "downcast":
+      case "unionWrap":
+      case "unionRetype":
+      case "unionNarrow":
+        return this.fresh(e.value, freshLocals, derived);
+      case "ternary":
+        return (
+          this.fresh(e.then, freshLocals, derived) && this.fresh(e.else_, freshLocals, derived)
+        );
+      default:
+        return false;
+    }
+  }
+
+  /** A copy of `source`'s elements (a spread, `Array.from`, `slice`,
+   * `concat`) puts element values in a new container. Primitive elements
+   * cannot alias anything, so the copy is fresh whatever `source` is.
+   * Object elements stay shared with the source, so the source must itself
+   * be fresh. */
+  private copyOfFresh(
+    source: IrExpr,
+    freshLocals: ReadonlySet<string>,
+    derived?: (e: IrExpr) => boolean,
+  ): boolean {
+    if (source.type.kind === "string") return true;
+    const elem = arrayElement(source.type);
+    if (elem !== undefined && cannotAlias(elem)) return true;
+    return this.fresh(source, freshLocals, derived);
+  }
+
+  /** An array intrinsic that yields a container: the copying methods build
+   * a new array whose element values come from the receiver and arguments,
+   * and `reverse` returns the receiver it sorted in place. The flattening
+   * copies return the result array they are handed, so even for primitive
+   * elements it must be fresh. */
+  private intrinsicFresh(
+    e: Extract<IrExpr, { kind: "arrIntrinsic" }>,
+    freshLocals: ReadonlySet<string>,
+    derived?: (e: IrExpr) => boolean,
+  ): boolean {
+    if (e.method === "reverse") return this.fresh(e.receiver, freshLocals, derived);
+    if (!ARR_COPIES.has(e.method)) return false;
+    if (
+      (e.method === "flatCopy" || e.method === "flatOne") &&
+      !this.fresh(e.receiver, freshLocals, derived)
+    )
+      return false;
+    const elem = arrayElement(e.type);
+    if (elem !== undefined && cannotAlias(elem)) return true;
+    return (
+      this.fresh(e.receiver, freshLocals, derived) &&
+      e.args.every((a) => this.fresh(a, freshLocals, derived))
+    );
+  }
+
+  /** The constructor chain uses `this` only to read and write its own
+   * fields: the new object is referenced from nowhere else. */
+  private constructorKeepsThis(className: string): boolean {
+    const c = this.c;
+    for (
+      let cls = c.classes.get(className);
+      cls;
+      cls = cls.base ? c.classes.get(cls.base) : undefined
+    ) {
+      if (cls.runtime === true) return false;
+      const ctor = c.functions.get(`%${cls.name}.constructor`);
+      if (!ctor) continue;
+      const self = ctor.params[0]?.localId;
+      if (self === undefined) return false;
+      const allowed = new Set<IrExpr>();
+      walk(ctor.body, {
+        stmt: (s) => {
+          if (s.kind === "fieldSet" && s.obj.kind === "varRef") allowed.add(s.obj);
+        },
+        expr: (e) => {
+          if (e.kind === "fieldGet" && e.obj.kind === "varRef") allowed.add(e.obj);
+          if (
+            e.kind === "call" &&
+            e.callee === `%${cls.base}.constructor` &&
+            e.args[0]?.kind === "varRef"
+          )
+            allowed.add(e.args[0]);
+        },
+      });
+      let ok = true;
+      walk(ctor.body, {
+        expr: (e) => {
+          if (e.kind === "varRef" && e.localId === self && !allowed.has(e)) ok = false;
+          if (e.kind === "closure" && e.captures.includes(self)) ok = false;
+        },
+      });
+      if (!ok) return false;
+    }
+    return true;
+  }
+
+  /** One pass over the program: derived values, stores, escapes and
+   * mutations. With `report`, violations become diagnostics. */
+  private pass(report: boolean): void {
+    const c = this.c;
+    for (const fn of c.mod.functions) {
+      const derivedMemo = new Map<IrExpr, boolean>();
+      const freshLocals = this.freshLocalsOf(fn);
+      const derived = (e: IrExpr): boolean => {
+        if (!isRefCounted(e.type) || e.type.kind === "string") return false;
+        const memo = derivedMemo.get(e);
+        if (memo !== undefined) return memo;
+        derivedMemo.set(e, false);
+        const result = this.derivedExpr(fn, e, derived);
+        derivedMemo.set(e, result);
+        return result;
+      };
+      const hold = (slot: string | null, value: IrExpr, at: string): void => {
+        if (slot === null || !derived(value)) return;
+        if (!this.mayHold.has(slot)) {
+          this.mayHold.add(slot);
+          this.via.set(slot, at);
+        }
+      };
+      const store = (slot: string | null, value: IrExpr, how?: string): void => {
+        if (slot === null) return;
+        const note = this.annotated.get(slot);
+        if (note && report && !this.fresh(value, freshLocals, derived)) {
+          c.report(
+            "SC7004",
+            value.loc,
+            `the value stored into '${note.name}' (Immutable) may be referenced elsewhere: '${c.text(value.loc)}' is not a fresh literal, construction or factory result`,
+            "build the value in place (a literal, `new`, or a function that returns what it builds), so no mutable reference to it remains",
+          );
+        }
+        hold(slot, value, how ?? `stored at ${c.where(value.loc)}`);
+      };
+      const mutate = (target: IrExpr, at: SrcLoc, what: string): void => {
+        if (!report || !derived(target)) return;
+        const shown = c.text(target.loc);
+        const origin = this.originOf(fn, target);
+        const subject =
+          origin === "" && shown !== "" && shown !== c.text(at) ? ` ('${shown}')` : "";
+        c.report(
+          "SC7004",
+          at,
+          `${what} writes to a value that may be Immutable${subject}${origin}`,
+          "Immutable values cannot be written through any reference; copy the value before changing it",
+        );
+      };
+      const escape = (value: IrExpr, at: SrcLoc, what: string): void => {
+        if (!report || !derived(value)) return;
+        c.report(
+          "SC7005",
+          at,
+          `a value that may be Immutable escapes to ${what}, where writes are not checked: '${c.text(value.loc)}'${this.originOf(fn, value)}`,
+          "keep Immutable values in typed code, or copy the value before handing it out",
+        );
+      };
+      const args = (callee: string, list: IrExpr[], offset: number, at: SrcLoc): void => {
+        const target = c.functions.get(callee);
+        list.forEach((arg, i) => {
+          const param = target?.params[i + offset];
+          if (!target || !param)
+            return escape(arg, arg.loc, `a call to '${c.displayName(callee)}'`);
+          store(
+            `l:${callee}\0${param.localId}`,
+            arg,
+            `passed to '${c.displayName(callee)}' at ${c.where(at)}`,
+          );
+        });
+      };
+      walk(fn.body, {
+        stmt: (s) => {
+          switch (s.kind) {
+            case "varDecl":
+              if (s.init) store(this.localSlot(fn, s.localId), s.init);
+              break;
+            case "assign":
+              store(this.localSlot(fn, s.localId), s.value);
+              break;
+            case "return":
+              if (s.value)
+                store(
+                  `r:${fn.name}`,
+                  s.value,
+                  `returned from '${c.displayName(fn.name)}' at ${c.where(s.loc)}`,
+                );
+              break;
+            case "fieldSet":
+              mutate(s.obj, s.loc, `'${c.text(s.loc)}'`);
+              store(this.fieldSlot(s.className, s.field), s.value);
+              break;
+            case "recordSet":
+              mutate(s.obj, s.loc, `'${c.text(s.loc)}'`);
+              store(`s:${s.shapeId}\0${s.field}`, s.value);
+              break;
+            case "recordKeySet":
+              mutate(s.obj, s.loc, `'${c.text(s.loc)}'`);
+              escape(s.value, s.loc, "a dynamically keyed property");
+              break;
+            case "recordKeyDelete":
+              mutate(s.obj, s.loc, `'${c.text(s.loc)}'`);
+              break;
+            case "arraySet":
+              mutate(s.arr, s.loc, `'${c.text(s.loc)}'`);
+              store(`e:${typeKey(s.arr.type)}`, s.value);
+              break;
+            case "arraySetLength":
+            case "arraySetUndefined":
+            case "arrayDelete":
+            case "bytesSet":
+              mutate(s.arr, s.loc, `'${c.text(s.loc)}'`);
+              break;
+            case "forOf": {
+              const slot = this.localSlot(fn, s.localId);
+              const elems =
+                this.mayHold.has(`e:${typeKey(s.iterable.type)}`) ||
+                this.mayHold.has(`se:${typeKey(s.iterable.type)}`);
+              if ((elems || derived(s.iterable)) && !this.mayHold.has(slot)) {
+                this.mayHold.add(slot);
+                this.via.set(slot, `iterated at ${c.where(s.loc)}`);
+              }
+              break;
+            }
+            case "throw":
+              escape(s.value, s.loc, "a throw");
+              break;
+          }
+        },
+        expr: (e) => {
+          switch (e.kind) {
+            case "assignExpr":
+              store(this.localSlot(fn, e.localId), e.value);
+              return;
+            case "call":
+              return args(e.callee, e.args, 0, e.loc);
+            case "new":
+              return args(`%${e.className}.constructor`, e.args, 1, e.loc);
+            case "virtualCall":
+              for (const impl of this.methodImpls.get(e.method) ?? []) args(impl, e.args, 0, e.loc);
+              return;
+            case "fieldIncDec":
+              return mutate(e.obj, e.loc, `'${c.text(e.loc)}'`);
+            case "arrIntrinsic":
+              if (ARR_COPIES.has(e.method))
+                this.copyElements(e.receiver, e.type, derived(e.receiver), c.where(e.loc));
+              if (!ARR_READS.has(e.method)) mutate(e.receiver, e.loc, `'${c.text(e.loc)}'`);
+              for (const a of e.args) {
+                if (e.method === "indexOf" || e.method === "includes" || e.method === "indexEq")
+                  continue;
+                store(`e:${typeKey(e.receiver.type)}`, a);
+              }
+              return;
+            case "mapIntrinsic":
+              if (COLLECTION_COPIES.has(e.method))
+                this.copyElements(e.receiver, e.type, derived(e.receiver), c.where(e.loc));
+              if (!MAP_READS.has(e.method)) mutate(e.receiver, e.loc, `'${c.text(e.loc)}'`);
+              if (e.method === "set") {
+                if (e.args[0]) store(`mk:${typeKey(e.receiver.type)}`, e.args[0]);
+                if (e.args[1]) store(`mv:${typeKey(e.receiver.type)}`, e.args[1]);
+              }
+              return;
+            case "setIntrinsic":
+              if (COLLECTION_COPIES.has(e.method))
+                this.copyElements(e.receiver, e.type, derived(e.receiver), c.where(e.loc));
+              if (!SET_READS.has(e.method)) mutate(e.receiver, e.loc, `'${c.text(e.loc)}'`);
+              if (e.method === "add" && e.args[0])
+                store(`se:${typeKey(e.receiver.type)}`, e.args[0]);
+              return;
+            case "arrayLit":
+              for (const x of e.elems) store(`e:${typeKey(e.type)}`, x);
+              return;
+            case "recordLit":
+              if (e.type.kind === "record")
+                for (const f of e.fields) store(`s:${e.type.shapeId}\0${f.name}`, f.value);
+              return;
+            case "mapNew":
+              for (const p of e.seed ?? []) {
+                store(`mk:${typeKey(e.type)}`, p.key);
+                store(`mv:${typeKey(e.type)}`, p.value);
+              }
+              return;
+            case "closure": {
+              const lifted = c.functions.get(e.fnName);
+              e.captures.forEach((id, i) => {
+                const inner = lifted?.captures?.[i];
+                const outer = this.localSlot(fn, id);
+                if (!inner) return;
+                const innerSlot = `l:${lifted!.name}\0${inner.localId}`;
+                if (this.mayHold.has(outer) && !this.mayHold.has(innerSlot)) {
+                  this.mayHold.add(innerSlot);
+                  this.via.set(innerSlot, `captured at ${c.where(e.loc)}`);
+                }
+              });
+              return;
+            }
+            case "libCall":
+              if (!LIB_READS.test(e.fn) && !ALWAYS_THROW_LIB_FNS.has(e.fn))
+                for (const a of e.args) escape(a, a.loc, `the library call ${e.fn}`);
+              return;
+            case "callValue":
+              for (const a of e.args) escape(a, a.loc, "a call through a function value");
+              if (e.receiver) escape(e.receiver, e.receiver.loc, "a call through a function value");
+              return;
+          }
+          if (PASS_THROUGH.has(e.kind) || OBSERVE.has(e.kind)) return;
+          if (e.kind === "fieldGet" || e.kind === "recordGet" || e.kind === "arrayGet") return;
+          // Any other parent: a derived child goes somewhere this pass does
+          // not follow (dynamic conversions, runtime helpers).
+          everyExprChild(
+            e,
+            (child) => {
+              escape(child, child.loc, describeSink(e));
+              return true;
+            },
+            () => true,
+          );
+        },
+      });
+    }
+  }
+
+  /** A copy of a container whose elements may be immutable: the copy's
+   * element slots may hold them too (the copy itself is fresh). */
+  private copyElements(
+    receiver: IrExpr,
+    result: IrType,
+    receiverDerived: boolean,
+    where: string,
+  ): void {
+    const at = `copied at ${where}`;
+    const rk = typeKey(receiver.type);
+    const sources = [`e:${rk}`, `mk:${rk}`, `mv:${rk}`, `se:${rk}`];
+    if (!receiverDerived && !sources.some((slot) => this.mayHold.has(slot))) return;
+    const key = typeKey(result);
+    for (const slot of [`e:${key}`, `se:${key}`, `mk:${key}`, `mv:${key}`])
+      if (!this.mayHold.has(slot)) {
+        this.mayHold.add(slot);
+        this.via.set(slot, at);
+      }
+  }
+
+  private originOf(fn: IrFunction, e: IrExpr): string {
+    let root = e;
+    for (let steps = 0; steps < 16; steps++) {
+      if (root.kind === "fieldGet" || root.kind === "recordGet") root = root.obj;
+      else if (root.kind === "arrayGet") root = root.arr;
+      else if (root.kind === "seqExpr") root = root.result;
+      // A receiver that is the element when it is present and otherwise
+      // throws (`xs[i]!.push(v)`) is that element read.
+      else if (
+        root.kind === "ternary" &&
+        root.else_.kind === "libCall" &&
+        root.else_.fn === "error.nodeThrow"
+      )
+        root = root.then;
+      else if (
+        root.kind === "upcast" ||
+        root.kind === "downcast" ||
+        root.kind === "unionWrap" ||
+        root.kind === "unionRetype" ||
+        root.kind === "unionNarrow" ||
+        root.kind === "assignExpr"
+      )
+        root = root.value;
+      else if (root.kind === "varRef") {
+        // Compiler temporaries (no source binding): follow their initializer.
+        const id = root.localId;
+        const local = fn.locals.find((l) => l.id === id);
+        if (local === undefined || local.source !== undefined) break;
+        let init: IrExpr | null = null;
+        walk(fn.body, {
+          stmt: (s) => {
+            if (s.kind === "varDecl" && s.localId === id && s.init) init ??= s.init;
+          },
+        });
+        if (init === null) break;
+        root = init;
+      } else break;
+    }
+    if (root.kind === "varRef") {
+      const slot = this.localSlot(fn, root.localId);
+      const note = this.annotated.get(slot);
+      if (note) return ` (from '${note.name}')`;
+      const via = this.via.get(slot);
+      if (via) {
+        const local = fn.locals.find((l) => l.id === root.localId);
+        return ` ('${local?.name ?? root.localId}' may be an Immutable value ${via})`;
+      }
+    }
+    return "";
+  }
+
+  /** Whether `e` may evaluate to (part of) an Immutable value. */
+  private derivedExpr(fn: IrFunction, e: IrExpr, derived: (e: IrExpr) => boolean): boolean {
+    switch (e.kind) {
+      case "varRef":
+        return this.mayHold.has(this.localSlot(fn, e.localId));
+      case "fieldGet": {
+        const slot = this.fieldSlot(e.className, e.field);
+        return (slot !== null && this.mayHold.has(slot)) || derived(e.obj);
+      }
+      case "recordGet":
+        return (
+          this.mayHold.has(
+            `s:${e.obj.type.kind === "record" ? e.obj.type.shapeId : ""}\0${e.field}`,
+          ) || derived(e.obj)
+        );
+      case "arrayGet":
+        return (
+          this.mayHold.has(`e:${typeKey(e.arr.type)}`) ||
+          immutableElement(e.arr.type, derived(e.arr))
+        );
+      case "mapIntrinsic":
+        return (
+          MAP_ELEMENT_READS.has(e.method) &&
+          (this.mayHold.has(`mv:${typeKey(e.receiver.type)}`) ||
+            this.mayHold.has(`mk:${typeKey(e.receiver.type)}`) ||
+            derived(e.receiver))
+        );
+      case "setIntrinsic":
+        return (
+          SET_ELEMENT_READS.has(e.method) &&
+          (this.mayHold.has(`se:${typeKey(e.receiver.type)}`) || derived(e.receiver))
+        );
+      case "call": {
+        // The checked element read `%arr.idxOr.<elem>` is one helper shared by
+        // every `a[i]` of its element type, so its result slot holds the union
+        // of all call sites. Read it as the element read it is: derived exactly
+        // when the array passed here may hold Immutable elements.
+        const arg = e.args[0];
+        if (arg !== undefined && e.callee.startsWith("%arr.idxOr."))
+          return (
+            this.mayHold.has(`e:${typeKey(arg.type)}`) || immutableElement(arg.type, derived(arg))
+          );
+        return this.mayHold.has(`r:${e.callee}`);
+      }
+      case "virtualCall":
+        return (this.methodImpls.get(e.method) ?? []).some((impl) => this.mayHold.has(`r:${impl}`));
+      case "ternary":
+        return derived(e.then) || derived(e.else_);
+      case "logical":
+      case "nullish":
+        return derived(e.left) || derived(e.right);
+      case "seqExpr":
+        return derived(e.result);
+      case "assignExpr":
+        return derived(e.value);
+      case "upcast":
+      case "downcast":
+      case "unionWrap":
+      case "unionRetype":
+      case "unionNarrow":
+        return derived(e.value);
+      default: {
+        if (!PASS_THROUGH.has(e.kind)) return false;
+        let any = false;
+        everyExprChild(
+          e,
+          (child) => {
+            any ||= derived(child);
+            return !any;
+          },
+          () => true,
+        );
+        return any;
+      }
+    }
+  }
+
+  /** Module constants with an Immutable annotation, written once from a
+   * fresh value of a publishable type: the backend makes them immortal. */
+  private immortalGlobals(): void {
+    const c = this.c;
+    if (c.library || c.diagnostics.length > 0) return;
+    const out: string[] = [];
+    for (const g of c.mod.globals ?? []) {
+      if (
+        g.mutable ||
+        g.tdz === true ||
+        g.initFlag !== undefined ||
+        !this.annotated.has(`g:${g.id}`)
+      )
+        continue;
+      if (!this.publishable(g.type, new Set())) continue;
+      let writes = 0;
+      let fresh = true;
+      for (const fn of c.mod.functions) {
+        const freshLocals = this.freshLocalsOf(fn);
+        walk(fn.body, {
+          stmt: (s) => {
+            if ((s.kind === "assign" || s.kind === "varDecl") && s.localId === g.id) {
+              writes++;
+              const value = s.kind === "assign" ? s.value : s.init;
+              if (!value || !this.fresh(value, freshLocals)) fresh = false;
+            }
+          },
+          expr: (e) => {
+            if (e.kind === "assignExpr" && e.localId === g.id) writes++;
+          },
+        });
+      }
+      if (writes === 1 && fresh) out.push(g.id);
+    }
+    c.record("immortalGlobals", out);
+  }
+
+  /** Static types the publication walkers handle without a refusal. */
+  private publishable(t: IrType, seen: Set<string>): boolean {
+    const c = this.c;
+    switch (t.kind) {
+      case "f64":
+      case "bool":
+      case "string":
+      case "undefinedT":
+      case "nullT":
+        return true;
+      case "array":
+      case "set":
+        return this.publishable(t.elem, seen);
+      case "map":
+        return this.publishable(t.key, seen) && this.publishable(t.value, seen);
+      case "record": {
+        const key = `r:${t.shapeId}`;
+        if (seen.has(key)) return true;
+        seen.add(key);
+        const shape = c.mod.records?.find((r) => r.id === t.shapeId);
+        return (
+          !!shape && !shape.indexValue && shape.fields.every((f) => this.publishable(f.type, seen))
+        );
+      }
+      case "union": {
+        const key = `u:${t.unionId}`;
+        if (seen.has(key)) return true;
+        seen.add(key);
+        const def = c.mod.unions?.find((u) => u.id === t.unionId);
+        return !!def && def.arms.every((arm) => this.publishable(arm, seen));
+      }
+      case "object": {
+        const key = `o:${t.className}`;
+        if (seen.has(key)) return true;
+        seen.add(key);
+        // Subclasses can stand behind a base-typed reference.
+        for (const cls of c.classes.values()) {
+          let under = false;
+          for (
+            let x: IrClassDef | undefined = cls;
+            x;
+            x = x.base ? c.classes.get(x.base) : undefined
+          )
+            if (x.name === t.className) under = true;
+          if (!under) continue;
+          for (
+            let x: IrClassDef | undefined = cls;
+            x;
+            x = x.base ? c.classes.get(x.base) : undefined
+          )
+            if (x.runtime === true || x.localCaptures !== undefined) return false;
+          if (!cls.fields.every((f) => f.name.startsWith("%") || this.publishable(f.type, seen)))
+            return false;
+        }
+        return true;
+      }
+      default:
+        return false;
+    }
+  }
+}
+
+function describeSink(e: IrExpr): string {
+  switch (e.kind) {
+    case "dynFrom":
+    case "dynObjLit":
+    case "dynArrLit":
+      return "dynamic (any or unknown) code";
+    case "intrinsic":
+      return `the runtime (${e.name})`;
+    default:
+      return `an operation scriptc does not follow (${e.kind})`;
+  }
+}

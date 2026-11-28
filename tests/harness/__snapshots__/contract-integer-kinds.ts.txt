@@ -1,0 +1,53 @@
+contract-integer-kinds.ts:10:14 - error SC7002: the value stored into 'Pixel.r' (Uint8) is not provably an integer in [0, 255]: 'v % 256'
+
+   9 |   set(v: number): void {
+  10 |     this.r = v % 256;
+     |              ^~~~~~~
+  11 |   }
+
+  hint: make the Uint8 conversion explicit, for example '(v % 256) & 0xff', so Node computes the same value
+
+contract-integer-kinds.ts:15:10 - error SC7002: the value returned from 'signed' (Int8) is not provably an integer in [-128, 127]: 'x & 0xff'
+
+  14 | function signed(x: Uint32): Int8 {
+  15 |   return x & 0xff;
+     |          ^~~~~~~~
+  16 | }
+
+  hint: make the Int8 conversion explicit, for example '((x & 0xff) << 24) >> 24', so Node computes the same value
+
+contract-integer-kinds.ts:19:5 - error SC7002: the value stored into 'h' (Uint64) is not provably a bigint in [0, 2^64 - 1]: 'h * 3n'
+
+  18 | let h: Uint64 = 1n;
+  19 | h = h * 3n;
+     |     ^~~~~~
+  20 | const big: Int64 = 9223372036854775808n;
+
+  hint: make the Uint64 conversion explicit, for example 'BigInt.asUintN(64, h * 3n)', so Node computes the same value
+
+contract-integer-kinds.ts:20:20 - error SC7002: the value stored into 'big' (Int64) is not provably a bigint in [-2^63, 2^63 - 1]: '9223372036854775808n'
+
+  19 | h = h * 3n;
+  20 | const big: Int64 = 9223372036854775808n;
+     |                    ^~~~~~~~~~~~~~~~~~~~
+  21 | 
+
+  hint: make the Int64 conversion explicit, for example 'BigInt.asIntN(64, 9223372036854775808n)', so Node computes the same value
+
+contract-integer-kinds.ts:23:9 - error SC7003: the Uint16 contract on 'Box.size' cannot be checked: the compiled class has no field 'size'
+
+  22 | class Box<T> {
+  23 |   size: Uint16 = 0;
+     |         ^~~~~~
+  24 |   value: T;
+
+  hint: annotate an ordinary instance field
+
+contract-integer-kinds.ts:23:9 - error SC7003: the Uint16 contract on 'Box.size' cannot be checked: the class is generic or extends a runtime-provided class
+
+  22 | class Box<T> {
+  23 |   size: Uint16 = 0;
+     |         ^~~~~~
+  24 |   value: T;
+
+  hint: move the field to a non-generic class

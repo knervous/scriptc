@@ -3,8 +3,8 @@ import { constructedValue, type ConstructorReturnPlan } from "./constructor-retu
 import { keyedHelperName, setStableNameFiles, setStableNameRoot, stableFileName } from "./stable-names.js";
 import { createHash } from "node:crypto";
 import { intrinsicPragma } from "../../ir/intrinsic-libraries.js";
-import { checkContracts, withContracts } from "../../ir/contract-check.js";
-import { collectContractAnnotations, isContractSource } from "../contract-annotations.js";
+import { checkContracts } from "../../contracts/check.js";
+import { collectContractAnnotations } from "../contract-types.js";
 import { HEADER_PLACEHOLDER_CODE, objectModuleHash, objectModuleTag, type ObjectUnit } from "../../link/module-tag.js";
 import { nativeAnyEnabled, browserTarget, wasmGcLaneTarget, defines, isDomLibFile, isNodeWebGlobalMirror, nativeDyn, hostHandlesEnabled, interfaceClassArmsEnabled, stripSourceSites, sourcePathPrefixMap, sourceSitePath } from "../browser-target.js";
 import { trapUnimplementedVirtualCalls } from "./unimplemented-virtual.js";
@@ -285,6 +285,9 @@ export interface LowerResult {
   /** Coverage only (LowerOptions.coverage): the unreached remainder,
    * lowered in a throwaway pass — blockers in it can never fail a build. */
   unreached?: { diagnostics: ScrDiagnostic[]; stats: LowerStats };
+  /** Contract types (contracts/check.ts): performance warnings, InlineArray
+   * fields that keep ordinary arrays (SC6105). */
+  contractWarnings?: ScrDiagnostic[];
   /** --dynamic only: every Node builtin the embedded npm graph imports,
    * shimmed or not — the coverage report's island honesty. */
   npmBuiltins?: NpmBuiltinUse[];
@@ -614,6 +617,49 @@ export function lowerToIr(
       for (const fn of resultLowerer.liftedFns) lifted.add(fn.name);
       result.module.functions = withoutUnreachedFunctions(result.module, lifted, options.libRoots ?? []).functions;
       timing("unreached-lifted-drop");
+    }
+  }
+  // Contract types (@scriptc/types and the int intrinsic library): the
+  // written annotations, checked against the finished IR (contracts/check.ts)
+  // on every backend. Acyclic object types name the IR unit the program
+  // lowered them to; a type the module never uses has no unit (mapping it now
+  // only touches the lowerer's tables, never the finished module).
+  if (result.module) {
+    const lowered = result.module;
+    const contracts = collectContractAnnotations(program.getTypeChecker(), moduleOrder, (type) => {
+      let mapped: IrType | null = null;
+      try {
+        mapped = resultLowerer.mapTypeOf(type);
+      } catch {
+        mapped = null;
+      }
+      if (mapped?.kind === "object")
+        return lowered.classes?.some((c) => c.name === mapped.className) ? `object:${mapped.className}` : null;
+      if (mapped?.kind === "record")
+        return lowered.records?.some((r) => r.id === mapped.shapeId) ? `record:${mapped.shapeId}` : null;
+      if (mapped?.kind === "union")
+        return lowered.unions?.some((u) => u.id === mapped.unionId) ? `union:${mapped.unionId}` : null;
+      return null;
+    });
+    timing("contract-annotations", { found: contracts.count });
+    if (contracts.diagnostics.length > 0)
+      result = { ...result, module: null, diagnostics: [...result.diagnostics, ...contracts.diagnostics] };
+    else if (contracts.count > 0) {
+      const sourceTexts = new Map(moduleOrder.map((sf) => [sf.fileName, sf.text] as const));
+      // Every intrinsic library module (any `@scriptc-intrinsics` pragma) states
+      // its own contracts as facts its tests establish.
+      const trustedFiles = new Set(moduleOrder.filter((sf) => intrinsicPragma(sf.text) !== null).map((sf) => sf.fileName));
+      const checked = checkContracts(lowered, contracts, sourceTexts, {
+        library: options.libRoots !== undefined,
+        trustedFiles,
+      });
+      timing("contracts");
+      if (checked.diagnostics.length > 0)
+        result = { ...result, module: null, diagnostics: [...result.diagnostics, ...checked.diagnostics] };
+      else {
+        if (checked.contracts) lowered.contracts = { ...lowered.contracts, ...checked.contracts };
+        if (checked.warnings.length > 0) result = { ...result, contractWarnings: checked.warnings };
+      }
     }
   }
   if (options.coverage !== true) return result;
@@ -5120,25 +5166,12 @@ export class Lowerer {
             } : {}),
           };
     if (module) sanitizeUnregisteredClassTypes(module, (name) => this.classes.has(name));
-    // Fixed-width integer contracts (ir/contract-check.ts): prove every write, or refuse the program.
-    let checkedModule = module;
-    if (module) {
-      const annotations = this.moduleOrder.flatMap((sf) => {
-        const trusted = intrinsicPragma(sf.text) !== null;
-        return collectContractAnnotations(sf, (spec) => isContractSource(spec, sf.fileName), trusted);
-      });
-      const checked = checkContracts(module, annotations);
-      if (checked.diagnostics.length) {
-        for (const d of checked.diagnostics) this.diags.push(d);
-        checkedModule = null;
-      } else withContracts(module, checked.contracts);
-    }
     // Execution tiers from the final bodies (ir/tiers.ts): upstream's validator
     // holds static-tier functions to the boundary vocabulary (invariant I1).
     // A function's tier is not serialized and no backend of this fork reads it.
     assignLegacyTiers(functions);
     return {
-      module: checkedModule,
+      module,
       diagnostics: this.diags,
       runtimeFences: this.runtimeFences,
       stats: this.stats,
@@ -7255,6 +7288,12 @@ export class Lowerer {
     // fences (a mismatch there is a compile-time story, not a boundary).
     if (expected.kind === "func" && expr.type.kind === "func" && !typeEquals(expr.type, expected)) {
       const sf = this.program.getSourceFile(expr.loc.file);
+      // The plain WasmGC lane (no browser) has no checked-dynamic function boundary (no dyn calls): the general
+      // adapter below wraps the function statically when its pieces convert.
+      if (sf !== undefined && isJsSourceFile(sf) && wasmGcLaneTarget() && !browserTarget()) {
+        const adapter = this.funcCoerceAdapter(expr.type, expected, expr.loc);
+        if (adapter) return { kind: "call", callee: adapter, args: [expr], type: expected, loc: expr.loc };
+      }
       if (
         sf !== undefined && isJsSourceFile(sf) &&
         dynHoldable(expr.type, (id) => this.shapes.get(id), (id) => this.unions.get(id)) &&

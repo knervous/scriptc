@@ -164,8 +164,9 @@ export function jsBridge(ctx: JsBridgeContext) {
       case "callFn": return call(`js.callFn.${n - 1}`, ps(n), E, a);
       case "callFnThis": return call(`js.callFnThis.${n - 2}`, ps(n), E, a);
       case "construct": return call(`js.construct.${n - 1}`, ps(n), E, a);
-      case "callSpread": return call("js.callSpread", [E, E, E], E, a);
-      case "callMethodSpread": return call("js.callMethodSpread", [E, E, E, E], E, [a[0]!, name(e.name, e.loc), a[1]!, a[2]!]);
+      // (the spread source's spelling for the nullish TypeError)
+      case "callSpread": return call("js.callSpread", [E, E, E, E], E, [...a, name(e.spreadName ?? e.name ?? "", e.loc)]);
+      case "callMethodSpread": return call("js.callMethodSpread", [E, E, E, E, E], E, [a[0]!, name(e.name, e.loc), a[1]!, a[2]!, name(e.spreadName ?? "", e.loc)]);
       case "objLit": return call(`js.objLit.${n}`, ps(n), E, a);
       case "arrLit": return call(`js.arrLit.${n}`, ps(n), E, a);
       case "defineGetter": return call("js.defineGetter", [E, E, E], E, a);

@@ -111,7 +111,7 @@ const EXPR_FIELDS: Classified<IrExpr> = {
   jsonStringify: { indent: "other" },
   dynCheck: { inferredSite: "other" },
   // This fork's island and page operations.
-  jsOp: { name: "other", calleeName: "other", domInterface: "other" },
+  jsOp: { name: "other", calleeName: "other", spreadName: "other", domInterface: "other" },
 };
 
 const STMT_FIELDS: Classified<IrStmt> = {

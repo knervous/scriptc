@@ -43,7 +43,7 @@ import { hoistAwaits } from "./async-hoist.js";
 import { ATTR_FIXED, ATTR_HIDDEN, ATTR_INTERNAL, ATTR_READONLY, CTOR_FIELD0, KEY_MARK, OBJ_INLINE0, ctorFieldLayout, dynObjects } from "./dyn-object.js";
 import { DATE_HOST_MEMBERS, DATE_LOCALE_METHODS } from "../../ir/date-host.js";
 import { serializeModule } from "../../ir/serialize.js";
-import { FORK_BYTES_ELEMENT_NAME, FORK_BYTES_ELEMENT_SIZE, DYN_CLASS_PROPERTIES, accessorSlotProp, shapeHasAccessorSlots, canDynCheckTo, RUNTIME_ERROR_CLASSES, isUnitType, typeEquals, typeKey as irTypeKey, type IrExpr, type IrFunction, type IrModule, type IrStmt, type IrType, type SrcLoc } from "../../ir/ir.js";
+import { FORK_BYTES_ELEMENT_NAME, FORK_BYTES_ELEMENT_SIZE, DYN_CLASS_PROPERTIES, accessorSlotProp, shapeHasAccessorSlots, canDynCheckTo, RUNTIME_ERROR_CLASSES, isUnitType, typeEquals, typeKey as irTypeKey, type IrExpr, type IrFunction, type IrModule, type IrRecordField, type IrStmt, type IrType, type SrcLoc } from "../../ir/ir.js";
 import { bytesRuntime } from "./bytes.js";
 import { findSimdModule, simdLowering } from "./simd.js";
 import { INT_LOWERED, f16Lowering, intLowering, mathLowering } from "./intrinsics.js";
@@ -857,7 +857,7 @@ function emitModule(given: IrModule, opts: WasmGcEmitOptions, setPhase: (phase: 
   const mathLib = intrinsicModule(mod, "math");
   const f16Lib = intrinsicModule(mod, "f16");
   if (simdLib) types.simdV128 = simdLib.v128Class;
-  // Fixed-width integer fields (ir/contract-check.ts): every class of the family stores the field as i32 (packed for
+  // Fixed-width integer fields (contracts/check.ts): every class of the family stores the field as i32 (packed for
   // 8- and 16-bit types). Int32 fields come from int32Fields, the narrower and unsigned ones from narrowFields.
   {
     const families = new Map<string, NarrowKind>();
@@ -4170,7 +4170,9 @@ function emitModule(given: IrModule, opts: WasmGcEmitOptions, setPhase: (phase: 
       case "string": return boxDyn("dyn:str", value);
       case "union": return unionToDyn(t.unionId, value);
       // Native dyn: a typed array stays the same array; dyn access dispatches on its type ($tarr.*).
-      case "array": registerDynRef(t); return value;
+      // The plain lane has no typed readers: the array enters as a dyn array of its converted elements.
+      case "array": if (plainDyn() && plainDynElem(t.elem)) return m.call(typedArrayToDyn(t.elem), [value], binaryen.anyref);
+        registerDynRef(t); return value;
       // A byte array enters as its page view over module memory (storage shared, so writes alias).
       // A u8 $Bytes that is its storage's registered whole-buffer value IS an ArrayBuffer (typed arrays never
       // are): it stays the raw $Bytes in dyn, one representation on every conversion path. Any other typed
@@ -4191,7 +4193,8 @@ function emitModule(given: IrModule, opts: WasmGcEmitOptions, setPhase: (phase: 
       // Native dyn: a typed record stays the same struct; dyn property access dispatches on its type ($typed.*).
       // A typed tuple is an array to JS: it stays the same struct too, and dyn
       // index/length/method access dispatches through the $tarr family.
-      case "record": registerDynRef(t); return value;
+      case "record": if (plainDyn()) return plainRecordToDyn(t.shapeId, value, loc);
+        registerDynRef(t); return value;
       // A function: itself (a forwarding typed-slot view answers the function it views).
       // A closure whose signature has no dyn form (a typed array, a promise or a page-backed
       // record parameter) has no dyn invoker, so untyped code could only reach it as a
@@ -4257,6 +4260,59 @@ function emitModule(given: IrModule, opts: WasmGcEmitOptions, setPhase: (phase: 
     else if (t.kind === "map" || t.kind === "set") collectionsInDyn.set(GcTypes.typeKey(t), t);
   };
   const TARR_READ_METHODS = new Set(["at", "flat", "flatMap", "with", "toSorted", "toReversed", "toSpliced", "findLast", "findLastIndex", "reduceRight", "slice", "indexOf", "lastIndexOf", "includes", "join", "toString", "forEach", "map", "filter", "some", "every", "find", "findIndex", "reduce", "concat"]);
+  /** The plain lane (neither native nor engine dyn): its records carry no type id, so dyn code reads no typed record
+   * or array; a typed value entering dyn is a dyn object or array of its converted fields (a copy, the boundary
+   * dynCheck already draws the other way: dyn into a typed value builds a new one). */
+  const plainDyn = () => !types.nativeDyn && !types.engineDyn;
+  const plainDynElem = (elem: IrType): boolean => elem.kind === "f64" || elem.kind === "bool" || elem.kind === "string" || elem.kind === "dyn"
+    || elem.kind === "record" || (elem.kind === "array" && plainDynElem(elem.elem));
+  /** Whether a value of record shape `shapeId` can hold a value of its own shape (through fields, arrays and union
+   * arms), so a field-by-field copy of a cyclic graph would not end. */
+  const recordReachesItself = (shapeId: string): boolean => {
+    const seen = new Set<string>();
+    const visit = (t: IrType): boolean => {
+      if (t.kind === "record") {
+        if (t.shapeId === shapeId) return true;
+        if (seen.has(t.shapeId)) return false;
+        seen.add(t.shapeId);
+        const shape = recordsById.get(t.shapeId);
+        return !!shape && (shape.fields.some(f => visit(f.type)) || (shape.indexValue !== undefined && visit(shape.indexValue)));
+      }
+      if (t.kind === "array") return visit(t.elem);
+      if (t.kind === "union") return types.unionArms(t.unionId).some(visit);
+      return false;
+    };
+    const shape = recordsById.get(shapeId);
+    return !!shape && (shape.fields.some(f => visit(f.type)) || (shape.indexValue !== undefined && visit(shape.indexValue)));
+  };
+  /** Plain lane: a typed record entering dyn as a fresh dyn object with its declared fields in declaration order (a
+   * tuple as a dyn array). A field that holds undefined where the shape lets it be unset is left out, as the typed
+   * readers' key lists leave it out. */
+  const plainRecordToDyn = (shapeId: string, value: number, loc?: SrcLoc): number => {
+    const shape = recordsById.get(shapeId)!;
+    if (shape.tuple) return m.call(tupleToDyn(shapeId), [value], binaryen.anyref);
+    if (shape.indexValue !== undefined) return unsupported("dynamic value from a record with an index signature on the plain WasmGC lane", loc);
+    if (types.recordOf(shapeId).js !== undefined || types.recordExtOf(shapeId)) return unsupported("dynamic value from a page-backed record on the plain WasmGC lane", loc);
+    if (recordReachesItself(shapeId)) return unsupported("dynamic value from a recursive record type on the plain WasmGC lane (a copy of a cyclic value would not end)", loc);
+    const rec = types.recordOf(shapeId), name = `$rec.todyn.${symbol(shapeId)}`;
+    defineOwn(name, [rec.ref], binaryen.anyref, () => {
+      const r = () => m.local.get(0, rec.ref), o = temp(dynObj().ref), field = temp(binaryen.anyref);
+      const unsettable = (f: IrRecordField) => f.optional === true || (f.type.kind === "union" && types.unionArms(f.type.unionId).some(a => a.kind === "undefinedT"));
+      return m.block(null, [
+        m.if(m.ref.is_null(r()), m.return(m.ref.null(binaryen.anyref))),
+        m.local.set(o, newDynObj()),
+        ...declaredFields(shapeId).filter(f => !f.name.startsWith("%")).map(f => {
+          const converted = toDynValue(recGet(shapeId, f.name, r(), f.type), f.type, loc);
+          const set = (v: number) => dobj.set(m.local.get(o, dynObj().ref), m.i32.const(dobj.atom(f.name)), v);
+          return unsettable(f)
+            ? m.block(null, [m.local.set(field, converted), m.if(m.i32.eqz(m.ref.is_null(m.local.get(field, binaryen.anyref))), set(m.local.get(field, binaryen.anyref)))])
+            : set(converted);
+        }),
+        m.local.get(o, dynObj().ref),
+      ], binaryen.anyref);
+    });
+    return m.call(name, [value], binaryen.anyref);
+  };
   /** A typed tuple as a fresh dyn array of its boxed elements (a JS tuple is an array). */
   const tupleToDyn = (shapeId: string) => {
     const rec = types.recordOf(shapeId), name = `$tuple.todyn.${symbol(shapeId)}`;
@@ -4287,9 +4343,9 @@ function emitModule(given: IrModule, opts: WasmGcEmitOptions, setPhase: (phase: 
         m.local.set(out, newDynArr(m.i32.add(m.struct.get(ARRAY_LEN, a(), i32, false), m.i32.const(1)))),
         m.block(`td.done.${n}`, [m.loop(`td.next.${n}`, m.block(null, [
           m.br(`td.done.${n}`, m.i32.ge_s(m.local.get(i, i32), m.struct.get(ARRAY_LEN, a(), i32, false))),
-          // A hole stays a hole (presence-sensitive methods skip it).
+          // A hole stays a hole (presence-sensitive methods skip it); the plain lane has no hole value, so it reads undefined.
           m.call(dynArrPush(), [m.local.get(out, dynArr().ref),
-            m.if(m.i32.eq(m.call(arrayRuntime(elem).state, [a(), m.local.get(i, i32)], i32), m.i32.const(SLOT_HOLE)), hole(), boxed)], binaryen.none),
+            m.if(m.i32.eq(m.call(arrayRuntime(elem).state, [a(), m.local.get(i, i32)], i32), m.i32.const(SLOT_HOLE)), plainDyn() ? m.ref.null(binaryen.anyref) : hole(), boxed)], binaryen.none),
           m.local.set(i, m.i32.add(m.local.get(i, i32), m.i32.const(1))), m.br(`td.next.${n}`)]))]),
         m.local.get(out, dynArr().ref),
       ], binaryen.anyref);
@@ -12984,7 +13040,9 @@ function emitModule(given: IrModule, opts: WasmGcEmitOptions, setPhase: (phase: 
           return m.call(symbol(e.callee), dyn.withThis(args, e.args.map(a => valueType(a.type)), dyn.undef()), valueType(e.type));
         }
         const abi = i32Abi.get(e.callee);
-        if (abi && (!abi.result || e.type.kind === "f64") && (!abi.atomResult || e.type.kind === "string")) {
+        // A dual method (I32Abi.dual): its i32 entry when every narrowed argument is a proven int32, else its double copy.
+        const dualWide = abi?.dual === true && e.args.some((a, i) => abi.params[i] && intKind(a) !== "s");
+        if (abi && !dualWide && (!abi.result || e.type.kind === "f64") && (!abi.atomResult || e.type.kind === "string")) {
           // The i32 entry: proven-int32 arguments as their i32 (i32Value; exact), atom arguments as their atoms (atomArg),
           // the result converted back (an atom result to its text; atomResultCall takes the atom itself).
           const call = m.call(i32Entry(e.callee), e.args.map((a, i) => abi.params[i] ? i32Value(a) : abi.atoms[i] ? atomArg(a) : expr(a)), abi.result || abi.atomResult ? i32 : valueType(e.type));
@@ -13950,7 +14008,10 @@ function emitModule(given: IrModule, opts: WasmGcEmitOptions, setPhase: (phase: 
         // A method-style call through a typed function value (`obj.f(x)`):
         // compiled functions read `this` from THIS_N, the convention the dyn
         // invokers use; the frontend bound the receiver to a local (evaluated once).
-        if (e.receiver && !types.nativeDyn) return unsupported("method-style closure call", e.loc);
+        // The plain lane passes no receiver: forwarding the caller's own `this` (a function adapter's call) forwards
+        // the undefined the callee reads there anyway.
+        const forwardsThis = e.receiver?.kind === "libCall" && (e.receiver.fn === "dyn.this" || e.receiver.fn === "dyn.generatorThis");
+        if (e.receiver && !types.nativeDyn && !forwardsThis) return unsupported("method-style closure call", e.loc);
         if (e.callee.type.kind !== "func") return unsupported(`calling ${e.callee.type.kind}`, e.loc);
         const info = types.closureOf(e.callee.type);
         // `f(x)` where f is a module-level `const f = (…) => …` with nothing captured: the binding is read as before (its
@@ -13976,7 +14037,7 @@ function emitModule(given: IrModule, opts: WasmGcEmitOptions, setPhase: (phase: 
         const c = temp(info.ref);
         return m.block(null, [
           m.local.set(c, expr(e.callee)),
-          ...(e.receiver ? [m.global.set(THIS_N, toDyn(e.receiver))] : []),
+          ...(e.receiver && types.nativeDyn ? [m.global.set(THIS_N, toDyn(e.receiver))] : []),
           callSlot(m.struct.get(0, m.local.get(c, info.ref), i32, false), [m.struct.get(1, m.local.get(c, info.ref), binaryen.structref, false), ...e.args.map(expr)], info, info.result),
         ], info.result);
       }
@@ -14445,8 +14506,10 @@ function emitModule(given: IrModule, opts: WasmGcEmitOptions, setPhase: (phase: 
    * parameter write or return drops the assumption and requeues the functions it may affect. SCRIPTC_WASMGC_NO_I32_PARAMS=1
    * turns it off. */
   const I32_ABI_OFF = typeof process !== "undefined" && process.env?.["SCRIPTC_WASMGC_NO_I32_PARAMS"] === "1";
-  /** Per narrowed function: its i32 parameters and result, and (atom ABI) its atom parameters and result. */
-  type I32Abi = { params: boolean[]; result: boolean; atoms: boolean[]; atomResult: boolean };
+  /** Per narrowed function: its i32 parameters and result, and (atom ABI) its atom parameters and result. `dual`: a class
+   * method (i32MethodCandidate) whose ordinary symbol keeps its own double-ABI body instead of forwarding to the i32
+   * entry, so a reach other than a proven direct call (a vtable, a dyn invoker) never truncates a double. */
+  type I32Abi = { params: boolean[]; result: boolean; atoms: boolean[]; atomResult: boolean; dual?: true };
   const i32Abi = new Map<string, I32Abi>();
   /** Functions whose results intKind may treat as int32: the candidates while the fixpoint runs, then the final set. */
   let abiResults: Set<string> | null = null;
@@ -14508,6 +14571,18 @@ function emitModule(given: IrModule, opts: WasmGcEmitOptions, setPhase: (phase: 
   /** A `new C(args)` site as the direct call it makes: `this` (no atom: never checked) then the arguments. */
   const atomNewSite = (e: IrExpr & { kind: "new" }): IrExpr & { kind: "call" } =>
     ({ kind: "call", callee: `%${e.className}.constructor`, args: [{ kind: "unitLit", unit: "undefined", type: { kind: "undefinedT" } } as unknown as IrExpr, ...e.args], type: { kind: "void" }, loc: e.loc } as unknown as IrExpr & { kind: "call" });
+  /** A class method whose body reads or writes typed-array or DataView storage (a layout view's accessor, `getX(i)` over
+   * `this.view`): its direct calls may take the i32 ABI as a module function's do, its index arriving as an exact int32
+   * and the access taking the integer bounds test. The method's other reaches (virtual dispatch, dyn code) keep a
+   * double-ABI copy of the body (I32Abi.dual). */
+  const i32MethodCandidate = (f: IrFunction): boolean => {
+    if (!f.name.startsWith("%") || f.params[0]?.name !== "this") return false;
+    const dot = f.name.lastIndexOf("."), cls = classDef(f.name.slice(1, dot)), member = f.name.slice(dot + 1);
+    if (cls === undefined || member === "constructor" || !(cls.methods ?? []).includes(member)) return false;
+    let storage = false;
+    walkObjects(f.body, (v: any) => { if (v?.kind === "bytesIntrinsic" || v?.kind === "bytesGet" || v?.kind === "bytesSet") storage = true; });
+    return storage;
+  };
   const computeI32Abi = (): void => {
     if (I32_ABI_OFF || shared || census) return;
     // Module globals are classified without call facts (cached before the optimistic assumptions exist).
@@ -14515,12 +14590,13 @@ function emitModule(given: IrModule, opts: WasmGcEmitOptions, setPhase: (phase: 
     const count = new Map<string, number>();
     for (const f of mod.functions) count.set(f.name, (count.get(f.name) ?? 0) + 1);
     const linkExports = new Set(opts.link?.exports ?? []);
-    type Cand = { f: IrFunction; params: Set<string>; ret: boolean; atoms: Set<string>; aret: boolean };
+    type Cand = { f: IrFunction; params: Set<string>; ret: boolean; atoms: Set<string>; aret: boolean; dual?: true };
     const cands = new Map<string, Cand>();
     for (const f of mod.functions) {
       // A constructor: atom parameters only (atomCtorCandidate), every site a `new` or a super call.
       if (atomCtorCandidate(f, count)) { const { atoms } = atomAbiSeed(f); if (atoms.size) cands.set(f.name, { f, params: new Set(), ret: false, atoms, aret: false }); continue; }
-      if (count.get(f.name) !== 1 || (f.name.startsWith("%") && !isModuleFunction(f)) || f.name === mod.entry || f.async || f.generator || f.captures?.length || f.classCaptures?.length
+      const method = i32MethodCandidate(f);
+      if (count.get(f.name) !== 1 || (f.name.startsWith("%") && !isModuleFunction(f) && !method) || f.name === mod.entry || f.async || f.generator || f.captures?.length || f.classCaptures?.length
         || readsThis.has(f.name) || linkExports.has(f.name) || closureTargets.has(f.name) || noSignature().has(f.name) || rtaStubs.has(f.name)) continue;
       // `arguments` (sloppy mode aliases the parameters) and rest forms keep the double ABI.
       if (f.paramModes?.some(mode => mode !== "required" && mode !== "omittable")) continue;
@@ -14528,7 +14604,7 @@ function emitModule(given: IrModule, opts: WasmGcEmitOptions, setPhase: (phase: 
       const params = new Set(f.params.filter(p => p.type.kind === "f64" && !grouped?.has(p.localId) && f.locals.some(l => l.id === p.localId && l.type.kind === "f64" && !l.boxed && !l.tdz)).map(p => p.localId));
       const ret = f.returnType.kind === "f64";
       const { atoms, aret } = atomAbiSeed(f);
-      if (params.size || ret || atoms.size || aret) cands.set(f.name, { f, params, ret, atoms, aret });
+      if (params.size || ret || atoms.size || aret) cands.set(f.name, { f, params, ret, atoms, aret, ...(method ? { dual: true as const } : {}) });
     }
     if (!cands.size) return;
     // Every string spelling a candidate's name, other than a call's callee and a function's own name, is a reference
@@ -14544,7 +14620,8 @@ function emitModule(given: IrModule, opts: WasmGcEmitOptions, setPhase: (phase: 
     };
     for (const key in mod) if (key !== "functions") walk((mod as unknown as Record<string, unknown>)[key]);
     for (const f of mod.functions) for (const key in f) if (key !== "name" && key !== "sourceName" && key !== "loc") walk((f as unknown as Record<string, unknown>)[key]);
-    for (const name of escaped) { cands.get(name)!.params.clear(); cands.get(name)!.atoms.clear(); }
+    // (a dual method's other reaches take its double-ABI copy)
+    for (const name of escaped) if (!cands.get(name)!.dual) { cands.get(name)!.params.clear(); cands.get(name)!.atoms.clear(); }
     atomCtorValued(cands, valued);
     // The call graph over candidates; an arity mismatch anywhere keeps double parameters.
     const calls = new Map<IrFunction, (IrExpr & { kind: "call" })[]>(), callers = new Map<string, Set<IrFunction>>();
@@ -14593,7 +14670,8 @@ function emitModule(given: IrModule, opts: WasmGcEmitOptions, setPhase: (phase: 
         }
         for (const call of calls.get(f) ?? []) {
           const callee = cands.get(call.callee)!;
-          if (!callee.params.size) continue;
+          // A dual method keeps its narrowed parameters: a call whose argument is not an exact int32 takes the double copy.
+          if (!callee.params.size || callee.dual) continue;
           callee.f.params.forEach((p, i) => {
             if (callee.params.has(p.localId) && intKind(call.args[i]!) !== "s") { callee.params.delete(p.localId); enqueue(callee.f); }
           });
@@ -14601,7 +14679,7 @@ function emitModule(given: IrModule, opts: WasmGcEmitOptions, setPhase: (phase: 
       }
     } finally { provenReads = savedReads; i32Kinds = savedKinds; curRanges = NO_RANGES; }
     for (const [name, c] of cands) if (c.ret || c.params.size || c.atoms.size || c.aret)
-      i32Abi.set(name, { params: c.f.params.map(p => c.params.has(p.localId)), result: c.ret, atoms: c.f.params.map(p => c.atoms.has(p.localId)), atomResult: c.aret });
+      i32Abi.set(name, { params: c.f.params.map(p => c.params.has(p.localId)), result: c.ret, atoms: c.f.params.map(p => c.atoms.has(p.localId)), atomResult: c.aret, ...(c.dual ? { dual: true as const } : {}) });
     abiResults = new Set([...i32Abi].filter(([, a]) => a.result).map(([name]) => name));
     atomResults = new Set([...i32Abi].filter(([, a]) => a.atomResult).map(([name]) => name));
     // SCRIPTC_WASMGC_I32_ABI_STATS=1: which functions took the i32 ABI.
@@ -23000,14 +23078,15 @@ function emitModule(given: IrModule, opts: WasmGcEmitOptions, setPhase: (phase: 
   /** The Wasm result of a function's entry: a promise (async), a generator object (generator, sync or async), else its return type. */
   function stubResult(f: IrFunction): number { return f.generator ? types.generatorRef() : f.async ? types.promiseRef() : valueType(f.returnType); }
 
-  function emitFunction(f: IrFunction) {
+  function emitFunction(f: IrFunction, wide = false) {
     if (f.async && !f.generator || f.generator && !f.async) return emitAsyncFunction(f);
     if (f.async || f.generator) unsupported(`${f.async ? "async" : "generator"} function ${f.name}`, f.loc);
     if (f.classCaptures?.length) unsupported(`class capture in ${f.name}`, f.loc);
     const capturing = Boolean(f.captures?.length);
     const closureType = closureTargets.get(f.name);
     if (capturing && !closureType) unsupported(`capturing function ${f.name} without a closure site`, f.loc);
-    const abi = capturing ? undefined : i32Abi.get(f.name);
+    // `wide`: a dual method's double-ABI copy (I32Abi.dual), emitted as if the function had no i32 ABI.
+    const abi = capturing || wide ? undefined : i32Abi.get(f.name);
     const params = [...(capturing ? [binaryen.structref] : []), ...f.params.map((p, i) => abi?.params[i] || abi?.atoms[i] ? i32 : valueType(p.type))];
     fn = { ir: f, locals: new Map(), boxed: new Map(), prealloc: new Set(), localTypes: [], paramCount: params.length, labels: [], finallies: [], fence: fenceable(f) };
     provenReads = computeProvenReads(f);
@@ -23184,7 +23263,8 @@ function emitModule(given: IrModule, opts: WasmGcEmitOptions, setPhase: (phase: 
       // The i32 entry holds the body; the ordinary symbol converts and forwards (every reach but a direct call).
       m.addFunction(i32Entry(f.name), binaryen.createType(params), result, fn.localTypes, bodyExpr);
       attachLocs(i32Entry(f.name));
-      i32AbiWrapper(f, abi, false);
+      if (abi.dual) emitFunction(f, true);
+      else i32AbiWrapper(f, abi, false);
       return;
     }
     else m.addFunction(symbol(f.name), binaryen.createType(params), result, fn.localTypes, bodyExpr);

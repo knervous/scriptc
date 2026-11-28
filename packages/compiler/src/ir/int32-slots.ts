@@ -1200,7 +1200,7 @@ export function analyzeInt32Slots(mod: IrModule, inputs: Int32SlotInputs = {}): 
   const reason = (key: string, why: string): void => {
     if (!slots.reasons.has(key)) slots.reasons.set(key, why);
   };
-  // Int32 contracts (ir/contract-check.ts proved every write): pinned
+  // Int32 contracts (contracts/check.ts proved every write): pinned
   // candidates the fixpoint below never drops, plus local facts.
   const contracts = mod.contracts;
   for (const family of contracts?.int32Fields ?? []) {

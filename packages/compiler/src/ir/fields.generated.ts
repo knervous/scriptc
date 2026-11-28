@@ -316,6 +316,7 @@ export function eachStringField(
       visit(node.op, "op");
       if (typeof node.name === "string") visit(node.name, "name");
       if (typeof node.calleeName === "string") visit(node.calleeName, "calleeName");
+      if (typeof node.spreadName === "string") visit(node.spreadName, "spreadName");
       if (typeof node.domInterface === "string") visit(node.domInterface, "domInterface");
       return;
     }
@@ -1172,6 +1173,9 @@ export function walkExprFields(node: IrExpr, walker: IrFieldWalker, skipType: bo
       }
       if (node.calleeName !== undefined && node.calleeName !== null) {
         walker.string(node.calleeName);
+      }
+      if (node.spreadName !== undefined && node.spreadName !== null) {
+        walker.string(node.spreadName);
       }
       if (node.domInterface !== undefined && node.domInterface !== null) {
         walker.string(node.domInterface);
@@ -3416,7 +3420,7 @@ export type IrFieldsCurrent = [
   Unread<ValuesNotRead<Extract<IrExpr, { kind: "jsMarshal" }>["opaque"]>>,
   Unread<ValuesNotRead<Extract<IrExpr, { kind: "jsMarshal" }>["bufferStore"]>>,
   Unread<ValuesNotRead<Extract<IrExpr, { kind: "jsMarshal" }>["unshared"]>>,
-  Unread<FieldsNotRead<Extract<IrExpr, { kind: "jsOp" }>, "kind" | "op" | "name" | "calleeName" | "domReceiver" | "domInterface" | "args" | "type" | "loc">>,
+  Unread<FieldsNotRead<Extract<IrExpr, { kind: "jsOp" }>, "kind" | "op" | "name" | "calleeName" | "spreadName" | "domReceiver" | "domInterface" | "args" | "type" | "loc">>,
   Unread<ValuesNotRead<Extract<IrExpr, { kind: "jsOp" }>["domReceiver"]>>,
   Unread<FieldsNotRead<Extract<IrExpr, { kind: "jsonStringify" }>, "kind" | "value" | "indent" | "circular" | "type" | "loc">>,
   Unread<ValuesNotRead<Extract<IrExpr, { kind: "jsonStringify" }>["circular"]>>,
