@@ -132,6 +132,8 @@ await program.main();
 
 The program's own code is compiled; each call into the package, and each value it hands over, crosses to the page. `--compile-packages <list>` (`compilePackages` in `compile`) compiles the named packages' JavaScript into the module instead, so nothing crosses. It takes packages whose CommonJS or ES module exports the compiler can follow. A package whose entry chooses its build with `process.env.NODE_ENV` at load time, as React's does, needs that name defined (the compiler's `define` option, which the package does not expose yet), and for React the result is slower than leaving it npm JavaScript, so React stays npm JavaScript.
 
+With packages compiled in, a page program's `any` values are compiled values, as the packages' own are, rather than page values: a program usually types a compiled-in package's values `any` (the package's declarations are not what its JavaScript is compiled from), and as page values each use of them would cross to the page and back. `--no-native-any` (`nativeAny: false` in `compile`) keeps `any` a page value.
+
 ## The compiler as a function
 
 ```js
@@ -141,7 +143,7 @@ const result = await compile("src/app.ts", { outPath: "dist/app.wasm", browser: 
 if (!result.ok) for (const d of result.diagnostics) console.error(formatDiagnostic(d));
 ```
 
-`compile` takes `capabilities`, `targets`, `conditions` and `compilePackages` as the CLI does, and `dynModel: "engine"` with `browser` for the smallest page module (dynamic values as engine values behind host calls; UI libraries need the default, `"native"`). It resolves to `{ ok: true, wasmPath, hostSidecarPath, capabilitiesPath, capabilities, variants, variantsPath?, explainCapabilities }` or `{ ok: false, diagnostics }`, where each diagnostic has a `message` and, when known, a `code`, `file`, `line` and `hint`. It runs under Node only; type declarations ship for both entry points.
+`compile` takes `capabilities`, `targets`, `conditions`, `compilePackages` and `nativeAny` as the CLI does, and `dynModel: "engine"` with `browser` for the smallest page module (dynamic values as engine values behind host calls; UI libraries need the default, `"native"`). It resolves to `{ ok: true, wasmPath, hostSidecarPath, capabilitiesPath, capabilities, variants, variantsPath?, explainCapabilities }` or `{ ok: false, diagnostics }`, where each diagnostic has a `message` and, when known, a `code`, `file`, `line` and `hint`. It runs under Node only; type declarations ship for both entry points.
 
 ## Capabilities
 

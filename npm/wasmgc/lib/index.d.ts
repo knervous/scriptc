@@ -19,6 +19,10 @@ export interface CompileOptions {
    * JavaScript. A package the compiler cannot take this way either stays npm JavaScript (with a note on stderr) or
    * fails the build with its diagnostics. */
   compilePackages?: string[];
+  /** With `compilePackages` and `browser`: whether the program's `any` values are compiled values (the default,
+   * `true`), as the compiled-in packages' values are, or page values (`false`, the representation without
+   * `compilePackages`). */
+  nativeAny?: boolean;
   /** With `browser`: how dynamic values are represented. `native` (the default) compiles them as WasmGC values, which
    * UI libraries and frameworks need; `engine` keeps them as engine values behind host calls, for the smallest module. */
   dynModel?: "native" | "engine";

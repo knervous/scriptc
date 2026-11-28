@@ -331,6 +331,11 @@ export interface GenericInstance {
       return param.initializer ? { type: DYN, mode: "omittable", bodyType: DYN }
         : { type: DYN, mode: param.questionToken ? "omittable" : "required" };
     }
+    // A then-handler receiving a dynamic import's namespace (markModuleNsHandlerParams), in TypeScript or JavaScript.
+    const moduleNs = lowerer.moduleNsParamOverrides.get(param);
+    if (moduleNs !== undefined) {
+      return { type: moduleNs, mode: param.questionToken ? "omittable" : "required" };
+    }
     const executor = param.parent;
     const construction = executor?.parent;
     const nativeExecutor = executor && (ts.isArrowFunction(executor) || ts.isFunctionExpression(executor)) && ts.isNewExpression(construction) &&
@@ -355,10 +360,6 @@ export interface GenericInstance {
       return param.initializer
         ? { type: DYN, mode: "omittable", bodyType: DYN }
         : { type: DYN, mode: "required" };
-    }
-    const moduleNs = lowerer.moduleNsParamOverrides.get(param);
-    if (moduleNs !== undefined) {
-      return { type: moduleNs, mode: param.questionToken ? "omittable" : "required" };
     }
     // Island-handle params (a then-handler receiving a dynamic import's
     // namespace handle — markJsvalHandlerParams): jsval, whatever the
@@ -8738,7 +8739,9 @@ function loweredTemplateStrings(
     while (ts.isParenthesizedExpression(e)) e = e.expression;
     if (!ts.isArrowFunction(e) && !ts.isFunctionExpression(e)) return;
     for (const p of e.parameters) {
-      if (ts.isIdentifier(p.name) && !p.dotDotDotToken && !p.initializer) {
+      // A destructured namespace (`({ C }) => C(...)`) reads its exports by name, as `ns.C` does.
+      const destructured = ts.isObjectBindingPattern(p.name) && p.name.elements.every((el) => !el.dotDotDotToken);
+      if ((ts.isIdentifier(p.name) || destructured) && !p.dotDotDotToken && !p.initializer) {
         lowerer.moduleNsParamOverrides.set(p, type);
       }
     }

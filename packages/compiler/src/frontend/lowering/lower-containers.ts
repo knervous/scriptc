@@ -2425,10 +2425,10 @@ export function tryLowerNumberComparedRead(lowerer: Lowerer, operand: IrExpr, lo
     // that ToBoolean has a static answer (bool passes through; f64/string
     // by value; a truthy-answerable union by its arm — the
     // `packages.some((p) => p.scripts[name])` idiom, whose callback
-    // returns the index read's `string | undefined`).
+    // returns the index read's `string | undefined`), and an untyped value's (`(b) => id.includes(b)`, id untyped).
     const fnRet = fnArg.type.ret;
     const truthyRet =
-      fnRet.kind === "bool" || fnRet.kind === "f64" || fnRet.kind === "string" || fnRet.kind === "dyn" ||
+      fnRet.kind === "bool" || fnRet.kind === "f64" || fnRet.kind === "string" || fnRet.kind === "dyn" || fnRet.kind === "jsval" ||
       (fnRet.kind === "union" &&
         (lowerer.unions.get(fnRet.unionId)?.arms ?? []).every((a) => a.kind !== "dyn" && a.kind !== "caught" && a.kind !== "jsval"));
     if (!truthyRet) lowerer.badType(argNode, lowerer.typeOf(argNode));

@@ -6,6 +6,7 @@ import { rewriteBundlerCjsWithParser } from "./npm-static-rewrite-host.js";
 import { isBundlerCjsCandidate } from "./npm-static-rewrite-syntax.js";
 import * as syntax from "./npm-static-declaration-syntax.js";
 import { applyNpmStaticDefinedBranches } from "./npm-static-defined-branches.js";
+import { applyNpmStaticForwardingImports } from "./npm-static-forwarding-imports.js";
 import type { SourceFile } from "./ts7/ast-types.js";
 
 /** Evaluate an isolated, self-contained TypeScript callback under a finite
@@ -75,6 +76,11 @@ export class FrontendServices {
     this.ensureOpen();
     if (table.size === 0) return null;
     return applyNpmStaticDefinedBranches(this.parse(path, source, "js"), source, table);
+  }
+  forwardingImports(path: string, source: string): string | null {
+    this.ensureOpen();
+    if (!/^\s*export\s*\{/m.test(source) || !/^\s*import\s*\{/m.test(source)) return null;
+    return applyNpmStaticForwardingImports(this.parse(path, source, "js"), source);
   }
   shadowedModuleParams(path: string, source: string): string | null {
     this.ensureOpen();

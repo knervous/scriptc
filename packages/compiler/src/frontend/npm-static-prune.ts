@@ -10,6 +10,7 @@
  * init headers must see one graph. */
 
 import * as ts from "./ts7/adapter.js";
+import { isBuiltin } from "node:module";
 import { dirname, join, relative, resolve } from "node:path";
 import { nearestPackageType, nearestPkgJsonPath, resolveBareModule } from "./resolve.js";
 import { npmStaticPackageOfPath } from "./npm-static.js";
@@ -215,6 +216,8 @@ export function planNpmStaticReexports(
       return edges.every((edge) => {
         const dep = resolveEdgeOnce(sf, edge.spec, edge.kind);
         if (dep !== null) return visit(dep);
+        // A Node builtin evaluates nothing the program can observe (an Emscripten chunk's guarded `import("node:fs")`).
+        if (isBuiltin(edge.spec)) return true;
         const resolved = resolveBareModule(sf.fileName, edge.spec, "js-only");
         const pkg = resolved === null ? null : npmPackageNameOf(resolved.typesFile);
         const root = pkg === null || resolved === null ? null : packageRootJsonPath(resolved.typesFile, pkg);

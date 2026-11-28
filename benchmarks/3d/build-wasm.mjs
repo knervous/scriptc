@@ -1,11 +1,12 @@
 // Builds a scene app to WasmGC with this repository's compiler and the scriptw package's own compile options
 // (npm/wasmgc/lib/compile.mjs: what `scriptw build --browser --release` passes).
 //
-//   node benchmarks/3d/build-wasm.mjs <three|lite|core> [out.wasm] [--compile-packages <list>] [--dev]
+//   node benchmarks/3d/build-wasm.mjs <three|lite|core> [out.wasm] [--compile-packages <list> [--no-native-any]] [--dev]
 //
 // Without --compile-packages the library stays npm JavaScript, which the page hands to the loader (`modules`); with it,
-// the named packages are compiled into the module. The module exports setup(id, n) and frame(t), and ready() where the
-// library starts asynchronously.
+// the named packages are compiled into the module, and the app's `any` values are compiled values as the package does it
+// (--no-native-any keeps them page values). The module exports setup(id, n) and frame(t), and ready() where the library
+// starts asynchronously.
 import fs from "node:fs";
 import path from "node:path";
 import { fileURLToPath } from "node:url";
@@ -24,6 +25,7 @@ const r = await compile(path.join(here, lib, "entry.ts"), {
   outDir: path.dirname(out), outPath: out, outputKind: "wasmgc", release: !argv.includes("--dev"), browser: true, dynModel: "native", conditions: ["wasmgc"],
   capabilities: "auto", optimization: argv.includes("--dev") ? "dev" : undefined,
   ...(compilePackages ? { npmStatic: compilePackages } : {}),
+  ...(compilePackages && !argv.includes("--no-native-any") ? { experimentalTsNativeAny: true } : {}),
   // (not a package option: the page calls these two)
   wasmLink: { exports: ["setup", "frame", ...(fs.readFileSync(path.join(here, lib, "entry.ts"), "utf8").includes("export function ready") ? ["ready"] : [])] },
 });

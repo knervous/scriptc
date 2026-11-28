@@ -302,7 +302,7 @@ export function wasmGcHostImports(opts: WasmGcHostOptions = {}, state: WasmGcHos
     // A fixed memory never grows: its own buffer never detaches.
     if (state.fixedMemory) return mem.buffer;
     // Instantiation refused hosts without toResizableBuffer (see instantiateLinked).
-    if (!rbuf) rbuf = mem.toResizableBuffer!();
+    if (!rbuf) { rbuf = mem.toResizableBuffer!(); moduleBuffers.add(rbuf); }
     return rbuf;
   };
   const views = new WeakMap<object, ArrayBufferView>(), viewOwners = new WeakMap<object, object>(), viewOffsets = new WeakMap<object, number>();
@@ -1328,8 +1328,8 @@ export function wasmGcHostImports(opts: WasmGcHostOptions = {}, state: WasmGcHos
     "js.callMethod.0@d2": (o: any, k: any) => toDyn(o[k]()),
     "js.callMethod.1@d3": (o: any, k: any, a: any) => toDyn(o[k](a)),
     "js.callMethod.2@d4": (o: any, k: any, a: any, b: any) => toDyn(o[k](a, b)),
-    "js.callMethod.3@d5": (o: any, k: any, a: any, b: any, c: any) => toDyn(o[k](a, b, c)),
-    "js.callMethod.4@d6": (o: any, k: any, a: any, b: any, c: any, d: any) => toDyn(o[k](a, b, c, d)),
+    "js.callMethod.3@d5": (o: any, k: any, a: any, b: any, c: any) => toDyn(callMethodWith(o, k, [a, b, c])),
+    "js.callMethod.4@d6": (o: any, k: any, a: any, b: any, c: any, d: any) => toDyn(callMethodWith(o, k, [a, b, c, d])),
     // Common DOM members by name (DOM_DIRECT): each its own function, so
     // the member is a named access with its own feedback (V8's named-load
     // IC per member) instead of the generic keyed `o[k]` of js.get /
@@ -1990,8 +1990,44 @@ const callSink = (o: any, k: string, args: unknown[]): unknown => {
     return o[k](toPlain(args[0]), ...args.slice(1).map(plainTransfer));
   }
 };
+/** Platform methods that read a byte view's bytes during the call and refuse a view over a resizable buffer (Web IDL
+ * buffer sources without [AllowResizable]). Compiled storage crosses to the page as views over the module memory's
+ * resizable buffer (memBuffer), and a memory has no fixed-length alias while that buffer lives, so these receive a copy
+ * of the view's bytes instead: the method reads them before it returns and keeps no reference, so nothing tells the copy
+ * apart except the refusal. Matched by function identity: only the platform's own methods, and only views over a
+ * module memory (a page's own resizable buffer is refused as it would be). */
+let viewReaders: Set<unknown> | undefined;
+const readsViews = (f: unknown): boolean => {
+  if (viewReaders === undefined) {
+    viewReaders = new Set();
+    const g = globalThis as unknown as Record<string, { prototype?: Record<string, unknown> } | undefined>;
+    for (const [iface, names] of [["GPUQueue", ["writeBuffer", "writeTexture"]]] as const) {
+      const proto = g[iface]?.prototype;
+      if (proto) for (const name of names) if (typeof proto[name] === "function") viewReaders.add(proto[name]);
+    }
+  }
+  return viewReaders.has(f);
+};
+/** The resizable buffers of module memories (memBuffer registers each). */
+const moduleBuffers = new WeakSet<ArrayBuffer>();
+const copiedViews = (args: unknown[]): unknown[] => args.map((v) => {
+  if (!ArrayBuffer.isView(v) || !moduleBuffers.has(v.buffer as ArrayBuffer)) return v;
+  if (v instanceof DataView) return new DataView((v.buffer as ArrayBuffer).slice(v.byteOffset, v.byteOffset + v.byteLength));
+  return (v as unknown as { slice(): ArrayBufferView }).slice();
+});
+/** `o[k](...args)`, a view-reading platform method's module views copied (readsViews). `o[k]` is read once. */
+export function callMethodWith(o: any, k: any, args: unknown[]): unknown {
+  const f = o[k];
+  if (typeof f !== "function") return notMethod(o, k, f);
+  return Reflect.apply(f, o, readsViews(f) ? copiedViews(args) : args);
+}
+/** The TypeError `o[k]()` throws for a non-callable member, without reading the member again. */
+function notMethod(_o: unknown, k: any, f: unknown): never {
+  const o = { [k]: f } as Record<PropertyKey, () => never>;
+  return o[k]!();
+}
 const ARITY_OPS: Record<string, (...a: any[]) => unknown> = {
-  callMethod: (o, k, ...a) => o[k](...a), callFn: (f, ...a) => f(...a), callFnThis: (f, t, ...a) => f.apply(t, a),
+  callMethod: (o, k, ...a) => callMethodWith(o, k, a), callFn: (f, ...a) => f(...a), callFnThis: (f, t, ...a) => f.apply(t, a),
   construct: (C, ...a) => new C(...a),
   objLit: (...kv) => { const o: Record<string, unknown> = {}; for (let i = 0; i < kv.length; i += 2) o[kv[i]] = kv[i + 1]; return o; },
   arrLit: (...a) => a,
@@ -2004,8 +2040,9 @@ const notCallable = (f: unknown) => new TypeError(`${String(f)} is not a functio
  * call sees a matching parameter count. Larger arities use ARITY_OPS. */
 const FIXED_ARITY_OPS: Record<string, ((...a: any[]) => unknown)[]> = {
   callMethod: [
-    (o, k) => o[k](), (o, k, a) => o[k](a), (o, k, a, b) => o[k](a, b), (o, k, a, b, c) => o[k](a, b, c),
-    (o, k, a, b, c, d) => o[k](a, b, c, d), (o, k, a, b, c, d, e) => o[k](a, b, c, d, e), (o, k, a, b, c, d, e, g) => o[k](a, b, c, d, e, g),
+    (o, k) => o[k](), (o, k, a) => o[k](a), (o, k, a, b) => o[k](a, b), (o, k, a, b, c) => callMethodWith(o, k, [a, b, c]),
+    (o, k, a, b, c, d) => callMethodWith(o, k, [a, b, c, d]), (o, k, a, b, c, d, e) => callMethodWith(o, k, [a, b, c, d, e]),
+    (o, k, a, b, c, d, e, g) => callMethodWith(o, k, [a, b, c, d, e, g]),
   ],
   callFn: [
     (f) => f(), (f, a) => f(a), (f, a, b) => f(a, b), (f, a, b, c) => f(a, b, c),

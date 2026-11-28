@@ -2,7 +2,7 @@
 
 This tree is a derivative of scriptc (https://github.com/vercel-labs/scriptc), licensed under the Apache License, Version 2.0 (LICENSE). It is compared here with upstream commit `97248e92994ff55f7009e0057700241b9109a35e`. The LLVM backend (`packages/compiler/src/backend/llvm`), the IR (`packages/compiler/src/ir`), the runtime (`packages/runtime` and the runtime and LLVM packs) and `native/llvm-codegen` track upstream at that commit, with the changes listed below. The frontend (`packages/compiler/src/frontend`), the compiler's unit and integration tests, the test corpus and fixtures, the compatibility inventory and the documentation are this fork's own and follow an earlier upstream state, so upstream's newer tests and documentation are not included.
 
-As section 4(b) of the license requires, the files below carry changes. 1136 files are modified from that upstream commit and 3475 files are new; 23267 upstream files are not part of this tree (see "Removed files"). Each modified source file of the compiler, the runtime and the repository tooling also says so in its first comment line.
+As section 4(b) of the license requires, the files below carry changes. 1136 files are modified from that upstream commit and 3499 files are new; 23267 upstream files are not part of this tree (see "Removed files"). Each modified source file of the compiler, the runtime and the repository tooling also says so in its first comment line.
 
 ## Modified files
 
@@ -1164,6 +1164,8 @@ As section 4(b) of the license requires, the files below carry changes. 1136 fil
 - `benchmarks/3d/package.json`
 - `benchmarks/3d/page/bench.js`
 - `benchmarks/3d/page/index.html`
+- `benchmarks/3d/receipts/lite-compiled-counts.json`
+- `benchmarks/3d/receipts/lite-compiled.json`
 - `benchmarks/3d/receipts/scenes-counts.json`
 - `benchmarks/3d/receipts/scenes.json`
 - `benchmarks/3d/run.mjs`
@@ -2504,6 +2506,7 @@ As section 4(b) of the license requires, the files below carry changes. 1136 fil
 - `packages/compiler/src/backend/wasmgc/function-effects.test.ts`
 - `packages/compiler/src/backend/wasmgc/host-bytes.test.ts`
 - `packages/compiler/src/backend/wasmgc/host-keys.test.ts`
+- `packages/compiler/src/backend/wasmgc/host-view-readers.test.ts`
 - `packages/compiler/src/backend/wasmgc/host.ts`
 - `packages/compiler/src/backend/wasmgc/int-shadow.ts`
 - `packages/compiler/src/backend/wasmgc/intrinsics.ts`
@@ -2550,6 +2553,7 @@ As section 4(b) of the license requires, the files below carry changes. 1136 fil
 - `packages/compiler/src/frontend/npm-fetch-node.ts`
 - `packages/compiler/src/frontend/npm-fetch-syntax.ts`
 - `packages/compiler/src/frontend/npm-static-defined-branches.ts`
+- `packages/compiler/src/frontend/npm-static-forwarding-imports.ts`
 - `packages/compiler/src/ir/builtin-signatures/host.ts`
 - `packages/compiler/src/ir/builtin-signatures/island.ts`
 - `packages/compiler/src/ir/capture-values-wasmgc.ts`
@@ -3151,6 +3155,15 @@ As section 4(b) of the license requires, the files below carry changes. 1136 fil
 - `tests/fixtures/host-island/host-demo.ts`
 - `tests/fixtures/host-island/stub-host.c`
 - `tests/fixtures/node-types/child-stdin-fences.ts`
+- `tests/fixtures/npm-static/forwardbarrel-cli.ts`
+- `tests/fixtures/npm-static/forwardbarrel-renamed-cli.ts`
+- `tests/fixtures/npm-static/node_modules/forwardbarrel/index.d.ts`
+- `tests/fixtures/npm-static/node_modules/forwardbarrel/index.js`
+- `tests/fixtures/npm-static/node_modules/forwardbarrel/local.js`
+- `tests/fixtures/npm-static/node_modules/forwardbarrel/other.js`
+- `tests/fixtures/npm-static/node_modules/forwardbarrel/package.json`
+- `tests/fixtures/npm-static/node_modules/forwardbarrel/spare.js`
+- `tests/fixtures/npm-static/node_modules/forwardbarrel/used.js`
 - `tests/fixtures/source-sideeffects/app/main.ts`
 - `tests/fixtures/source-sideeffects/app/package.json`
 - `tests/fixtures/source-sideeffects/app/tsconfig.json`
@@ -3262,6 +3275,8 @@ As section 4(b) of the license requires, the files below carry changes. 1136 fil
 - `tests/wasmgc-browser/fixtures/array-buffer-byte-length.ts`
 - `tests/wasmgc-browser/fixtures/array-buffer-is-view.ts`
 - `tests/wasmgc-browser/fixtures/array-buffer-view-into-buffer-source.ts`
+- `tests/wasmgc-browser/fixtures/array-callback-any-result-helper.js`
+- `tests/wasmgc-browser/fixtures/array-callback-any-result.ts`
 - `tests/wasmgc-browser/fixtures/array-flat-holes.ts`
 - `tests/wasmgc-browser/fixtures/array-from-iterators.ts`
 - `tests/wasmgc-browser/fixtures/array-frozen-write-fast-path.ts`
@@ -3275,6 +3290,8 @@ As section 4(b) of the license requires, the files below carry changes. 1136 fil
 - `tests/wasmgc-browser/fixtures/async-finally-await-completions.ts`
 - `tests/wasmgc-browser/fixtures/async-frame-liveness.ts`
 - `tests/wasmgc-browser/fixtures/async-literal-method-adopts-slot-result.ts`
+- `tests/wasmgc-browser/fixtures/async-nullish-await-helper.js`
+- `tests/wasmgc-browser/fixtures/async-nullish-await.ts`
 - `tests/wasmgc-browser/fixtures/async-return-page-promise.ts`
 - `tests/wasmgc-browser/fixtures/async-switch-await.ts`
 - `tests/wasmgc-browser/fixtures/atom-string-closed-fields.ts`
@@ -3474,6 +3491,8 @@ As section 4(b) of the license requires, the files below carry changes. 1136 fil
 - `tests/wasmgc-browser/fixtures/defect-function-cast-keyed-write.ts`
 - `tests/wasmgc-browser/fixtures/defect-getter-literal-shared-key.ts`
 - `tests/wasmgc-browser/fixtures/defect-namespace-star-keys.ts`
+- `tests/wasmgc-browser/fixtures/define-generic-descriptor-helper.js`
+- `tests/wasmgc-browser/fixtures/define-generic-descriptor.ts`
 - `tests/wasmgc-browser/fixtures/descriptor-dispatch-arms.ts`
 - `tests/wasmgc-browser/fixtures/destructure-assign-await-page.ts`
 - `tests/wasmgc-browser/fixtures/destructure-union-arms.ts`
@@ -4010,6 +4029,8 @@ As section 4(b) of the license requires, the files below carry changes. 1136 fil
 - `tests/wasmgc-browser/fixtures/native-builtin-globals.ts`
 - `tests/wasmgc-browser/fixtures/native-number-of-page-values.ts`
 - `tests/wasmgc-browser/fixtures/never-narrowed-assertion-box.ts`
+- `tests/wasmgc-browser/fixtures/npm-forwarding-barrel-lib/entry.ts`
+- `tests/wasmgc-browser/fixtures/npm-forwarding-barrel.ts`
 - `tests/wasmgc-browser/fixtures/nullish-conditional-absent-key.ts`
 - `tests/wasmgc-browser/fixtures/nullish-element-read-chain.ts`
 - `tests/wasmgc-browser/fixtures/nullish-index-read-fallback.ts`
@@ -4413,6 +4434,9 @@ As section 4(b) of the license requires, the files below carry changes. 1136 fil
 - `tests/wasmgc-browser/fixtures/tdz-lexical-early-read.ts`
 - `tests/wasmgc-browser/fixtures/text-codec-utf8.ts`
 - `tests/wasmgc-browser/fixtures/text-decoder-buffer-sources.ts`
+- `tests/wasmgc-browser/fixtures/then-namespace-destructure-helper.js`
+- `tests/wasmgc-browser/fixtures/then-namespace-destructure-lib/build.js`
+- `tests/wasmgc-browser/fixtures/then-namespace-destructure.ts`
 - `tests/wasmgc-browser/fixtures/this-reentry.ts`
 - `tests/wasmgc-browser/fixtures/timer-clear-optional.ts`
 - `tests/wasmgc-browser/fixtures/ts-any-arguments-callback-helper.js`

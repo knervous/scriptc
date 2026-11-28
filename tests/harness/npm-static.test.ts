@@ -740,6 +740,8 @@ describe(`npm-static pilots${sanitize ? " (sanitized)" : ""}`, () => {
     ["purebarrel", "purebarrel-cli.ts"],
     ["statefulbarrel", "statefulbarrel-cli.ts"],
     ["statefulbarrel", "statefulbarrel-empty-cli.ts"],
+    ["forwardbarrel", "forwardbarrel-cli.ts"],
+    ["forwardbarrel", "forwardbarrel-renamed-cli.ts"],
   ] as const)("%s namespace re-exports byte-match Node", async ([pkg, file]) => {
     const entry = join(pilotRoot, file);
     const { coverage } = analyze(entry, { npmStatic: [pkg] });

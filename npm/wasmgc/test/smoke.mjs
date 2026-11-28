@@ -9,7 +9,8 @@
 // - hosted/scaled.ts, which imports a typed `host:` module, builds with `--browser` and runs under Node through the
 //   exported loader, `scriptw/host`;
 // - compiled-package/uses-cjs.ts builds with `--browser --compile-packages smoke-cjs` (a CommonJS package installed
-//   from its tarball) into a module with no npm JavaScript, which prints what Node prints;
+//   from its tarball) into a module with no npm JavaScript, which prints what Node prints, and again with
+//   --no-native-any;
 // - `import("scriptw")` compiles through the programmatic API, and `scriptw --version` names the versions and commit.
 //
 //   node npm/wasmgc/test/smoke.mjs <package.tgz> [--keep]
@@ -103,6 +104,11 @@ try {
   const cjsOracle = sh(process.execPath, ["uses-cjs.ts"]);
   check(compiled.status === 0 && compiled.stdout === `${cjsOracle.stdout}compiled in\n` && compiled.stderr === "",
     `--compile-packages smoke-cjs: build ${compiledBuild.ms} ms`, { stdout: compiled.stdout, stderr: compiled.stderr, status: compiled.status, node: cjsOracle.stdout });
+  // The same with the program's `any` values kept as page values.
+  const pageAnyBuild = cjsInstall.status === 0 ? scriptw(["build", "uses-cjs.ts", "--browser", "--compile-packages", "smoke-cjs", "--no-native-any", "-o", "uses-cjs-page-any.wasm"]) : cjsInstall;
+  const pageAny = pageAnyBuild.status === 0 ? sh(process.execPath, ["run.mjs", "uses-cjs-page-any.wasm"]) : pageAnyBuild;
+  check(pageAny.status === 0 && pageAny.stdout === `${cjsOracle.stdout}compiled in\n` && pageAny.stderr === "",
+    `--compile-packages smoke-cjs --no-native-any: build ${pageAnyBuild.ms} ms`, { stdout: pageAny.stdout, stderr: pageAny.stderr, status: pageAny.status, node: cjsOracle.stdout });
 
   // The programmatic API, and a refusal's diagnostic.
   fs.writeFileSync(path.join(dir, "bad.ts"), "const n: number = 1;\nconst s: string = n;\nconsole.log(s);\n");

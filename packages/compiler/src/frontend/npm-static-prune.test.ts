@@ -50,6 +50,20 @@ describe("npm static namespace re-export pruning", () => {
     expect(files.some((file) => file.endsWith("/cycle-b/spare.js"))).toBe(true);
     expect(files.some((file) => file.endsWith("/cycle-impure/index.js"))).toBe(true);
   });
+  test("a barrel's forwarding imports prune like re-exports, through a guarded builtin import", () => {
+    const { files, diagnostics } = moduleOrder("forwardbarrel-cli.ts", "forwardbarrel");
+    expect(diagnostics).toEqual([]);
+    for (const kept of ["index.js", "used.js", "local.js"]) expect(files.some((file) => file.endsWith(`/forwardbarrel/${kept}`)), kept).toBe(true);
+    for (const dropped of ["spare.js", "other.js"]) expect(files.some((file) => file.endsWith(`/forwardbarrel/${dropped}`)), dropped).toBe(false);
+  });
+
+  test("a forwarded import under another local name keeps the module it names when asked", () => {
+    const { files, diagnostics } = moduleOrder("forwardbarrel-renamed-cli.ts", "forwardbarrel");
+    expect(diagnostics).toEqual([]);
+    expect(files.some((file) => file.endsWith("/forwardbarrel/other.js"))).toBe(true);
+    expect(files.some((file) => file.endsWith("/forwardbarrel/used.js"))).toBe(false);
+  });
+
   test("per-file sideEffects patterns retain initialization through imports and cycles", () => {
     const { files, diagnostics } = moduleOrder("selectivebarrel-cli.ts", "selectivebarrel");
     expect(diagnostics).toEqual([]);

@@ -2,6 +2,8 @@
 
 ## Unreleased
 
+- With `--compile-packages` and `--browser`, the program's `any` values are compiled values, as the compiled-in packages' are, instead of page values; `--no-native-any` (`nativeAny: false` in `compile()`) keeps page values. Babylon Lite compiled in runs its scene benchmark 1.4 times as fast at 1,000 meshes and 2.6 times at 10,000 as with page values, with a sixth of the host calls.
+- `--compile-packages` compiles only the modules of a side-effect-free package that the program reaches, including through a barrel that imports names only to re-export them (`import { a } from "./a.js"; export { a };`). Babylon Lite (`@babylonjs/lite`) compiles into the module this way and runs.
 - Every contract type in `@scriptc/types` is checked on WasmGC as natively, by the contract checker ported from upstream scriptc: `NoThrow` (SC7001), `Immutable` (SC7004, SC7005), `Acyclic` (SC7007), `ProgramLifetime` (SC7008) and `Int32[]`, beside the integer types. Before this, only the integer types were checked, and the other contracts compiled without being checked.
 - A contract written where it is not checked (a type alias, an interface member, a union such as `Int32 | undefined`, an array of an integer type other than `Int32`) fails the build with SC7006 instead of being ignored. A contract field of a generic class, or of a class whose instances reach `any` values, fails with SC7003.
 - Integer contract diagnostics use upstream scriptc's messages, which quote the value and suggest the conversion: `the value stored into 'x' (Int32) is not provably an int32: 'x / 3'`.

@@ -1,0 +1,116 @@
+{
+ "date": "2026-11-28T16:33:51.364Z",
+ "browser": "158.0.8127.36",
+ "webgl": "ANGLE (Google, Vulkan 1.3.0 (SwiftShader Device (Subzero) (0x0000C0DE)), SwiftShader driver)",
+ "pages": 2,
+ "warmup": 30,
+ "frames": 60,
+ "lanes": [
+  "lite.wasm",
+  "lite.in",
+  "lite.in-page-any"
+ ],
+ "counts": {
+  "1000": {
+   "lite.wasm": {
+    "callsPerFrame": 11003,
+    "calls": {
+     "host.js.get": 5006,
+     "host.js.set": 3000,
+     "host.js.fromNum": 2996,
+     "host.js.callFn.2": 1
+    },
+    "checksum": 982
+   },
+   "lite.in": {
+    "callsPerFrame": 3076.4,
+    "calls": {
+     "host.js.arrayIterPristine": 3010,
+     "host.js.protoOf@d1": 18,
+     "host.js.set": 16,
+     "host.js.fromNum": 12.4,
+     "host.js.callMethod.1@d3": 5,
+     "host.js.eq": 4,
+     "host.js.callMethod.0@d2": 3,
+     "host.js.get@d2": 3,
+     "host.js.dynFacade": 2,
+     "host.js.callMethod.2@d4": 2,
+     "host.js.get": 1
+    },
+    "checksum": 982
+   },
+   "lite.in-page-any": {
+    "callsPerFrame": 19069.4,
+    "calls": {
+     "host.js.set": 3016,
+     "host.js.arrayIterPristine": 3010,
+     "host.js.fromNum": 3008.4,
+     "host.js.get": 3002,
+     "host.js.classify": 2999,
+     "host.js.toNum": 2996,
+     "host.js.classFacade": 1000,
+     "host.js.protoOf@d1": 18,
+     "host.js.callMethod.1@d3": 5,
+     "host.js.eq": 4,
+     "host.js.callMethod.0@d2": 3,
+     "host.js.get@d2": 3,
+     "host.js.dynFacade": 2,
+     "host.js.callMethod.2@d4": 2,
+     "host.js.unwrapAny": 1
+    },
+    "checksum": 982
+   }
+  },
+  "10000": {
+   "lite.wasm": {
+    "callsPerFrame": 109967,
+    "calls": {
+     "host.js.get": 50006,
+     "host.js.set": 30000,
+     "host.js.fromNum": 29960,
+     "host.js.callFn.2": 1
+    },
+    "checksum": 10098
+   },
+   "lite.in": {
+    "callsPerFrame": 30076.4,
+    "calls": {
+     "host.js.arrayIterPristine": 30010,
+     "host.js.protoOf@d1": 18,
+     "host.js.set": 16,
+     "host.js.fromNum": 12.4,
+     "host.js.callMethod.1@d3": 5,
+     "host.js.eq": 4,
+     "host.js.callMethod.0@d2": 3,
+     "host.js.get@d2": 3,
+     "host.js.dynFacade": 2,
+     "host.js.callMethod.2@d4": 2,
+     "host.js.get": 1
+    },
+    "checksum": 10098
+   },
+   "lite.in-page-any": {
+    "callsPerFrame": 189961.4,
+    "calls": {
+     "host.js.set": 30016,
+     "host.js.arrayIterPristine": 30010,
+     "host.js.get": 30002,
+     "host.js.fromNum": 29972.4,
+     "host.js.classify": 29963,
+     "host.js.toNum": 29960,
+     "host.js.classFacade": 10000,
+     "host.js.protoOf@d1": 18,
+     "host.js.callMethod.1@d3": 5,
+     "host.js.eq": 4,
+     "host.js.callMethod.0@d2": 3,
+     "host.js.get@d2": 3,
+     "host.js.dynFacade": 2,
+     "host.js.callMethod.2@d4": 2,
+     "host.js.unwrapAny": 1
+    },
+    "checksum": 10098
+   }
+  }
+ },
+ "errors": []
+}

@@ -19,7 +19,8 @@ import { unsupportedRuntimeMessage } from "../lib/runtime-check.mjs";
 
 const USAGE = `usage:
   scriptw build <entry.ts> [-o <out>] [--target wasmgc | native | native:<platform>] [--release]
-                [--browser] [--conditions <list>] [--compile-packages <list>] [--capabilities <list>] [--targets <list>]
+                [--browser] [--conditions <list>] [--compile-packages <list> [--no-native-any]] [--capabilities <list>]
+                [--targets <list>]
                 [--explain-capabilities]
                 [--host auto|<set>|quickjs] [--host-features <list>] [--explain-host] [--host-lib <archive>]
   scriptw run <entry.ts | module.wasm> [--target wasmgc | native] [--release] [--browser] ...
@@ -29,7 +30,8 @@ const USAGE = `usage:
   comma-separated (for example dom-stream).
 --compile-packages <list> (wasmgc): npm packages to compile into the module, comma-separated: their JavaScript
   is compiled with the program rather than loaded as npm JavaScript. A package the compiler cannot take this way
-  either stays npm JavaScript (the build says so) or stops the build with its diagnostics.
+  either stays npm JavaScript (the build says so) or stops the build with its diagnostics. With --browser, the
+  program's \`any\` values are then compiled values, as the packages' are; --no-native-any keeps them page values.
 --capabilities <list> (wasmgc): auto (the default), baseline or compat, and/or eh=exnref|legacy,
   views=resizable|fixed[:<MiB>], [-]relaxed-simd, threads=off|shared|auto, [-]jspi. auto builds one compat
   variant (<out>.compat.wasm, listed in <out.wasm>.variants.json) only when a target needs it.
@@ -78,7 +80,7 @@ if (unsupported !== null) {
 }
 
 let entry, out, release = false, browser = false, host, hostLib, hostFeatures, explainHost = false;
-let capabilities, targets, conditions, compilePackages, explainCapabilities = false;
+let capabilities, targets, conditions, compilePackages, nativeAny, explainCapabilities = false;
 let target = "wasmgc";
 for (let i = 0; i < argv.length; i++) {
   const a = argv[i];
@@ -113,7 +115,8 @@ for (let i = 0; i < argv.length; i++) {
     const list = argv[++i];
     if (list === undefined || !/^(@[a-z0-9._-]+\/)?[a-z0-9._-]+(,(@[a-z0-9._-]+\/)?[a-z0-9._-]+)*$/.test(list)) { console.error("scriptw: --compile-packages takes a comma-separated list of npm package names"); process.exit(2); }
     compilePackages = list.split(",");
-  } else if (a === "--capabilities" || a === "--targets") {
+  } else if (a === "--no-native-any") nativeAny = false;
+  else if (a === "--capabilities" || a === "--targets") {
     const list = argv[++i];
     if (list === undefined || list.startsWith("--")) { console.error(`scriptw: ${a} takes a comma-separated list`); process.exit(2); }
     if (a === "--capabilities") capabilities = list; else targets = list;
@@ -130,7 +133,7 @@ if (!fs.existsSync(entry)) { console.error(`scriptw: ${entry} does not exist`); 
 const compilerDist = new URL("../packages/compiler/dist/", import.meta.url);
 
 async function build(source, outPath) {
-  const r = await compile(source, { outPath, release, browser, ...(conditions === undefined ? {} : { conditions }), ...(compilePackages === undefined ? {} : { compilePackages }), ...(capabilities === undefined ? {} : { capabilities }), ...(targets === undefined ? {} : { targets }) });
+  const r = await compile(source, { outPath, release, browser, ...(conditions === undefined ? {} : { conditions }), ...(compilePackages === undefined ? {} : { compilePackages }), ...(nativeAny === undefined ? {} : { nativeAny }), ...(capabilities === undefined ? {} : { capabilities }), ...(targets === undefined ? {} : { targets }) });
   if (!r.ok) {
     for (const d of r.diagnostics) console.error(formatDiagnostic(d));
     process.exit(1);

@@ -103,11 +103,26 @@ export function hoistAwaits(f: IrFunction, refuse: Refuse, suspension: "await" |
       return [[...pc, { kind: "if", cond: c, then: assign(e.then), else_: assign(e.else_), loc: e.loc }], t];
     }
     if (e.kind === "logical") {
-      if (e.type.kind !== "bool") return refuse("await in a value-returning logical", e.loc);
+      // `l && r` / `l || r`: l is the result unless its truthiness says r runs (then r is). A value-returning form
+      // (operands and result share one type, IR logical) decides on l's ToBoolean.
       const [pl, l] = lift(e.left);
       const first: IrStmt = { kind: "assign", localId: t.localId, value: l, loc: e.loc };
-      const cond: IrExpr = e.op === "&&" ? t : { kind: "unary", op: "!", operand: t, type: { kind: "bool" }, loc: e.loc } as IrExpr;
+      const bool = { kind: "bool" } as IrType;
+      const truthy: IrExpr = e.type.kind === "bool" ? t : { kind: "toBool", operand: t, type: bool, loc: e.loc } as IrExpr;
+      const cond: IrExpr = e.op === "&&" ? truthy : { kind: "unary", op: "!", operand: truthy, type: bool, loc: e.loc } as IrExpr;
       return [[...pl, first, { kind: "if", cond, then: assign(e.right), else_: null, loc: e.loc }], t];
+    }
+    // `l ?? r` over an untyped l (the emitter's dyn nullish): r runs only when l is null or undefined, and the result is
+    // l itself or r as a dynamic value.
+    if (e.kind === "nullish" && e.left.type.kind === "dyn" && e.type.kind === "dyn") {
+      const l = fresh(e.left.type, e.loc), bool = { kind: "bool" } as IrType;
+      const [pl, left] = lift(e.left);
+      const [pr, right] = lift(e.right);
+      const asDyn: IrExpr = right.type.kind === "dyn" ? right : { kind: "dynFrom", value: right, type: e.type, loc: e.loc } as IrExpr;
+      return [[...pl, { kind: "varDecl", localId: l.localId, init: left, loc: e.loc },
+        { kind: "if", cond: { kind: "dynTest", test: "nullish", value: l, type: bool, loc: e.loc } as IrExpr,
+          then: [...pr, { kind: "assign", localId: t.localId, value: asDyn, loc: e.loc }],
+          else_: [{ kind: "assign", localId: t.localId, value: l, loc: e.loc }], loc: e.loc }], t];
     }
     // `l ?? r` with a suspension in r: r runs only when l is null or undefined, exactly as the
     // emitter's nullish (its two result shapes: l itself, or l narrowed to its one non-unit arm).

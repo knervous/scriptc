@@ -31,6 +31,11 @@ export async function compile(entry, options = {}) {
     // Named npm packages whose JavaScript is compiled into the module (the compiler's npm-static mode) instead of
     // loaded as npm JavaScript; a package it cannot take that way stays npm JavaScript (with a note) or fails the build.
     ...(options.compilePackages?.length ? { npmStatic: [...options.compilePackages] } : {}),
+    // A compiled-in package's values are compiled objects, and the program usually types them `any` (a package's
+    // declarations are not what its compiled JavaScript is typed from): with packages compiled in, the program's `any`
+    // values are compiled values too, not page values, unless `nativeAny: false` asks for page values.
+    ...(options.compilePackages?.length && options.browser === true && (options.dynModel ?? "native") === "native" && options.nativeAny !== false
+      ? { experimentalTsNativeAny: true } : {}),
     // The package builds auto capabilities against the default (or given) targets: a compat variant only when a target
     // needs one and the program uses the feature that differs.
     capabilities: options.capabilities ?? "auto",

@@ -10098,8 +10098,14 @@ function emitModule(given: IrModule, opts: WasmGcEmitOptions, setPhase: (phase: 
             m.i32.eqz(m.call(dynSameValue(), [dobj.get(dd(), m.i32.const(dobj.atom("value"))), dobj.valAt(ob(), k())], i32))))),
           throwError("%TypeError", "Cannot redefine property")),
       ])),
-      // A definition writes the slot directly (an accessor there is replaced, not called).
-      m.if(m.i32.or(dobj.has(dd(), m.i32.const(dobj.atom("value"))), m.if(m.i32.lt_s(k(), m.i32.const(0)), m.i32.const(1), dobj.isAccAt(ob(), k()))),
+      // A definition writes the slot directly (an accessor there is replaced, not called): a new property, a value, or a
+      // data descriptor over an accessor (value and writable then default to undefined and false). A generic descriptor
+      // (neither value nor writable) keeps an accessor and changes only the attributes it names.
+      m.if(m.if(m.i32.ge_s(k(), m.i32.const(0)), m.i32.and(dobj.isAccAt(ob(), k()),
+          m.i32.and(m.i32.eqz(dobj.has(dd(), m.i32.const(dobj.atom("writable")))), dobj.has(dd(), m.i32.const(dobj.atom("value"))))), m.i32.const(0)),
+        m.local.set(6, m.i32.or(f(), m.i32.const(1)))),
+      m.if(m.i32.or(dobj.has(dd(), m.i32.const(dobj.atom("value"))), m.if(m.i32.lt_s(k(), m.i32.const(0)), m.i32.const(1),
+          m.i32.and(dobj.isAccAt(ob(), k()), dobj.has(dd(), m.i32.const(dobj.atom("writable")))))),
         dobj.defineValue(ob(), a(), dobj.get(dd(), m.i32.const(dobj.atom("value"))))),
       m.if(m.i32.ne(f(), m.i32.const(0)), dobj.setFlags(ob(), a(), f()), m.if(m.i32.ge_s(k(), m.i32.const(0)), dobj.setFlags(ob(), a(), m.i32.const(0)))),
       o(),

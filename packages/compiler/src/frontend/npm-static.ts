@@ -397,7 +397,10 @@ export function npmStaticFsShadow(services: FrontendServices): NpmStaticFsShadow
           // A load-time build switch the `define` table decides (`if (process.env.NODE_ENV === 'production')`) keeps
           // only its live arm, as a bundler's fold does (npm-static-defined-branches.ts).
           const folded = read === null ? null : services.definedBranches(path, read, defines());
-          const original = folded ?? read;
+          // A barrel's forwarding imports become re-exports the pruning can drop (npm-static-forwarding-imports.ts).
+          const unforwarded = folded ?? read;
+          const forwarded = unforwarded === null ? null : services.forwardingImports(path, unforwarded);
+          const original = forwarded ?? unforwarded;
           if (original !== null) {
             const unshadowed = services.shadowedModuleParams(path, original);
             const namepaths = services.jsDocNamepaths(path, unshadowed ?? original) ?? unshadowed;
@@ -424,7 +427,7 @@ export function npmStaticFsShadow(services: FrontendServices): NpmStaticFsShadow
             if (answer !== null && typeof answer === "object") {
               reportNpmStaticOffender(target.pkg, answer.degrade);
             } else {
-              rewritten = answer ?? latest ?? namepaths ?? folded;
+              rewritten = answer ?? latest ?? namepaths ?? forwarded ?? folded;
             }
           }
         } catch {

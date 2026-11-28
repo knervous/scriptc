@@ -1,0 +1,61 @@
+{
+ "date": "2026-11-28T16:32:35.883Z",
+ "browser": "158.0.8127.36",
+ "webgl": "ANGLE (Google, Vulkan 1.3.0 (SwiftShader Device (Subzero) (0x0000C0DE)), SwiftShader driver)",
+ "pages": 3,
+ "warmup": 30,
+ "frames": 60,
+ "lanes": [
+  "lite",
+  "lite.wasm",
+  "lite.in",
+  "lite.in-page-any"
+ ],
+ "counts": {
+  "1000": {
+   "lite": {
+    "median": 0.4900000002235174,
+    "p95": 0.7050000000745058,
+    "checksum": 982
+   },
+   "lite.wasm": {
+    "median": 0.9274999999906868,
+    "p95": 1.0600000000558794,
+    "checksum": 982
+   },
+   "lite.in": {
+    "median": 1.7949999999254942,
+    "p95": 2.4099999996833503,
+    "checksum": 982
+   },
+   "lite.in-page-any": {
+    "median": 2.5249999999068677,
+    "p95": 3.180000000167638,
+    "checksum": 982
+   }
+  },
+  "10000": {
+   "lite": {
+    "median": 4.524999999906868,
+    "p95": 7.009999999776483,
+    "checksum": 10098
+   },
+   "lite.wasm": {
+    "median": 9.204999999841675,
+    "p95": 19.975000000093132,
+    "checksum": 10098
+   },
+   "lite.in": {
+    "median": 13.515000000130385,
+    "p95": 20.43500000005588,
+    "checksum": 10098
+   },
+   "lite.in-page-any": {
+    "median": 35.85499999974854,
+    "p95": 65.1750000002794,
+    "checksum": 10098
+   }
+  }
+ },
+ "errors": []
+}
