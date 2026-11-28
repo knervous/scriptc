@@ -502,7 +502,8 @@ export const LINK_FEATURE_REQUIREMENTS: readonly LinkFeatureRequirement[] = [
   // it.
   { feature: "eventTarget", requires: ["emitter", "symbol"] },
   { feature: "abortSignal", requires: ["emitter", "symbol"] },
-  { feature: "fetch", requires: ["emitter", "symbol"] },
+  // fetch also calls scr_regex.c's case conversion (below, with dynInvoke).
+  { feature: "fetch", requires: ["emitter", "symbol", "regex"] },
   // events.once with options registers the await through the emitter unit.
   { feature: "eventsOnceSignal", requires: ["emitter"] },
   // scr_perf.c resolves performance.measure's Node timing milestone names
@@ -530,7 +531,6 @@ export const LINK_FEATURE_REQUIREMENTS: readonly LinkFeatureRequirement[] = [
   // scr_dyn_invoke.c's untyped String methods call scr_regex.c's case
   // conversion (scr_str_to_lower/upper); the unit links for each of these.
   { feature: "dynInvoke", requires: ["regex"] },
-  { feature: "fetch", requires: ["regex"] },
   { feature: "nodeIsland", requires: ["regex"] },
   // The QuickJS island's host paths (scr_island.c) call
   // scr_path_win32_relative, which rides the regex unit.

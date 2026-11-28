@@ -14014,14 +14014,7 @@ static void scr_errdyn_teardown(void) {
   free(cache);
 }
 
-/* The system_* fields (errno, syscall, path, dest) exist only on errors the runtime allocates, whose vtables are the
- * builtin ones. This fork's frontend lays a user Error subclass out with the shorter prefix (name through stack) and
- * puts the subclass's own fields where upstream's frontend puts %systemErrno..%systemDest, so reading them there
- * would read the subclass's fields, or past the object. */
-static bool scr_error_has_system_fields(const ScrError *e) {
-  uintptr_t vt = (uintptr_t)e->vt;
-  return vt >= (uintptr_t)&scr_error_vts[0] && vt < (uintptr_t)&scr_error_vts[SCR_ERR_COUNT];
-}
+/* scr_error_has_system_fields is in scr_error.h. */
 
 /* An error's own `stack`: a non-enumerable accessor shared by every error,
  * as V8 defines it. The getter formats the stack on first access, so its
@@ -14301,7 +14294,7 @@ ScrDyn *scr_error_dyn_fields(const ScrError *e) {
   } else {
     /* errno rides fs errors (with syscall) and zlib errors (without); a
      * DNSException presents it first, reading undefined. */
-    if (e->errno_undefined)
+    if (system_fields && e->errno_undefined)
       scr_dyn_obj_set(d, "errno", 5, scr_dyn_undefined());
     else if (system_fields && (e->system_call || e->system_errno != 0))
       scr_dyn_obj_set(d, "errno", 5, scr_dyn_new_num(e->system_errno));

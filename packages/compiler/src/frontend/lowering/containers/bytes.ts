@@ -14,33 +14,33 @@ import { defaultAfterUndefined, lowerOptionalArgument, lowerStaticallyUndefinedA
 import { lowerBytesPredicateCall, lowerCheckedArrayFrom } from "../lower-containers.js";
 import { boolLit, varRef } from "../../../ir/build.js";
 
-/** Uint8Array.prototype.toSorted. The receiver/comparator expressions are
- * evaluated before entering the helper; the helper snapshots with
- * TypedArray.prototype.slice before its first comparison, then performs
- * the same stable merge walk as Array.toSorted. Uint8Array's default
- * comparator is numeric ascending, so its comparator-less form needs no
- * string-conversion machinery. */
-function lowerBytesToSortedCall(
+/** TypedArray.prototype.sort and toSorted (buildBytesSortFn). The receiver/comparator expressions are evaluated
+ * before entering the helper; toSorted's helper snapshots with TypedArray.prototype.slice before its first
+ * comparison, sort's writes back into the receiver and returns it. The default comparator is numeric ascending, so
+ * the comparator-less form needs no string-conversion machinery. */
+function lowerBytesSortCall(
   lowerer: Lowerer,
   call: ts.CallExpression,
   access: ts.PropertyAccessExpression,
   bytesT: IrType & { kind: "bytes" },
+  method: "sort" | "toSorted",
 ): IrExpr {
   const loc = locOf(call);
   if (call.arguments.length > 1 || call.arguments.some(ts.isSpreadElement)) {
-    lowerer.noLowering(`.toSorted with ${call.arguments.length} arguments on Uint8Array`, call);
+    lowerer.noLowering(`.${method} with ${call.arguments.length} arguments on typed arrays`, call);
   }
+  const copyFirst = method === "toSorted";
   const receiver = lowerer.lowerExprExpecting(access.expression, bytesT);
   const undefinedArg = call.arguments[0]
     ? lowerStaticallyUndefinedArgument(lowerer, call.arguments[0])
     : null;
   if (call.arguments.length === 0 || undefinedArg) {
-    const key = "bytes.toSorted:u8:default";
+    const key = `bytes.${method}:${bytesT.elem}:default`;
     let helper = lowerer.arrHofHelpers.get(key);
     if (!helper) {
-      helper = keyedHelperName(lowerer, "%bytes.toSorted", key);
+      helper = keyedHelperName(lowerer, `%bytes.${method}`, key);
       lowerer.arrHofHelpers.set(key, helper);
-      lowerer.liftedFns.push(buildBytesSortFn(helper, 0, false, loc));
+      lowerer.liftedFns.push(buildBytesSortFn(helper, bytesT, 0, false, copyFirst, loc));
     }
     if (!undefinedArg || isSafeToDiscard(undefinedArg)) {
       return { kind: "call", callee: helper, args: [receiver], type: bytesT, loc };
@@ -83,12 +83,12 @@ function lowerBytesToSortedCall(
     lowerer.badType(argNode, lowerer.typeOf(argNode));
   }
   const arity = fnArg.type.params.length;
-  const key = `bytes.toSorted:u8:${arity}`;
+  const key = `bytes.${method}:${bytesT.elem}:${arity}`;
   let helper = lowerer.arrHofHelpers.get(key);
   if (!helper) {
-    helper = keyedHelperName(lowerer, "%bytes.toSorted", key);
+    helper = keyedHelperName(lowerer, `%bytes.${method}`, key);
     lowerer.arrHofHelpers.set(key, helper);
-    lowerer.liftedFns.push(buildBytesSortFn(helper, arity, true, loc));
+    lowerer.liftedFns.push(buildBytesSortFn(helper, bytesT, arity, true, copyFirst, loc));
   }
   return {
     kind: "call",
@@ -622,12 +622,13 @@ export function lowerBytesMethodCall(lowerer: Lowerer, call: ts.CallExpression,
       call.arguments[0] ? lowerer.lowerExprExpecting(call.arguments[0], DYN) : dynUndefinedExpr(loc),
       { kind: "strLit", value: access.getText(), type: STRING, loc }], type: STRING, loc };
   }
-  if (receiverIr.elem === "u8" && name === "toSorted") {
-    return lowerBytesToSortedCall(lowerer, call, access, receiverIr);
+  if ((name === "toSorted" || name === "sort") && receiverIr.elem !== "f16") {
+    return lowerBytesSortCall(lowerer, call, access, receiverIr, name);
   }
-  if (receiverIr.elem === "u8" && name === "toReversed") {
+  // toReversed on any typed array: both backends copy the stored elements in reverse, whatever their width.
+  if (receiverIr.elem !== "f16" && name === "toReversed") {
     if (nArgs !== 0) {
-      lowerer.noLowering(`.toReversed with ${nArgs} arguments on Uint8Array`, call);
+      lowerer.noLowering(`.toReversed with ${nArgs} arguments on typed arrays`, call);
     }
     return {
       kind: "bytesIntrinsic",

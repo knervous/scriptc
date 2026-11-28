@@ -1498,6 +1498,71 @@ function lowerNetServerMethodCall(lowerer: Lowerer, call: ts.CallExpression,
   );
 }
 
+/** Whether a setEncoding call can reach some net.Socket in this program (upstream's socketEncodingReachable):
+ * `x.setEncoding(...)` or `x["setEncoding"](...)` where `x` is a socket or an untyped value. Sockets that never get
+ * an encoding keep the Buffer chunk path; with one, Node's 'data' chunks are strings. */
+const encodingReachable = new WeakMap<Lowerer, boolean>();
+function socketEncodingReachable(lowerer: Lowerer): boolean {
+  const known = encodingReachable.get(lowerer);
+  if (known !== undefined) return known;
+  let reachable = false;
+  const visit = (node: ts.Node): void => {
+    if (reachable) return;
+    if (ts.isCallExpression(node)) {
+      const callee = node.expression;
+      const receiver =
+        ts.isPropertyAccessExpression(callee) && callee.name.text === "setEncoding"
+          ? callee.expression
+          : ts.isElementAccessExpression(callee) && ts.isStringLiteralLike(callee.argumentExpression) &&
+              callee.argumentExpression.text === "setEncoding"
+            ? callee.expression
+            : null;
+      if (receiver !== null) {
+        const kind = lowerer.mapTypeOf(lowerer.checker.getTypeAtLocation(receiver))?.kind;
+        if (kind === undefined || kind === "netSocket" || kind === "dyn") reachable = true;
+      }
+    }
+    ts.forEachChild(node, visit);
+  };
+  for (const file of lowerer.program.getSourceFiles()) {
+    if (file.isDeclarationFile || !file.text.includes("setEncoding")) continue;
+    visit(file);
+    if (reachable) break;
+  }
+  encodingReachable.set(lowerer, reachable);
+  return reachable;
+}
+
+/** An inline 'data' listener whose chunk parameter is typed Buffer, for a socket that may have an encoding set
+ * (upstream's lowerEncodedDataListener): the chunk binds as a checked dynamic value, so the body sees what Node
+ * passes (a string after setEncoding, a Buffer otherwise) whatever the annotation says. Null for other listener
+ * shapes, which keep the Buffer path. */
+function lowerEncodedDataListener(lowerer: Lowerer, node: ts.Expression): IrExpr | null {
+  let fn: ts.Expression = node;
+  while (ts.isParenthesizedExpression(fn)) fn = fn.expression;
+  if (!ts.isArrowFunction(fn) && !ts.isFunctionExpression(fn)) return null;
+  if (fn.parameters.length !== 1) return null;
+  const param = fn.parameters[0]!;
+  if (!ts.isIdentifier(param.name) || param.initializer || param.dotDotDotToken) return null;
+  const declared = lowerer.mapTypeOf(lowerer.checker.getTypeAtLocation(param.name));
+  if (declared?.kind !== "bytes" || declared.elem !== "u8") return null;
+  const symbol = lowerer.checker.getSymbolAtLocation(param.name);
+  if (symbol === undefined) return null;
+  const previousBinding = lowerer.runtimeOptionalBindingTypes.get(symbol);
+  const previousImplicit = lowerer.implicitParamTypes;
+  const implicit = new Map(previousImplicit ?? []);
+  implicit.set(symbol, lowerer.checker.getUnknownType());
+  lowerer.runtimeOptionalBindingTypes.set(symbol, DYN);
+  lowerer.implicitParamTypes = implicit;
+  try {
+    return lowerer.lowerExpr(fn);
+  } finally {
+    if (previousBinding === undefined) lowerer.runtimeOptionalBindingTypes.delete(symbol);
+    else lowerer.runtimeOptionalBindingTypes.set(symbol, previousBinding);
+    lowerer.implicitParamTypes = previousImplicit;
+  }
+}
+
 /** Method calls on net.Socket receivers: write/end/destroy/pipe and
  * on/once("data" | "end" | "close" | "error" | "connect"). Null for
  * other receivers. */
@@ -1511,9 +1576,9 @@ function lowerNetSocketMethodCall(lowerer: Lowerer, call: ts.CallExpression,
   if (name === "write" || name === "end") {
     requireStatementPosition(lowerer, call, `socket.${name}(...)`);
     // write(chunk, encoding) — the two-argument encoding form: 'buffer'
-    // beside a string chunk is Node's stream_base typecheck ("Second
-    // argument must be a buffer", thrown synchronously on an established
-    // socket — the invalid-input probes' shape); utf8 spellings are the
+    // beside a string chunk is Writable's encoding check (Node 24.22: a
+    // synchronous ERR_UNKNOWN_ENCODING TypeError, "Unknown encoding:
+    // buffer" — the invalid-input probes' shape); utf8 spellings are the
     // plain write (that IS the encoding written); a Buffer chunk ignores
     // the encoding like Node does. Other encodings keep the fence.
     if (name === "write" && args.length === 2) {
@@ -1523,7 +1588,7 @@ function lowerNetSocketMethodCall(lowerer: Lowerer, call: ts.CallExpression,
         if (encT.value === "buffer" && chunkT.kind === "string" &&
             isJsSourceFile(call.getSourceFile())) {
           lowerer.lowerExpr(args[0]!); // evaluation order (effect-free in practice)
-          return nodeThrowExpr(1, "ERR_INVALID_ARG_TYPE", "Second argument must be a buffer", VOID, loc);
+          return nodeThrowExpr(1, "ERR_UNKNOWN_ENCODING", "Unknown encoding: buffer", VOID, loc);
         }
         const passthrough =
           (chunkT.kind === "string" && (encT.value === "utf8" || encT.value === "utf-8")) ||
@@ -1691,6 +1756,15 @@ function lowerNetSocketMethodCall(lowerer: Lowerer, call: ts.CallExpression,
     const event = evT.isStringLiteralType() ? evT.value : null;
     const receiver = coerceToHandle(lowerer, access.expression, NETSOCKET_T);
     if (event === "data") {
+      // Upstream's encoded listener: where some socket may get an encoding, an inline Buffer-typed listener binds
+      // its chunk as a checked dynamic value, so the body sees what Node passes (a string after setEncoding).
+      const encoded = socketEncodingReachable(lowerer) ? lowerEncodedDataListener(lowerer, args[1]!) : null;
+      if (encoded !== null) {
+        const cb: IrExpr = encoded.type.kind === "func" && encoded.type.params[0]?.kind === "dyn"
+          ? encoded
+          : { kind: "dynCheck", value: encoded, type: funcOf([DYN], VOID), loc };
+        return { kind: "libCall", fn: "net.sockOnData", args: [receiver, cb, once], type: VOID, loc };
+      }
       const { cb } = lowerCallbackArg(
         lowerer, args[1]!, "data listeners", 1,
         (p) => p.kind === "bytes" && p.elem === "u8",

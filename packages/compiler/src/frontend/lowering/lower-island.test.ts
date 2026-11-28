@@ -1,11 +1,14 @@
-import { expect, test, vi } from "vitest";
+import { afterAll, expect, test, vi } from "vitest";
 import { F64, JSVAL, funcOf, type IrGlobal, type IrLocal } from "../../ir/ir.js";
-import { SyntaxKind, type Expression, type Identifier, type Program, type SourceFile, type Type } from "../ts7/adapter.js";
+import { SyntaxKind, type Expression, type Identifier, type Program, type Type } from "../ts7/adapter.js";
+import { closeSourceParser, parseSourceFile } from "../ts7/source-parser-node.js";
 import { isIslandExpr } from "./lower-island.js";
 import { Lowerer } from "./lowerer.js";
 
 const identifier = { kind: SyntaxKind.Identifier, text: "value" } as Identifier;
-const context = (dynamic: boolean) => new Lowerer({ getTypeChecker: () => ({}) } as Program, { fileName: "island.ts" } as SourceFile, [], dynamic);
+// The Lowerer reads its entry file (statements, file tags), so the probes run against a real, empty parsed one.
+afterAll(closeSourceParser);
+const context = (dynamic: boolean) => new Lowerer({ getTypeChecker: () => ({}) } as Program, parseSourceFile("island.ts", "", "ts"), [], dynamic);
 
 test("static island probes do not query the checker or map receiver and callee types", () => {
   const lowerer = context(false);

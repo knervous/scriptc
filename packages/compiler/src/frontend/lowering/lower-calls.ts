@@ -35,7 +35,7 @@ import { dynStringReceiver, lowerArrayConstructor, lowerArrayFromCall, lowerArra
 import { lowerBytesStaticCall } from "./containers/bytes.js";
 import { lowerRegexMethodCall, lowerStringIndexCall, lowerStringMethodCall, lowerStringPaddingCall, lowerStringSplitCall } from "./containers/string-and-regexp.js";
 import { createRequireSpecOf, lowerChildStreamMethodCall, lowerChildWriterMethodCall, lowerCreateRequireCall, lowerCryptoHashMethodCall, lowerDirentMethodCall, lowerFileHandleMethodCall, lowerImportMetaResolveCall, lowerNodeModuleCall, lowerPagePerformanceNow, lowerPerfHooksCall, lowerProcStreamMethodCall, lowerReflectCall, lowerRequireResolveCall, lowerWatcherMethodCall } from "./lower-builtins.js";
-import { awaitPromiseOrUnit, fieldTargetOnValue, callableBaseInstanceAsDyn } from "./lower-exprs.js";
+import { awaitPromiseOrUnit, fieldTargetOnValue, callableBaseInstanceAsDyn, lowerUnionIdentity } from "./lower-exprs.js";
 import { lowerAbsenceProbe, pageIdentityGlobal, lowerPromiseAllTupleCall, lowerPromiseRejectCall, stringWrapperToString, symbolFieldInfo, templateRawTextOf } from "./lower-exprs.js";
 import { isSafeToDiscard } from "./expressions/evaluation-safety.js";
 import { tryLowerExpression } from "./expressions/try-lower-expression.js";
@@ -10398,6 +10398,12 @@ export function lowerPromiseMethodCall(lowerer: Lowerer, call: ts.CallExpression
             return objectIsDisjointFalse(left, right, loc);
           }
         }
+        // The other shapes strict equality admits (a class hierarchy, two unions widened into their arms, a function
+        // against a unit-armed union): SameValue answers as === does there, except that number arms compare by
+        // SameValue.
+        const hasNumberArm = (unionId: string): boolean => (lowerer.unions.get(unionId)?.arms ?? []).some((a) => a.kind === "f64");
+        const identity = lowerUnionIdentity(lowerer, leftNode, rightNode, left, right, false, hasNumberArm, loc);
+        if (identity !== null) return identity;
         lowerer.noLowering(
           "Object.is over these union operands",
           call,

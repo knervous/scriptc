@@ -1,13 +1,17 @@
-import { expect, test } from "vitest";
+import { afterAll, expect, test } from "vitest";
 import { BOOL, DYN, F64, UNDEFINED_T, type IrExpr, type IrFunction, type IrType } from "../../ir/ir.js";
-import type { Program, SourceFile } from "../ts7/adapter.js";
+import type { Program } from "../ts7/adapter.js";
+import { closeSourceParser, parseSourceFile } from "../ts7/source-parser-node.js";
 import { Lowerer } from "./lowerer.js";
 import { moduleArtifacts } from "./lower-modules.js";
 import type { ClassInfo } from "./lower-classes.js";
 
+// The Lowerer reads its entry file (statements, file tags), so each test lowers against a real, empty parsed one.
+afterAll(closeSourceParser);
+
 test("retains dependencies from function storage, captures, generator channels and globals", () => {
   const loc = { file: "artifacts.ts", start: 0, end: 1 };
-  const lowerer = new Lowerer({ getTypeChecker: () => ({}) } as Program, { fileName: loc.file } as SourceFile, [], false);
+  const lowerer = new Lowerer({ getTypeChecker: () => ({}) } as Program, parseSourceFile(loc.file, "", "ts"), [], false);
   const record = (name: string, type: IrType = F64): IrType & { kind: "record" } => ({
     kind: "record", shapeId: lowerer.shapes.intern([{ name, type }]),
   });
@@ -21,7 +25,8 @@ test("retains dependencies from function storage, captures, generator channels a
   const completed = record("completed");
   const body = record("body");
   const global = record("global", record("nested"));
-  const wanted = lowerer.shapes.shapes.map((shape) => shape.id);
+  // moduleArtifacts lists records in id order (a stable object key), not intern order.
+  const wanted = lowerer.shapes.shapes.map((shape) => shape.id).sort();
   record("unused");
   const unionId = lowerer.unions.intern([body, UNDEFINED_T]);
   const unusedUnion = lowerer.unions.intern([F64, UNDEFINED_T]);
@@ -42,7 +47,7 @@ test("retains dependencies from function storage, captures, generator channels a
 
 test("retains a constructible grandchild through an unused intermediate class", () => {
   const loc = { file: "hierarchy.ts", start: 0, end: 1 };
-  const lowerer = new Lowerer({ getTypeChecker: () => ({}) } as Program, { fileName: loc.file } as SourceFile, [], false);
+  const lowerer = new Lowerer({ getTypeChecker: () => ({}) } as Program, parseSourceFile(loc.file, "", "ts"), [], false);
   const info = (name: string, base: ClassInfo | null): ClassInfo => {
     const value = { def: { name, fields: [], ...(base ? { base: base.def.name } : {}) }, base, subclasses: [], fields: new Map(), methods: new Map() } as unknown as ClassInfo;
     base?.subclasses.push(value);
@@ -66,7 +71,7 @@ test("retains a constructible grandchild through an unused intermediate class", 
 
 test("retains references carried by executable metadata and generator completion", () => {
   const loc = { file: "references.ts", start: 0, end: 1 };
-  const lowerer = new Lowerer({ getTypeChecker: () => ({}) } as Program, { fileName: loc.file } as SourceFile, [], false);
+  const lowerer = new Lowerer({ getTypeChecker: () => ({}) } as Program, parseSourceFile(loc.file, "", "ts"), [], false);
   const shapeId = lowerer.shapes.intern([{ name: "payload", type: F64 }]);
   const completedId = lowerer.shapes.intern([{ name: "completed", type: F64 }]);
   const unionId = lowerer.unions.intern([F64, UNDEFINED_T]);
@@ -89,11 +94,12 @@ test("retains references carried by executable metadata and generator completion
 
 test("closes nested structural types and index-signature values", () => {
   const loc = { file: "structural.ts", start: 0, end: 1 };
-  const lowerer = new Lowerer({ getTypeChecker: () => ({}) } as Program, { fileName: loc.file } as SourceFile, [], false);
+  const lowerer = new Lowerer({ getTypeChecker: () => ({}) } as Program, parseSourceFile(loc.file, "", "ts"), [], false);
   const record = (name: string): IrType & { kind: "record" } => ({ kind: "record", shapeId: lowerer.shapes.intern([{ name, type: F64 }]) });
   const key = record("key"), item = record("item"), yielded = record("yielded"), returned = record("returned"), sent = record("sent"), indexed = record("indexed");
   const containerId = lowerer.shapes.intern([], false, indexed);
-  const wanted = lowerer.shapes.shapes.map((shape) => shape.id);
+  // moduleArtifacts lists records in id order (a stable object key), not intern order.
+  const wanted = lowerer.shapes.shapes.map((shape) => shape.id).sort();
   record("unused");
   const nested: IrType = { kind: "func", params: [{ kind: "map", key, value: { kind: "set", elem: { kind: "array", elem: item } } }],
     ret: { kind: "promise", inner: { kind: "generator", yieldT: yielded, retT: returned, nextT: sent } } };
@@ -103,7 +109,7 @@ test("closes nested structural types and index-signature values", () => {
 
 test("boxed child values retain native stdio classes through recursive storage", () => {
   const loc = { file: "child.ts", start: 0, end: 1 };
-  const lowerer = new Lowerer({ getTypeChecker: () => ({}) } as Program, { fileName: loc.file } as SourceFile, [], false);
+  const lowerer = new Lowerer({ getTypeChecker: () => ({}) } as Program, parseSourceFile(loc.file, "", "ts"), [], false);
   for (const name of ["%Readable", "%Writable"]) lowerer.classes.set(name, { def: { name, fields: [], loc }, base: null, subclasses: [] } as unknown as ClassInfo);
   const shapeId = lowerer.shapes.intern([{ name: "children", type: { kind: "array", elem: { kind: "child" } } }]);
   const value: IrExpr = { kind: "varRef", localId: "value", type: { kind: "record", shapeId }, loc };

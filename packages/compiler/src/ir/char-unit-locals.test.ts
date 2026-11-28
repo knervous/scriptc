@@ -164,8 +164,10 @@ console.log(kept("a b", 1), kept("ab", 0), kept("", 3), longer("ab", 0), twice("
     expect(fn(before, name)).toBeDefined();
     expect(unionTests(fn(after, name))).toEqual(unionTests(fn(before, name)));
   }
-  // The local's own test still reads it as a union.
-  expect(unionTests(fn(after, "kept"))).toContain("unionEq");
+  // The local stays a character read: `src[pos]` still lowers to charAt after the pass, not a code unit. (Its own
+  // `=== " "` test once lowered to a unionEq over the optional string; this fork's frontend now lowers that compare
+  // without a union test, so the read is the observable.)
+  expect(unionTests(fn(after, "kept"))).toEqual(["charAt"]);
 });
 
 test("a held local tested inside another read's index or receiver becomes its unit", async () => {

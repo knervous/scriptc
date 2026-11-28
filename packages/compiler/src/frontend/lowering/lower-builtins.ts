@@ -9153,11 +9153,10 @@ function lowerProcessIpcSend(lowerer: Lowerer, call: ts.CallExpression): IrExpr 
       if (sig.type.kind === "string") {
         return { kind: "libCall", fn: "process.kill", args: [pid, sig], type: BOOL, loc };
       }
-      lowerer.noLowering(
-        `process.kill with a '${lowerer.fmt(sig.type)}' signal`,
-        sigNode,
-        "pass a signal name string or number (narrow unions first)",
-      );
+      // Any other signal value (an untyped one, a union): Node's own dispatch at run time (scr_kill_sig_dyn): a
+      // number is the signal, a falsy value SIGTERM, anything else its string's name (ERR_UNKNOWN_SIGNAL when it
+      // names none), and a BigInt throws.
+      return { kind: "libCall", fn: "process.killSigDyn", args: [pid, lowerer.coerceToExpected(sig, DYN)], type: BOOL, loc };
     }
     if (member === "exit") {
       const arg = call.arguments[0];

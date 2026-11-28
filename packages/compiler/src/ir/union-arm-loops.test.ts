@@ -46,6 +46,11 @@ const loops = (f: IrFunction): number =>
 /** Narrows and tag tests left on the source value. */
 const narrowsOn = (f: IrFunction, id: string): number =>
   count(f, (e) => e.kind === "unionNarrow" && e.value.kind === "varRef" && e.value.localId === id);
+/** Fork: the dispatch the frontend leaves on the source, inline (upstream's form, and a store's) or as an
+ * `%arraylike` helper call on it (a read or length, which the pass expands where it versions a loop). */
+const dispatchesOn = (f: IrFunction, id: string): number =>
+  narrowsOn(f, id) +
+  count(f, (e) => e.kind === "call" && e.callee.startsWith("%arraylike.") && e.args[0]?.kind === "varRef" && e.args[0].localId === id);
 const testsOn = (f: IrFunction, id: string): number =>
   count(f, (e) => e.kind === "unionIsTag" && e.value.kind === "varRef" && e.value.localId === id);
 
@@ -98,7 +103,7 @@ function fill(xs: UintArray, rounds: number): number {
 console.log(fill(new Uint32Array(4), 2));
 `);
   expect(loops(fn(before, "fill"))).toBe(2);
-  expect(narrowsOn(fn(before, "fill"), "xs.0")).toBeGreaterThan(0);
+  expect(dispatchesOn(fn(before, "fill"), "xs.0")).toBeGreaterThan(0);
 
   const after = versionUnionArmLoops(before);
   const fill = fn(after, "fill");
@@ -235,7 +240,7 @@ ${body}
 }
 console.log(scan(new Uint8Array(4)));
 `);
-  expect(narrowsOn(fn(before, "scan"), "xs.0")).toBeGreaterThan(0);
+  expect(dispatchesOn(fn(before, "scan"), "xs.0")).toBeGreaterThan(0);
   const after = versionUnionArmLoops(before);
   expect(after).toBe(before);
 });

@@ -31,6 +31,7 @@ import { emitNativeArtifact, llvmInputBytes, NativeCodegenError } from "./backen
 import { nativeBuildPartitions, nativePartitionPaths } from "./backend/native-codegen-core.js";
 import { privateSiblingPath } from "./backend/build-cache.js";
 import { nativeCodegenTarget, nativeCodegenTargetRefusal } from "./backend/targets.js";
+import { targetCpuField, targetCpuTargetRefusal } from "./backend/target-cpu.js";
 import { windowsSubsystemLinkerArgs, type WindowsSubsystem } from "./backend/targets.js";
 import type { NativeLinkFeatures } from "./backend/native-link-info.js";
 import { createNativeLinkInfo } from "./backend/native-link-info.js";
@@ -407,6 +408,7 @@ function nativeEmissionOptions(
     startupSection: buildPlatform === "linux",
     ...inlineRcOption(opts.optimization, sanitize),
     ...(opts.cpuDispatch === true ? { cpuDispatch: true } : {}),
+    ...targetCpuField(opts.targetCpu),
   };
 }
 
@@ -934,6 +936,10 @@ async function compileTracked(
       }
     }
   }
+  {
+    const refusal = targetCpuTargetRefusal(opts.targetCpu, buildPlatform, nativeCodegenTarget()?.architecture ?? process.arch);
+    if (refusal !== null) return { ok: false, diagnostics: [nativeCodegenDiag("SC3002", refusal, entryPath)], sourceTexts: new Map() };
+  }
   try {
     windowsSubsystemLinkerArgs(buildPlatform, opts.windowsSubsystem);
   } catch (err) {
@@ -985,7 +991,7 @@ async function compileTracked(
         opts.nativeProgramObject === true
           ? "helper-object"
           : helperObjectRoute ? "runtime-pack" : "driver-tu"
-      }${opts.cpuDispatch === true ? ":cpu-dispatch" : ""}${opts.nativeOutput === "android-main" ? ":android-main" : ""}`,
+      }${opts.cpuDispatch === true ? ":cpu-dispatch" : ""}${opts.targetCpu === undefined || opts.targetCpu === "baseline" ? "" : `:cpu-${opts.targetCpu}`}${opts.nativeOutput === "android-main" ? ":android-main" : ""}`,
     compiler: [
         helperObjectRoute
           ? resolvePlatformLinker(process.env, nativeCodegenTarget()?.defaultLinker)

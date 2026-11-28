@@ -181,8 +181,8 @@ const metadataExclusion =
 export const NODE24_FETCH_COMPAT_PROFILE = {
   schemaVersion: 1,
   target: {
-    node: "24.15.0",
-    undici: "7.24.4",
+    node: "24.22.1",
+    undici: "7.30.1",
   },
   requestInit: [
     {

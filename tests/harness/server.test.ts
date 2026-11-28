@@ -144,13 +144,15 @@ describe(`server differential (${cases.length} programs${sanitize ? ", sanitized
     expect(nativeRes.driverStdout).toBe(nodeRes.driverStdout);
   }, 120_000);
 
-  test("http-trailers rejects an aggregate trailer overflow", async () => {
+  // Node 24.22's llhttp answers a trailer block over the field limit with 431 (24.15 accepted it); the runtime
+  // follows 24.22, as upstream's copy of this test does.
+  test("http-trailers answers 431 for a trailer block over the field limit", async () => {
     const entry = join(fixturesRoot, "cases/http-trailers/main.ts");
     const driver = join(fixturesRoot, "cases/http-trailers/limit-driver.mjs");
     const binary = await build(entry);
     const nativeRes = await runLane(binary, [], driver);
     expect(nativeRes.exitCode).toBe(0);
-    expect(nativeRes.driverStdout).toBe("limit HTTP/1.1 400 Bad Request\nlimit driver done\n");
+    expect(nativeRes.driverStdout).toBe("limit HTTP/1.1 431 Request Header Fields Too Large\nlimit driver done\n");
   }, 120_000);
 
   test("net-reuse-port emits the additive LLVM ABI", async () => {

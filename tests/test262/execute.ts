@@ -88,7 +88,9 @@ export async function runSource(source: string, options: {
       backend: options.backend ?? "default", sanitize: options.sanitize ?? false,
     }));
     const compiled = await boundedRun(process.execPath, [
-      "--import", "tsx", fileURLToPath(new URL("./compile-worker.ts", import.meta.url)), requestFile,
+      // .mts: the compiler imports binaryen, whose top-level await a CommonJS transform cannot carry (the
+      // repository root has no "type": "module", so a .ts worker would load as CommonJS).
+      "--import", "tsx", fileURLToPath(new URL("./compile-worker.mts", import.meta.url)), requestFile,
     ], options.compileTimeoutMs ?? 120_000);
     const finish = (outcome: Outcome): Outcome => ({ ...outcome, ...(options.keep ? { workDir } : {}) });
     if (compiled.timeout) return finish({ status: "timeout", phase });

@@ -302,6 +302,9 @@ static const char *scr_net_errname(int err) {
   case EHOSTDOWN: return "EHOSTDOWN"; /* absent from the win32 CRT */
 #endif
   case EINVAL: return "EINVAL";
+#ifdef EAFNOSUPPORT
+  case EAFNOSUPPORT: return "EAFNOSUPPORT"; /* a family the host does not offer (IPv6 off) */
+#endif
   case ENOTSUP: return "ENOTSUP";
 #if defined(EOPNOTSUPP) && (!defined(ENOTSUP) || EOPNOTSUPP != ENOTSUP)
   case EOPNOTSUPP: return "EOPNOTSUPP";
@@ -1237,6 +1240,9 @@ static const char *scr_net_listen_reason(int err, bool explicit_host) {
   if (explicit_host && err == EADDRNOTAVAIL) return "address not available";
 #endif
   if (err == ENOTSUP) return "operation not supported";
+#ifdef EAFNOSUPPORT
+  if (err == EAFNOSUPPORT) return "address family not supported";
+#endif
 #if defined(EOPNOTSUPP) && (!defined(ENOTSUP) || EOPNOTSUPP != ENOTSUP)
   if (err == EOPNOTSUPP) return "operation not supported";
 #endif
@@ -2587,8 +2593,17 @@ static void scr_net_listen_opts_impl(ScrNetServer *s, double port, ScrStr *host 
   }
   int fd = socket(sa->sa_family, SOCK_STREAM, 0);
   if (fd < 0) {
-    fputs("scriptc: socket() failed\n", stderr);
-    abort();
+    /* a family the host does not offer (EAFNOSUPPORT with IPv6 off): Node's
+     * listen error, as for a failed bind */
+    int err = errno;
+    char msg[160];
+    char port_text[16] = "";
+    if (p > 0) snprintf(port_text, sizeof port_text, ":%d", p);
+    snprintf(msg, sizeof msg, "listen %s: %s %s%s", scr_net_errname(err),
+             scr_net_listen_reason(err, true), h, port_text);
+    if (!s->pending_err) s->pending_err = scr_str_new(msg, strlen(msg));
+    scr_net_server_register(s);
+    return;
   }
   if (v6) {
     int only = ipv6_only ? 1 : 0;
@@ -3504,8 +3519,16 @@ static void scr_net_sock_dial_peer(ScrNetSocket *s) {
   } else {
     fd = socket(sa->sa_family, SOCK_STREAM, 0);
     if (fd < 0) {
-      fputs("scriptc: socket() failed\n", stderr);
-      abort();
+      /* the family is not offered here (EAFNOSUPPORT): Node's connect error,
+       * which names the local address it never bound */
+      char msg[160];
+      snprintf(msg, sizeof msg, "connect %s %s:%d - Local (undefined:undefined)",
+               scr_net_errname(errno), s->peer_ip, s->peer_port);
+      s->pending_err = scr_str_new(msg, strlen(msg));
+      s->had_error = true;
+      s->connecting = false;
+      s->closed_before_connect = true;
+      return;
     }
     scr_net_nonblock(fd);
     int one = 1;
@@ -5699,8 +5722,15 @@ static bool scr_net_sock_dial_ip(ScrNetSocket *s, const ScrStr *ip) {
   } else {
     fd = socket(sa->sa_family, SOCK_STREAM, 0);
     if (fd < 0) {
-      fputs("scriptc: socket() failed\n", stderr);
-      abort();
+      /* the family is not offered here (EAFNOSUPPORT): this address fails as
+       * a refused connect would, and the dial moves on */
+      snprintf(msg, sizeof msg, "connect %s %s:%d - Local (undefined:undefined)",
+               scr_net_errname(errno), s->peer_ip, s->peer_port);
+      scr_str_release(s->dial_err);
+      s->dial_err = scr_str_new(msg, strlen(msg));
+      s->dial_err_code = NULL;
+      scr_net_attempt_queue(s, SCR_NET_ATTEMPT_FAILED, h, family, msg);
+      return false;
     }
     scr_net_nonblock(fd);
     int one = 1;

@@ -1,7 +1,6 @@
 // This file was modified from scriptc (Apache-2.0); see MODIFICATIONS.md.
 import {
   BOOL,
-  BYTES_U8,
   F64,
   type IrExpr,
   type IrFunction,
@@ -532,13 +531,19 @@ export function buildArraySortFn(
 }
 
 
+/** TypedArray.prototype.sort / toSorted over `bytesT`: a stable bottom-up merge sort, written back into the
+ * receiver (`sort`) or into a copy of it (`toSorted`, `copyFirst`), which the helper returns. Without a comparator
+ * the order is numeric (%TypedArray%.prototype.sort's default): a float array puts -0 before +0 and NaN last. A
+ * comparator's NaN result counts as 0, as `> 0` does. */
 export function buildBytesSortFn(
   name: string,
+  bytesT: IrType & { kind: "bytes" },
   arity: number,
   hasComparator: boolean,
+  copyFirst: boolean,
   loc: SrcLoc,
 ): IrFunction {
-  const bytesT = BYTES_U8;
+  const float = bytesT.elem === "f16" || bytesT.elem === "f32" || bytesT.elem === "f64";
   const fnT = funcOf([F64, F64].slice(0, arity), F64);
   const a = varRef("a.0", bytesT, loc);
   const src = varRef("src.0", bytesT, loc);
@@ -563,7 +568,16 @@ export function buildBytesSortFn(
     type: F64,
     loc,
   });
-  const shouldTakeRight = (leftValue: IrExpr, rightValue: IrExpr): IrExpr => ({
+  const cmp = (op: "<" | ">" | "===" | "!==", left: IrExpr, right: IrExpr): IrExpr => ({ kind: "bin", op, left, right, type: BOOL, loc });
+  const logical = (op: "&&" | "||", left: IrExpr, right: IrExpr): IrExpr => ({ kind: "logical", op, left, right, type: BOOL, loc });
+  const div = (left: IrExpr, right: IrExpr): IrExpr => ({ kind: "bin", op: "/", left, right, type: F64, loc });
+  // The default float order: the right value goes first when the left is greater, NaN being the greatest and
+  // -0 below +0 (1/-0 is -Infinity).
+  const floatGreater = (l: IrExpr, r: IrExpr): IrExpr =>
+    logical("&&", cmp("===", r, r), logical("||", cmp("!==", l, l), logical("||", cmp(">", l, r),
+      logical("&&", logical("&&", cmp("===", l, numLit(0, loc)), cmp("===", r, numLit(0, loc))),
+        cmp(">", div(numLit(1, loc), l), div(numLit(1, loc), r))))));
+  const shouldTakeRight = (leftValue: IrExpr, rightValue: IrExpr): IrExpr => !hasComparator && float ? floatGreater(leftValue, rightValue) : ({
     kind: "bin",
     op: ">",
     left: hasComparator
@@ -740,7 +754,7 @@ export function buildBytesSortFn(
     loc,
   });
   const body: IrStmt[] = [
-    { kind: "assign", localId: "a.0", value: slice(a), loc },
+    ...(copyFirst ? [{ kind: "assign" as const, localId: "a.0", value: slice(a), loc }] : []),
     { kind: "varDecl", localId: "n.0", init: { kind: "bytesIntrinsic", method: "length", receiver: a, args: [], type: F64, loc }, loc },
     { kind: "varDecl", localId: "src.0", init: slice(a), loc },
     { kind: "varDecl", localId: "dst.0", init: slice(a), loc },

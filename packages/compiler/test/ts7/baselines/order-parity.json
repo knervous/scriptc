@@ -8833,17 +8833,7 @@
    "order": [
     "<repo>/tests/corpus/4630-contract-int32.ts"
    ],
-   "diags": [
-    {
-     "code": "SC0001",
-     "message": "Cannot find module '@scriptc/types' or its corresponding type declarations.",
-     "loc": {
-      "file": "<repo>/tests/corpus/4630-contract-int32.ts",
-      "start": 282,
-      "end": 298
-     }
-    }
-   ]
+   "diags": []
   },
   "<repo>/tests/corpus/4630-reference-write-call-arguments.ts": {
    "order": [
@@ -8855,17 +8845,7 @@
    "order": [
     "<repo>/tests/corpus/4631-contract-nothrow.ts"
    ],
-   "diags": [
-    {
-     "code": "SC0001",
-     "message": "Cannot find module '@scriptc/types' or its corresponding type declarations.",
-     "loc": {
-      "file": "<repo>/tests/corpus/4631-contract-nothrow.ts",
-      "start": 181,
-      "end": 197
-     }
-    }
-   ]
+   "diags": []
   },
   "<repo>/tests/corpus/4631-reference-write-aliases.ts": {
    "order": [
@@ -8877,17 +8857,7 @@
    "order": [
     "<repo>/tests/corpus/4632-contract-immutable.ts"
    ],
-   "diags": [
-    {
-     "code": "SC0001",
-     "message": "Cannot find module '@scriptc/types' or its corresponding type declarations.",
-     "loc": {
-      "file": "<repo>/tests/corpus/4632-contract-immutable.ts",
-      "start": 289,
-      "end": 305
-     }
-    }
-   ]
+   "diags": []
   },
   "<repo>/tests/corpus/4632-reference-write-loops-and-walks.ts": {
    "order": [
@@ -8899,17 +8869,7 @@
    "order": [
     "<repo>/tests/corpus/4633-contract-program-lifetime.ts"
    ],
-   "diags": [
-    {
-     "code": "SC0001",
-     "message": "Cannot find module '@scriptc/types' or its corresponding type declarations.",
-     "loc": {
-      "file": "<repo>/tests/corpus/4633-contract-program-lifetime.ts",
-      "start": 415,
-      "end": 431
-     }
-    }
-   ]
+   "diags": []
   },
   "<repo>/tests/corpus/4633-reference-write-callbacks-returns.ts": {
    "order": [
@@ -8933,38 +8893,11 @@
     },
     {
      "code": "SC0001",
-     "message": "Cannot find module '@scriptc/types' or its corresponding type declarations.",
-     "loc": {
-      "file": "<repo>/tests/corpus/4634-contract-program-lifetime-publish.ts",
-      "start": 165,
-      "end": 181
-     }
-    },
-    {
-     "code": "SC0001",
      "message": "Parameter 'c' implicitly has an 'any' type.",
      "loc": {
       "file": "<repo>/tests/corpus/4634-contract-program-lifetime-publish.ts",
       "start": 8111,
       "end": 8112
-     }
-    },
-    {
-     "code": "SC0001",
-     "message": "Argument of type '(code: number) => void' is not assignable to parameter of type '(...args: unknown[]) => void'.\n  Types of parameters 'code' and 'args' are incompatible.\n    Type 'unknown' is not assignable to type 'number'.",
-     "loc": {
-      "file": "<repo>/tests/corpus/4634-contract-program-lifetime-publish.ts",
-      "start": 9344,
-      "end": 9363
-     }
-    },
-    {
-     "code": "SC0001",
-     "message": "Property 'postMessage' does not exist on type '{}'.",
-     "loc": {
-      "file": "<repo>/tests/corpus/4634-contract-program-lifetime-publish.ts",
-      "start": 9820,
-      "end": 9831
      }
     },
     {
@@ -8996,42 +8929,13 @@
    "order": [
     "<repo>/tests/corpus/4641-nothrow-try-catch.ts"
    ],
-   "diags": [
-    {
-     "code": "SC0001",
-     "message": "Cannot find module '@scriptc/types' or its corresponding type declarations.",
-     "loc": {
-      "file": "<repo>/tests/corpus/4641-nothrow-try-catch.ts",
-      "start": 241,
-      "end": 257
-     }
-    }
-   ]
+   "diags": []
   },
   "<repo>/tests/corpus/4642-acyclic-contract.ts": {
    "order": [
     "<repo>/tests/corpus/4642-acyclic-contract.ts"
    ],
-   "diags": [
-    {
-     "code": "SC0001",
-     "message": "Cannot find module '@scriptc/types' or its corresponding type declarations.",
-     "loc": {
-      "file": "<repo>/tests/corpus/4642-acyclic-contract.ts",
-      "start": 257,
-      "end": 273
-     }
-    },
-    {
-     "code": "SC0001",
-     "message": "Cannot find module '@scriptc/types' or its corresponding type declarations.",
-     "loc": {
-      "file": "<repo>/tests/corpus/4642-acyclic-contract.ts",
-      "start": 300,
-      "end": 316
-     }
-    }
-   ]
+   "diags": []
   },
   "<repo>/tests/corpus/4650-stale-property-narrowing.ts": {
    "order": [
@@ -9081,15 +8985,6 @@
       "file": "<repo>/tests/corpus/4691-publish-constructor-self-alias.ts",
       "start": 96,
       "end": 114
-     }
-    },
-    {
-     "code": "SC0001",
-     "message": "Argument of type '(code: number) => void' is not assignable to parameter of type '(...args: unknown[]) => void'.\n  Types of parameters 'code' and 'args' are incompatible.\n    Type 'unknown' is not assignable to type 'number'.",
-     "loc": {
-      "file": "<repo>/tests/corpus/4691-publish-constructor-self-alias.ts",
-      "start": 1706,
-      "end": 1725
      }
     },
     {
@@ -11065,6 +10960,12 @@
    ],
    "diags": []
   },
+  "<repo>/tests/corpus/error-subclass-assigned-fields-dyn.js": {
+   "order": [
+    "<repo>/tests/corpus/error-subclass-assigned-fields-dyn.js"
+   ],
+   "diags": []
+  },
   "<repo>/tests/corpus/error-subclass-message-accessor-keyed.js": {
    "order": [
     "<repo>/tests/corpus/error-subclass-message-accessor-keyed.js"
@@ -12523,87 +12424,13 @@
    "order": [
     "<repo>/tests/corpus/native-worker-arena-reuse.ts"
    ],
-   "diags": [
-    {
-     "code": "SC0001",
-     "message": "Property 'once' does not exist on type 'Worker'.",
-     "loc": {
-      "file": "<repo>/tests/corpus/native-worker-arena-reuse.ts",
-      "start": 763,
-      "end": 767
-     }
-    },
-    {
-     "code": "SC0001",
-     "message": "Property 'once' does not exist on type 'Worker'.",
-     "loc": {
-      "file": "<repo>/tests/corpus/native-worker-arena-reuse.ts",
-      "start": 876,
-      "end": 880
-     }
-    },
-    {
-     "code": "SC0001",
-     "message": "Property 'once' does not exist on type 'Worker'.",
-     "loc": {
-      "file": "<repo>/tests/corpus/native-worker-arena-reuse.ts",
-      "start": 918,
-      "end": 922
-     }
-    },
-    {
-     "code": "SC0001",
-     "message": "Property 'postMessage' does not exist on type '{}'.",
-     "loc": {
-      "file": "<repo>/tests/corpus/native-worker-arena-reuse.ts",
-      "start": 2096,
-      "end": 2107
-     }
-    }
-   ]
+   "diags": []
   },
   "<repo>/tests/corpus/native-worker-bounded-errors.ts": {
    "order": [
     "<repo>/tests/corpus/native-worker-bounded-errors.ts"
    ],
-   "diags": [
-    {
-     "code": "SC0001",
-     "message": "Argument of type '(lines: string[]) => void' is not assignable to parameter of type '(...args: unknown[]) => void'.\n  Types of parameters 'lines' and 'args' are incompatible.\n    Type 'unknown' is not assignable to type 'string[]'.",
-     "loc": {
-      "file": "<repo>/tests/corpus/native-worker-bounded-errors.ts",
-      "start": 1528,
-      "end": 1599
-     }
-    },
-    {
-     "code": "SC0001",
-     "message": "Argument of type '(error: Error) => void' is not assignable to parameter of type '(...args: unknown[]) => void'.\n  Types of parameters 'error' and 'args' are incompatible.\n    Type 'unknown' is not assignable to type 'Error'.",
-     "loc": {
-      "file": "<repo>/tests/corpus/native-worker-bounded-errors.ts",
-      "start": 1627,
-      "end": 1735
-     }
-    },
-    {
-     "code": "SC0001",
-     "message": "Argument of type '(code: number) => void' is not assignable to parameter of type '(...args: unknown[]) => void'.\n  Types of parameters 'code' and 'args' are incompatible.\n    Type 'unknown' is not assignable to type 'number'.",
-     "loc": {
-      "file": "<repo>/tests/corpus/native-worker-bounded-errors.ts",
-      "start": 1770,
-      "end": 1789
-     }
-    },
-    {
-     "code": "SC0001",
-     "message": "Property 'postMessage' does not exist on type '{}'.",
-     "loc": {
-      "file": "<repo>/tests/corpus/native-worker-bounded-errors.ts",
-      "start": 1924,
-      "end": 1935
-     }
-    }
-   ]
+   "diags": []
   },
   "<repo>/tests/corpus/native-worker-buffer-consumers.ts": {
    "order": [
@@ -12618,33 +12445,6 @@
       "start": 364,
       "end": 371
      }
-    },
-    {
-     "code": "SC0001",
-     "message": "Property 'once' does not exist on type 'Worker'.",
-     "loc": {
-      "file": "<repo>/tests/corpus/native-worker-buffer-consumers.ts",
-      "start": 628,
-      "end": 632
-     }
-    },
-    {
-     "code": "SC0001",
-     "message": "Property 'once' does not exist on type 'Worker'.",
-     "loc": {
-      "file": "<repo>/tests/corpus/native-worker-buffer-consumers.ts",
-      "start": 1307,
-      "end": 1311
-     }
-    },
-    {
-     "code": "SC0001",
-     "message": "Property 'postMessage' does not exist on type '{}'.",
-     "loc": {
-      "file": "<repo>/tests/corpus/native-worker-buffer-consumers.ts",
-      "start": 1455,
-      "end": 1466
-     }
     }
    ]
   },
@@ -12652,121 +12452,19 @@
    "order": [
     "<repo>/tests/corpus/native-worker-cancel-hot.ts"
    ],
-   "diags": [
-    {
-     "code": "SC0001",
-     "message": "Property 'postMessage' does not exist on type '{}'.",
-     "loc": {
-      "file": "<repo>/tests/corpus/native-worker-cancel-hot.ts",
-      "start": 681,
-      "end": 692
-     }
-    },
-    {
-     "code": "SC0001",
-     "message": "Property 'once' does not exist on type 'Worker'.",
-     "loc": {
-      "file": "<repo>/tests/corpus/native-worker-cancel-hot.ts",
-      "start": 920,
-      "end": 924
-     }
-    },
-    {
-     "code": "SC0001",
-     "message": "Property 'once' does not exist on type 'Worker'.",
-     "loc": {
-      "file": "<repo>/tests/corpus/native-worker-cancel-hot.ts",
-      "start": 1061,
-      "end": 1065
-     }
-    }
-   ]
+   "diags": []
   },
   "<repo>/tests/corpus/native-worker-class-fields.ts": {
    "order": [
     "<repo>/tests/corpus/native-worker-class-fields.ts"
    ],
-   "diags": [
-    {
-     "code": "SC0001",
-     "message": "Argument of type '(text: string) => void' is not assignable to parameter of type '(...args: unknown[]) => void'.\n  Types of parameters 'text' and 'args' are incompatible.\n    Type 'unknown' is not assignable to type 'string'.",
-     "loc": {
-      "file": "<repo>/tests/corpus/native-worker-class-fields.ts",
-      "start": 555,
-      "end": 574
-     }
-    },
-    {
-     "code": "SC0001",
-     "message": "Argument of type '(code: number) => void' is not assignable to parameter of type '(...args: unknown[]) => void'.\n  Types of parameters 'code' and 'args' are incompatible.\n    Type 'unknown' is not assignable to type 'number'.",
-     "loc": {
-      "file": "<repo>/tests/corpus/native-worker-class-fields.ts",
-      "start": 699,
-      "end": 730
-     }
-    },
-    {
-     "code": "SC0001",
-     "message": "Property 'on' does not exist on type '{}'.",
-     "loc": {
-      "file": "<repo>/tests/corpus/native-worker-class-fields.ts",
-      "start": 1664,
-      "end": 1666
-     }
-    },
-    {
-     "code": "SC0001",
-     "message": "Property 'postMessage' does not exist on type '{}'.",
-     "loc": {
-      "file": "<repo>/tests/corpus/native-worker-class-fields.ts",
-      "start": 1703,
-      "end": 1714
-     }
-    }
-   ]
+   "diags": []
   },
   "<repo>/tests/corpus/native-worker-clone-errors.ts": {
    "order": [
     "<repo>/tests/corpus/native-worker-clone-errors.ts"
    ],
-   "diags": [
-    {
-     "code": "SC0001",
-     "message": "Expected 1 arguments, but got 2.",
-     "loc": {
-      "file": "<repo>/tests/corpus/native-worker-clone-errors.ts",
-      "start": 361,
-      "end": 369
-     }
-    },
-    {
-     "code": "SC0001",
-     "message": "Argument of type '(code: number) => void' is not assignable to parameter of type '(...args: unknown[]) => void'.\n  Types of parameters 'code' and 'args' are incompatible.\n    Type 'unknown' is not assignable to type 'number'.",
-     "loc": {
-      "file": "<repo>/tests/corpus/native-worker-clone-errors.ts",
-      "start": 465,
-      "end": 508
-     }
-    },
-    {
-     "code": "SC0001",
-     "message": "Property 'once' does not exist on type '{}'.",
-     "loc": {
-      "file": "<repo>/tests/corpus/native-worker-clone-errors.ts",
-      "start": 534,
-      "end": 538
-     }
-    },
-    {
-     "code": "SC0001",
-     "message": "Property 'postMessage' does not exist on type '{}'.",
-     "loc": {
-      "file": "<repo>/tests/corpus/native-worker-clone-errors.ts",
-      "start": 582,
-      "end": 593
-     }
-    }
-   ]
+   "diags": []
   },
   "<repo>/tests/corpus/native-worker-commonjs.cjs": {
    "order": [
@@ -12778,805 +12476,73 @@
    "order": [
     "<repo>/tests/corpus/native-worker-delayed-messages.ts"
    ],
-   "diags": [
-    {
-     "code": "SC0001",
-     "message": "Argument of type '(code: number) => void' is not assignable to parameter of type '(...args: unknown[]) => void'.\n  Types of parameters 'code' and 'args' are incompatible.\n    Type 'unknown' is not assignable to type 'number'.",
-     "loc": {
-      "file": "<repo>/tests/corpus/native-worker-delayed-messages.ts",
-      "start": 248,
-      "end": 291
-     }
-    },
-    {
-     "code": "SC0001",
-     "message": "Property 'on' does not exist on type '{}'.",
-     "loc": {
-      "file": "<repo>/tests/corpus/native-worker-delayed-messages.ts",
-      "start": 423,
-      "end": 425
-     }
-    },
-    {
-     "code": "SC0001",
-     "message": "Property 'postMessage' does not exist on type '{}'.",
-     "loc": {
-      "file": "<repo>/tests/corpus/native-worker-delayed-messages.ts",
-      "start": 548,
-      "end": 559
-     }
-    },
-    {
-     "code": "SC0001",
-     "message": "Property 'close' does not exist on type '{}'.",
-     "loc": {
-      "file": "<repo>/tests/corpus/native-worker-delayed-messages.ts",
-      "start": 589,
-      "end": 594
-     }
-    }
-   ]
+   "diags": []
   },
   "<repo>/tests/corpus/native-worker-environment.ts": {
    "order": [
     "<repo>/tests/corpus/native-worker-environment.ts"
    ],
-   "diags": [
-    {
-     "code": "SC0001",
-     "message": "Argument of type '(code: number) => void' is not assignable to parameter of type '(...args: unknown[]) => void'.\n  Types of parameters 'code' and 'args' are incompatible.\n    Type 'unknown' is not assignable to type 'number'.",
-     "loc": {
-      "file": "<repo>/tests/corpus/native-worker-environment.ts",
-      "start": 371,
-      "end": 451
-     }
-    },
-    {
-     "code": "SC0001",
-     "message": "Property 'postMessage' does not exist on type '{}'.",
-     "loc": {
-      "file": "<repo>/tests/corpus/native-worker-environment.ts",
-      "start": 773,
-      "end": 784
-     }
-    },
-    {
-     "code": "SC0001",
-     "message": "Property 'postMessage' does not exist on type '{}'.",
-     "loc": {
-      "file": "<repo>/tests/corpus/native-worker-environment.ts",
-      "start": 1226,
-      "end": 1237
-     }
-    }
-   ]
+   "diags": []
   },
   "<repo>/tests/corpus/native-worker-error.ts": {
    "order": [
     "<repo>/tests/corpus/native-worker-error.ts"
    ],
-   "diags": [
-    {
-     "code": "SC0001",
-     "message": "Argument of type '(error: Error) => void' is not assignable to parameter of type '(...args: unknown[]) => void'.\n  Types of parameters 'error' and 'args' are incompatible.\n    Type 'unknown' is not assignable to type 'Error'.",
-     "loc": {
-      "file": "<repo>/tests/corpus/native-worker-error.ts",
-      "start": 156,
-      "end": 240
-     }
-    },
-    {
-     "code": "SC0001",
-     "message": "Argument of type '(code: number) => void' is not assignable to parameter of type '(...args: unknown[]) => void'.\n  Types of parameters 'code' and 'args' are incompatible.\n    Type 'unknown' is not assignable to type 'number'.",
-     "loc": {
-      "file": "<repo>/tests/corpus/native-worker-error.ts",
-      "start": 263,
-      "end": 306
-     }
-    }
-   ]
+   "diags": []
   },
   "<repo>/tests/corpus/native-worker-exception-state.ts": {
    "order": [
     "<repo>/tests/corpus/native-worker-exception-state.ts"
    ],
-   "diags": [
-    {
-     "code": "SC0001",
-     "message": "Argument of type '(lines: string[]) => void' is not assignable to parameter of type '(...args: unknown[]) => void'.\n  Types of parameters 'lines' and 'args' are incompatible.\n    Type 'unknown' is not assignable to type 'string[]'.",
-     "loc": {
-      "file": "<repo>/tests/corpus/native-worker-exception-state.ts",
-      "start": 7053,
-      "end": 7075
-     }
-    },
-    {
-     "code": "SC0001",
-     "message": "Property 'once' does not exist on type 'Worker'.",
-     "loc": {
-      "file": "<repo>/tests/corpus/native-worker-exception-state.ts",
-      "start": 7156,
-      "end": 7160
-     }
-    },
-    {
-     "code": "SC0001",
-     "message": "Property 'postMessage' does not exist on type '{}'.",
-     "loc": {
-      "file": "<repo>/tests/corpus/native-worker-exception-state.ts",
-      "start": 7283,
-      "end": 7294
-     }
-    }
-   ]
+   "diags": []
   },
   "<repo>/tests/corpus/native-worker-exit-listeners.ts": {
    "order": [
     "<repo>/tests/corpus/native-worker-exit-listeners.ts"
    ],
-   "diags": [
-    {
-     "code": "SC0001",
-     "message": "Argument of type '(value: number) => void' is not assignable to parameter of type '(...args: unknown[]) => void'.\n  Types of parameters 'value' and 'args' are incompatible.\n    Type 'unknown' is not assignable to type 'number'.",
-     "loc": {
-      "file": "<repo>/tests/corpus/native-worker-exit-listeners.ts",
-      "start": 468,
-      "end": 519
-     }
-    },
-    {
-     "code": "SC0001",
-     "message": "Argument of type '(error: Error) => void' is not assignable to parameter of type '(...args: unknown[]) => void'.\n  Types of parameters 'error' and 'args' are incompatible.\n    Type 'unknown' is not assignable to type 'Error'.",
-     "loc": {
-      "file": "<repo>/tests/corpus/native-worker-exit-listeners.ts",
-      "start": 547,
-      "end": 593
-     }
-    },
-    {
-     "code": "SC0001",
-     "message": "Argument of type '(code: number) => void' is not assignable to parameter of type '(...args: unknown[]) => void'.\n  Types of parameters 'code' and 'args' are incompatible.\n    Type 'unknown' is not assignable to type 'number'.",
-     "loc": {
-      "file": "<repo>/tests/corpus/native-worker-exit-listeners.ts",
-      "start": 620,
-      "end": 639
-     }
-    },
-    {
-     "code": "SC0001",
-     "message": "Property 'postMessage' does not exist on type '{}'.",
-     "loc": {
-      "file": "<repo>/tests/corpus/native-worker-exit-listeners.ts",
-      "start": 837,
-      "end": 848
-     }
-    }
-   ]
+   "diags": []
   },
   "<repo>/tests/corpus/native-worker-io.ts": {
    "order": [
     "<repo>/tests/corpus/native-worker-io.ts"
    ],
-   "diags": [
-    {
-     "code": "SC0001",
-     "message": "Property 'once' does not exist on type 'Worker'.",
-     "loc": {
-      "file": "<repo>/tests/corpus/native-worker-io.ts",
-      "start": 557,
-      "end": 561
-     }
-    },
-    {
-     "code": "SC0001",
-     "message": "Property 'once' does not exist on type 'Worker'.",
-     "loc": {
-      "file": "<repo>/tests/corpus/native-worker-io.ts",
-      "start": 628,
-      "end": 632
-     }
-    },
-    {
-     "code": "SC0001",
-     "message": "Property 'once' does not exist on type 'Worker'.",
-     "loc": {
-      "file": "<repo>/tests/corpus/native-worker-io.ts",
-      "start": 664,
-      "end": 668
-     }
-    },
-    {
-     "code": "SC0001",
-     "message": "Property 'postMessage' does not exist on type '{}'.",
-     "loc": {
-      "file": "<repo>/tests/corpus/native-worker-io.ts",
-      "start": 1779,
-      "end": 1790
-     }
-    }
-   ]
+   "diags": []
   },
   "<repo>/tests/corpus/native-worker-loop-cancellation.ts": {
    "order": [
     "<repo>/tests/corpus/native-worker-loop-cancellation.ts"
    ],
-   "diags": [
-    {
-     "code": "SC0001",
-     "message": "Property 'once' does not exist on type 'Worker'.",
-     "loc": {
-      "file": "<repo>/tests/corpus/native-worker-loop-cancellation.ts",
-      "start": 288,
-      "end": 292
-     }
-    },
-    {
-     "code": "SC0001",
-     "message": "Property 'once' does not exist on type 'Worker'.",
-     "loc": {
-      "file": "<repo>/tests/corpus/native-worker-loop-cancellation.ts",
-      "start": 349,
-      "end": 353
-     }
-    },
-    {
-     "code": "SC0001",
-     "message": "Property 'postMessage' does not exist on type '{}'.",
-     "loc": {
-      "file": "<repo>/tests/corpus/native-worker-loop-cancellation.ts",
-      "start": 457,
-      "end": 468
-     }
-    }
-   ]
+   "diags": []
   },
   "<repo>/tests/corpus/native-worker-message-graphs.ts": {
    "order": [
     "<repo>/tests/corpus/native-worker-message-graphs.ts"
    ],
-   "diags": [
-    {
-     "code": "SC0001",
-     "message": "Argument of type '(code: number) => void' is not assignable to parameter of type '(...args: unknown[]) => void'.\n  Types of parameters 'code' and 'args' are incompatible.\n    Type 'unknown' is not assignable to type 'number'.",
-     "loc": {
-      "file": "<repo>/tests/corpus/native-worker-message-graphs.ts",
-      "start": 781,
-      "end": 846
-     }
-    },
-    {
-     "code": "SC0001",
-     "message": "'root' is of type 'unknown'.",
-     "loc": {
-      "file": "<repo>/tests/corpus/native-worker-message-graphs.ts",
-      "start": 887,
-      "end": 891
-     }
-    },
-    {
-     "code": "SC0001",
-     "message": "Property 'postMessage' does not exist on type '{}'.",
-     "loc": {
-      "file": "<repo>/tests/corpus/native-worker-message-graphs.ts",
-      "start": 921,
-      "end": 932
-     }
-    },
-    {
-     "code": "SC0001",
-     "message": "'root' is of type 'unknown'.",
-     "loc": {
-      "file": "<repo>/tests/corpus/native-worker-message-graphs.ts",
-      "start": 945,
-      "end": 949
-     }
-    },
-    {
-     "code": "SC0001",
-     "message": "'root' is of type 'unknown'.",
-     "loc": {
-      "file": "<repo>/tests/corpus/native-worker-message-graphs.ts",
-      "start": 976,
-      "end": 980
-     }
-    },
-    {
-     "code": "SC0001",
-     "message": "'root' is of type 'unknown'.",
-     "loc": {
-      "file": "<repo>/tests/corpus/native-worker-message-graphs.ts",
-      "start": 991,
-      "end": 995
-     }
-    },
-    {
-     "code": "SC0001",
-     "message": "'root' is of type 'unknown'.",
-     "loc": {
-      "file": "<repo>/tests/corpus/native-worker-message-graphs.ts",
-      "start": 1006,
-      "end": 1010
-     }
-    },
-    {
-     "code": "SC0001",
-     "message": "'root' is of type 'unknown'.",
-     "loc": {
-      "file": "<repo>/tests/corpus/native-worker-message-graphs.ts",
-      "start": 1025,
-      "end": 1029
-     }
-    },
-    {
-     "code": "SC0001",
-     "message": "'root' is of type 'unknown'.",
-     "loc": {
-      "file": "<repo>/tests/corpus/native-worker-message-graphs.ts",
-      "start": 1054,
-      "end": 1058
-     }
-    },
-    {
-     "code": "SC0001",
-     "message": "'root' is of type 'unknown'.",
-     "loc": {
-      "file": "<repo>/tests/corpus/native-worker-message-graphs.ts",
-      "start": 1072,
-      "end": 1076
-     }
-    },
-    {
-     "code": "SC0001",
-     "message": "'root' is of type 'unknown'.",
-     "loc": {
-      "file": "<repo>/tests/corpus/native-worker-message-graphs.ts",
-      "start": 1090,
-      "end": 1094
-     }
-    },
-    {
-     "code": "SC0001",
-     "message": "'root' is of type 'unknown'.",
-     "loc": {
-      "file": "<repo>/tests/corpus/native-worker-message-graphs.ts",
-      "start": 1128,
-      "end": 1132
-     }
-    },
-    {
-     "code": "SC0001",
-     "message": "'root' is of type 'unknown'.",
-     "loc": {
-      "file": "<repo>/tests/corpus/native-worker-message-graphs.ts",
-      "start": 1165,
-      "end": 1169
-     }
-    },
-    {
-     "code": "SC0001",
-     "message": "'root' is of type 'unknown'.",
-     "loc": {
-      "file": "<repo>/tests/corpus/native-worker-message-graphs.ts",
-      "start": 1176,
-      "end": 1180
-     }
-    },
-    {
-     "code": "SC0001",
-     "message": "'root' is of type 'unknown'.",
-     "loc": {
-      "file": "<repo>/tests/corpus/native-worker-message-graphs.ts",
-      "start": 1215,
-      "end": 1219
-     }
-    },
-    {
-     "code": "SC0001",
-     "message": "'root' is of type 'unknown'.",
-     "loc": {
-      "file": "<repo>/tests/corpus/native-worker-message-graphs.ts",
-      "start": 1246,
-      "end": 1250
-     }
-    },
-    {
-     "code": "SC0001",
-     "message": "'root' is of type 'unknown'.",
-     "loc": {
-      "file": "<repo>/tests/corpus/native-worker-message-graphs.ts",
-      "start": 1273,
-      "end": 1277
-     }
-    },
-    {
-     "code": "SC0001",
-     "message": "'root' is of type 'unknown'.",
-     "loc": {
-      "file": "<repo>/tests/corpus/native-worker-message-graphs.ts",
-      "start": 1288,
-      "end": 1292
-     }
-    },
-    {
-     "code": "SC0001",
-     "message": "'root' is of type 'unknown'.",
-     "loc": {
-      "file": "<repo>/tests/corpus/native-worker-message-graphs.ts",
-      "start": 1300,
-      "end": 1304
-     }
-    },
-    {
-     "code": "SC0001",
-     "message": "'root' is of type 'unknown'.",
-     "loc": {
-      "file": "<repo>/tests/corpus/native-worker-message-graphs.ts",
-      "start": 1322,
-      "end": 1326
-     }
-    },
-    {
-     "code": "SC0001",
-     "message": "'root' is of type 'unknown'.",
-     "loc": {
-      "file": "<repo>/tests/corpus/native-worker-message-graphs.ts",
-      "start": 1335,
-      "end": 1339
-     }
-    },
-    {
-     "code": "SC0001",
-     "message": "'root' is of type 'unknown'.",
-     "loc": {
-      "file": "<repo>/tests/corpus/native-worker-message-graphs.ts",
-      "start": 1371,
-      "end": 1375
-     }
-    },
-    {
-     "code": "SC0001",
-     "message": "'root' is of type 'unknown'.",
-     "loc": {
-      "file": "<repo>/tests/corpus/native-worker-message-graphs.ts",
-      "start": 1404,
-      "end": 1408
-     }
-    },
-    {
-     "code": "SC0001",
-     "message": "'root' is of type 'unknown'.",
-     "loc": {
-      "file": "<repo>/tests/corpus/native-worker-message-graphs.ts",
-      "start": 1424,
-      "end": 1428
-     }
-    },
-    {
-     "code": "SC0001",
-     "message": "'root' is of type 'unknown'.",
-     "loc": {
-      "file": "<repo>/tests/corpus/native-worker-message-graphs.ts",
-      "start": 1445,
-      "end": 1449
-     }
-    }
-   ]
+   "diags": []
   },
   "<repo>/tests/corpus/native-worker-messages.ts": {
    "order": [
     "<repo>/tests/corpus/native-worker-messages.ts"
    ],
-   "diags": [
-    {
-     "code": "SC0001",
-     "message": "Argument of type '(code: number) => void' is not assignable to parameter of type '(...args: unknown[]) => void'.\n  Types of parameters 'code' and 'args' are incompatible.\n    Type 'unknown' is not assignable to type 'number'.",
-     "loc": {
-      "file": "<repo>/tests/corpus/native-worker-messages.ts",
-      "start": 364,
-      "end": 423
-     }
-    },
-    {
-     "code": "SC0001",
-     "message": "Property 'once' does not exist on type '{}'.",
-     "loc": {
-      "file": "<repo>/tests/corpus/native-worker-messages.ts",
-      "start": 542,
-      "end": 546
-     }
-    },
-    {
-     "code": "SC0001",
-     "message": "Property 'postMessage' does not exist on type '{}'.",
-     "loc": {
-      "file": "<repo>/tests/corpus/native-worker-messages.ts",
-      "start": 589,
-      "end": 600
-     }
-    }
-   ]
+   "diags": []
   },
   "<repo>/tests/corpus/native-worker-poll-exceptions.ts": {
    "order": [
     "<repo>/tests/corpus/native-worker-poll-exceptions.ts"
    ],
-   "diags": [
-    {
-     "code": "SC0001",
-     "message": "Argument of type '(lines: string[]) => void' is not assignable to parameter of type '(...args: unknown[]) => void'.\n  Types of parameters 'lines' and 'args' are incompatible.\n    Type 'unknown' is not assignable to type 'string[]'.",
-     "loc": {
-      "file": "<repo>/tests/corpus/native-worker-poll-exceptions.ts",
-      "start": 2123,
-      "end": 2186
-     }
-    },
-    {
-     "code": "SC0001",
-     "message": "Argument of type '(code: number) => void' is not assignable to parameter of type '(...args: unknown[]) => void'.\n  Types of parameters 'code' and 'args' are incompatible.\n    Type 'unknown' is not assignable to type 'number'.",
-     "loc": {
-      "file": "<repo>/tests/corpus/native-worker-poll-exceptions.ts",
-      "start": 2209,
-      "end": 2252
-     }
-    },
-    {
-     "code": "SC0001",
-     "message": "Property 'postMessage' does not exist on type '{}'.",
-     "loc": {
-      "file": "<repo>/tests/corpus/native-worker-poll-exceptions.ts",
-      "start": 2278,
-      "end": 2289
-     }
-    }
-   ]
+   "diags": []
   },
   "<repo>/tests/corpus/native-worker-port-lifetime.ts": {
    "order": [
     "<repo>/tests/corpus/native-worker-port-lifetime.ts"
    ],
-   "diags": [
-    {
-     "code": "SC0001",
-     "message": "Argument of type '(code: number) => void' is not assignable to parameter of type '(...args: unknown[]) => void'.\n  Types of parameters 'code' and 'args' are incompatible.\n    Type 'unknown' is not assignable to type 'number'.",
-     "loc": {
-      "file": "<repo>/tests/corpus/native-worker-port-lifetime.ts",
-      "start": 266,
-      "end": 316
-     }
-    },
-    {
-     "code": "SC0001",
-     "message": "Property 'start' does not exist on type '{}'.",
-     "loc": {
-      "file": "<repo>/tests/corpus/native-worker-port-lifetime.ts",
-      "start": 459,
-      "end": 464
-     }
-    },
-    {
-     "code": "SC0001",
-     "message": "Property 'hasRef' does not exist on type '{}'.",
-     "loc": {
-      "file": "<repo>/tests/corpus/native-worker-port-lifetime.ts",
-      "start": 502,
-      "end": 508
-     }
-    },
-    {
-     "code": "SC0001",
-     "message": "Property 'ref' does not exist on type '{}'.",
-     "loc": {
-      "file": "<repo>/tests/corpus/native-worker-port-lifetime.ts",
-      "start": 545,
-      "end": 548
-     }
-    },
-    {
-     "code": "SC0001",
-     "message": "Property 'on' does not exist on type '{}'.",
-     "loc": {
-      "file": "<repo>/tests/corpus/native-worker-port-lifetime.ts",
-      "start": 559,
-      "end": 561
-     }
-    },
-    {
-     "code": "SC0001",
-     "message": "Property 'off' does not exist on type '{}'.",
-     "loc": {
-      "file": "<repo>/tests/corpus/native-worker-port-lifetime.ts",
-      "start": 585,
-      "end": 588
-     }
-    },
-    {
-     "code": "SC0001",
-     "message": "Property 'hasRef' does not exist on type '{}'.",
-     "loc": {
-      "file": "<repo>/tests/corpus/native-worker-port-lifetime.ts",
-      "start": 624,
-      "end": 630
-     }
-    },
-    {
-     "code": "SC0001",
-     "message": "Property 'on' does not exist on type '{}'.",
-     "loc": {
-      "file": "<repo>/tests/corpus/native-worker-port-lifetime.ts",
-      "start": 642,
-      "end": 644
-     }
-    },
-    {
-     "code": "SC0001",
-     "message": "Property 'unref' does not exist on type '{}'.",
-     "loc": {
-      "file": "<repo>/tests/corpus/native-worker-port-lifetime.ts",
-      "start": 670,
-      "end": 675
-     }
-    },
-    {
-     "code": "SC0001",
-     "message": "Property 'on' does not exist on type '{}'.",
-     "loc": {
-      "file": "<repo>/tests/corpus/native-worker-port-lifetime.ts",
-      "start": 686,
-      "end": 688
-     }
-    },
-    {
-     "code": "SC0001",
-     "message": "Property 'hasRef' does not exist on type '{}'.",
-     "loc": {
-      "file": "<repo>/tests/corpus/native-worker-port-lifetime.ts",
-      "start": 726,
-      "end": 732
-     }
-    },
-    {
-     "code": "SC0001",
-     "message": "Property 'removeAllListeners' does not exist on type '{}'.",
-     "loc": {
-      "file": "<repo>/tests/corpus/native-worker-port-lifetime.ts",
-      "start": 744,
-      "end": 762
-     }
-    },
-    {
-     "code": "SC0001",
-     "message": "Property 'ref' does not exist on type '{}'.",
-     "loc": {
-      "file": "<repo>/tests/corpus/native-worker-port-lifetime.ts",
-      "start": 782,
-      "end": 785
-     }
-    },
-    {
-     "code": "SC0001",
-     "message": "Property 'removeAllListeners' does not exist on type '{}'.",
-     "loc": {
-      "file": "<repo>/tests/corpus/native-worker-port-lifetime.ts",
-      "start": 796,
-      "end": 814
-     }
-    },
-    {
-     "code": "SC0001",
-     "message": "Property 'hasRef' does not exist on type '{}'.",
-     "loc": {
-      "file": "<repo>/tests/corpus/native-worker-port-lifetime.ts",
-      "start": 846,
-      "end": 852
-     }
-    },
-    {
-     "code": "SC0001",
-     "message": "Property 'unref' does not exist on type '{}'.",
-     "loc": {
-      "file": "<repo>/tests/corpus/native-worker-port-lifetime.ts",
-      "start": 864,
-      "end": 869
-     }
-    },
-    {
-     "code": "SC0001",
-     "message": "Property 'once' does not exist on type '{}'.",
-     "loc": {
-      "file": "<repo>/tests/corpus/native-worker-port-lifetime.ts",
-      "start": 880,
-      "end": 884
-     }
-    },
-    {
-     "code": "SC0001",
-     "message": "Property 'hasRef' does not exist on type '{}'.",
-     "loc": {
-      "file": "<repo>/tests/corpus/native-worker-port-lifetime.ts",
-      "start": 939,
-      "end": 945
-     }
-    },
-    {
-     "code": "SC0001",
-     "message": "Property 'ref' does not exist on type '{}'.",
-     "loc": {
-      "file": "<repo>/tests/corpus/native-worker-port-lifetime.ts",
-      "start": 959,
-      "end": 962
-     }
-    },
-    {
-     "code": "SC0001",
-     "message": "Property 'hasRef' does not exist on type '{}'.",
-     "loc": {
-      "file": "<repo>/tests/corpus/native-worker-port-lifetime.ts",
-      "start": 987,
-      "end": 993
-     }
-    },
-    {
-     "code": "SC0001",
-     "message": "Property 'postMessage' does not exist on type '{}'.",
-     "loc": {
-      "file": "<repo>/tests/corpus/native-worker-port-lifetime.ts",
-      "start": 1020,
-      "end": 1031
-     }
-    },
-    {
-     "code": "SC0001",
-     "message": "Property 'close' does not exist on type '{}'.",
-     "loc": {
-      "file": "<repo>/tests/corpus/native-worker-port-lifetime.ts",
-      "start": 1082,
-      "end": 1087
-     }
-    },
-    {
-     "code": "SC0001",
-     "message": "Property 'hasRef' does not exist on type '{}'.",
-     "loc": {
-      "file": "<repo>/tests/corpus/native-worker-port-lifetime.ts",
-      "start": 1111,
-      "end": 1117
-     }
-    },
-    {
-     "code": "SC0001",
-     "message": "Property 'hasRef' does not exist on type '{}'.",
-     "loc": {
-      "file": "<repo>/tests/corpus/native-worker-port-lifetime.ts",
-      "start": 1209,
-      "end": 1215
-     }
-    }
-   ]
+   "diags": []
   },
   "<repo>/tests/corpus/native-worker-process-exit.ts": {
    "order": [
     "<repo>/tests/corpus/native-worker-process-exit.ts"
    ],
-   "diags": [
-    {
-     "code": "SC0001",
-     "message": "Argument of type '(code: number) => void' is not assignable to parameter of type '(...args: unknown[]) => void'.\n  Types of parameters 'code' and 'args' are incompatible.\n    Type 'unknown' is not assignable to type 'number'.",
-     "loc": {
-      "file": "<repo>/tests/corpus/native-worker-process-exit.ts",
-      "start": 243,
-      "end": 302
-     }
-    },
-    {
-     "code": "SC0001",
-     "message": "Property 'postMessage' does not exist on type '{}'.",
-     "loc": {
-      "file": "<repo>/tests/corpus/native-worker-process-exit.ts",
-      "start": 365,
-      "end": 376
-     }
-    }
-   ]
+   "diags": []
   },
   "<repo>/tests/corpus/native-worker-publish-classes.ts": {
    "order": [
@@ -13590,24 +12556,6 @@
       "file": "<repo>/tests/corpus/native-worker-publish-classes.ts",
       "start": 108,
       "end": 126
-     }
-    },
-    {
-     "code": "SC0001",
-     "message": "Argument of type '(code: number) => void' is not assignable to parameter of type '(...args: unknown[]) => void'.\n  Types of parameters 'code' and 'args' are incompatible.\n    Type 'unknown' is not assignable to type 'number'.",
-     "loc": {
-      "file": "<repo>/tests/corpus/native-worker-publish-classes.ts",
-      "start": 5186,
-      "end": 5205
-     }
-    },
-    {
-     "code": "SC0001",
-     "message": "Property 'postMessage' does not exist on type '{}'.",
-     "loc": {
-      "file": "<repo>/tests/corpus/native-worker-publish-classes.ts",
-      "start": 5474,
-      "end": 5485
      }
     },
     {
@@ -13654,535 +12602,73 @@
    "order": [
     "<repo>/tests/corpus/native-worker-published-graphs.ts"
    ],
-   "diags": [
-    {
-     "code": "SC0001",
-     "message": "Argument of type '(code: number) => void' is not assignable to parameter of type '(...args: unknown[]) => void'.\n  Types of parameters 'code' and 'args' are incompatible.\n    Type 'unknown' is not assignable to type 'number'.",
-     "loc": {
-      "file": "<repo>/tests/corpus/native-worker-published-graphs.ts",
-      "start": 1945,
-      "end": 1964
-     }
-    },
-    {
-     "code": "SC0001",
-     "message": "Property 'postMessage' does not exist on type '{}'.",
-     "loc": {
-      "file": "<repo>/tests/corpus/native-worker-published-graphs.ts",
-      "start": 2409,
-      "end": 2420
-     }
-    },
-    {
-     "code": "SC0001",
-     "message": "Property 'postMessage' does not exist on type '{}'.",
-     "loc": {
-      "file": "<repo>/tests/corpus/native-worker-published-graphs.ts",
-      "start": 2460,
-      "end": 2471
-     }
-    },
-    {
-     "code": "SC0001",
-     "message": "Property 'on' does not exist on type '{}'.",
-     "loc": {
-      "file": "<repo>/tests/corpus/native-worker-published-graphs.ts",
-      "start": 2531,
-      "end": 2533
-     }
-    },
-    {
-     "code": "SC0001",
-     "message": "Property 'postMessage' does not exist on type '{}'.",
-     "loc": {
-      "file": "<repo>/tests/corpus/native-worker-published-graphs.ts",
-      "start": 2652,
-      "end": 2663
-     }
-    },
-    {
-     "code": "SC0001",
-     "message": "Property 'postMessage' does not exist on type '{}'.",
-     "loc": {
-      "file": "<repo>/tests/corpus/native-worker-published-graphs.ts",
-      "start": 2723,
-      "end": 2734
-     }
-    },
-    {
-     "code": "SC0001",
-     "message": "Property 'postMessage' does not exist on type '{}'.",
-     "loc": {
-      "file": "<repo>/tests/corpus/native-worker-published-graphs.ts",
-      "start": 2861,
-      "end": 2872
-     }
-    },
-    {
-     "code": "SC0001",
-     "message": "Property 'postMessage' does not exist on type '{}'.",
-     "loc": {
-      "file": "<repo>/tests/corpus/native-worker-published-graphs.ts",
-      "start": 2924,
-      "end": 2935
-     }
-    },
-    {
-     "code": "SC0001",
-     "message": "Property 'close' does not exist on type '{}'.",
-     "loc": {
-      "file": "<repo>/tests/corpus/native-worker-published-graphs.ts",
-      "start": 3014,
-      "end": 3019
-     }
-    }
-   ]
+   "diags": []
   },
   "<repo>/tests/corpus/native-worker-references.ts": {
    "order": [
     "<repo>/tests/corpus/native-worker-references.ts"
    ],
-   "diags": [
-    {
-     "code": "SC0001",
-     "message": "Property 'unref' does not exist on type 'Worker'.",
-     "loc": {
-      "file": "<repo>/tests/corpus/native-worker-references.ts",
-      "start": 244,
-      "end": 249
-     }
-    },
-    {
-     "code": "SC0001",
-     "message": "Property 'ref' does not exist on type 'Worker'.",
-     "loc": {
-      "file": "<repo>/tests/corpus/native-worker-references.ts",
-      "start": 267,
-      "end": 270
-     }
-    },
-    {
-     "code": "SC0001",
-     "message": "Property 'threadId' does not exist on type 'Worker'.",
-     "loc": {
-      "file": "<repo>/tests/corpus/native-worker-references.ts",
-      "start": 281,
-      "end": 289
-     }
-    },
-    {
-     "code": "SC0001",
-     "message": "Property 'once' does not exist on type 'Worker'.",
-     "loc": {
-      "file": "<repo>/tests/corpus/native-worker-references.ts",
-      "start": 307,
-      "end": 311
-     }
-    },
-    {
-     "code": "SC0001",
-     "message": "Property 'once' does not exist on type 'Worker'.",
-     "loc": {
-      "file": "<repo>/tests/corpus/native-worker-references.ts",
-      "start": 363,
-      "end": 367
-     }
-    },
-    {
-     "code": "SC0001",
-     "message": "Property 'once' does not exist on type 'Worker'.",
-     "loc": {
-      "file": "<repo>/tests/corpus/native-worker-references.ts",
-      "start": 442,
-      "end": 446
-     }
-    },
-    {
-     "code": "SC0001",
-     "message": "Property 'threadId' does not exist on type 'Worker'.",
-     "loc": {
-      "file": "<repo>/tests/corpus/native-worker-references.ts",
-      "start": 508,
-      "end": 516
-     }
-    },
-    {
-     "code": "SC0001",
-     "message": "Property 'unref' does not exist on type 'Worker'.",
-     "loc": {
-      "file": "<repo>/tests/corpus/native-worker-references.ts",
-      "start": 601,
-      "end": 606
-     }
-    },
-    {
-     "code": "SC0001",
-     "message": "Property 'postMessage' does not exist on type '{}'.",
-     "loc": {
-      "file": "<repo>/tests/corpus/native-worker-references.ts",
-      "start": 765,
-      "end": 776
-     }
-    }
-   ]
+   "diags": []
   },
   "<repo>/tests/corpus/native-worker-roots/main.ts": {
    "order": [
     "<repo>/tests/corpus/native-worker-roots/main.ts"
    ],
-   "diags": [
-    {
-     "code": "SC0001",
-     "message": "Property 'once' does not exist on type 'Worker'.",
-     "loc": {
-      "file": "<repo>/tests/corpus/native-worker-roots/main.ts",
-      "start": 257,
-      "end": 261
-     }
-    },
-    {
-     "code": "SC0001",
-     "message": "Property 'once' does not exist on type 'Worker'.",
-     "loc": {
-      "file": "<repo>/tests/corpus/native-worker-roots/main.ts",
-      "start": 465,
-      "end": 469
-     }
-    }
-   ]
+   "diags": []
   },
   "<repo>/tests/corpus/native-worker-shared-views.ts": {
    "order": [
     "<repo>/tests/corpus/native-worker-shared-views.ts"
    ],
-   "diags": [
-    {
-     "code": "SC0001",
-     "message": "Argument of type '(code: number) => void' is not assignable to parameter of type '(...args: unknown[]) => void'.\n  Types of parameters 'code' and 'args' are incompatible.\n    Type 'unknown' is not assignable to type 'number'.",
-     "loc": {
-      "file": "<repo>/tests/corpus/native-worker-shared-views.ts",
-      "start": 637,
-      "end": 734
-     }
-    },
-    {
-     "code": "SC0001",
-     "message": "Property 'postMessage' does not exist on type '{}'.",
-     "loc": {
-      "file": "<repo>/tests/corpus/native-worker-shared-views.ts",
-      "start": 884,
-      "end": 895
-     }
-    },
-    {
-     "code": "SC0001",
-     "message": "Property 'postMessage' does not exist on type '{}'.",
-     "loc": {
-      "file": "<repo>/tests/corpus/native-worker-shared-views.ts",
-      "start": 1165,
-      "end": 1176
-     }
-    }
-   ]
+   "diags": []
   },
   "<repo>/tests/corpus/native-worker-stack-overflow.ts": {
    "order": [
     "<repo>/tests/corpus/native-worker-stack-overflow.ts"
    ],
-   "diags": [
-    {
-     "code": "SC0001",
-     "message": "Argument of type '(text: string) => number' is not assignable to parameter of type '(...args: unknown[]) => void'.\n  Types of parameters 'text' and 'args' are incompatible.\n    Type 'unknown' is not assignable to type 'string'.",
-     "loc": {
-      "file": "<repo>/tests/corpus/native-worker-stack-overflow.ts",
-      "start": 675,
-      "end": 733
-     }
-    },
-    {
-     "code": "SC0001",
-     "message": "Argument of type '(error: Error) => number' is not assignable to parameter of type '(...args: unknown[]) => void'.\n  Types of parameters 'error' and 'args' are incompatible.\n    Type 'unknown' is not assignable to type 'Error'.",
-     "loc": {
-      "file": "<repo>/tests/corpus/native-worker-stack-overflow.ts",
-      "start": 761,
-      "end": 877
-     }
-    },
-    {
-     "code": "SC0001",
-     "message": "Argument of type '(code: number) => void' is not assignable to parameter of type '(...args: unknown[]) => void'.\n  Types of parameters 'code' and 'args' are incompatible.\n    Type 'unknown' is not assignable to type 'number'.",
-     "loc": {
-      "file": "<repo>/tests/corpus/native-worker-stack-overflow.ts",
-      "start": 912,
-      "end": 931
-     }
-    },
-    {
-     "code": "SC0001",
-     "message": "Property 'postMessage' does not exist on type '{}'.",
-     "loc": {
-      "file": "<repo>/tests/corpus/native-worker-stack-overflow.ts",
-      "start": 1215,
-      "end": 1226
-     }
-    },
-    {
-     "code": "SC0001",
-     "message": "Property 'postMessage' does not exist on type '{}'.",
-     "loc": {
-      "file": "<repo>/tests/corpus/native-worker-stack-overflow.ts",
-      "start": 1300,
-      "end": 1311
-     }
-    },
-    {
-     "code": "SC0001",
-     "message": "Property 'postMessage' does not exist on type '{}'.",
-     "loc": {
-      "file": "<repo>/tests/corpus/native-worker-stack-overflow.ts",
-      "start": 1367,
-      "end": 1378
-     }
-    }
-   ]
+   "diags": []
   },
   "<repo>/tests/corpus/native-worker-terminate-exception-state.ts": {
    "order": [
     "<repo>/tests/corpus/native-worker-terminate-exception-state.ts"
    ],
-   "diags": [
-    {
-     "code": "SC0001",
-     "message": "Property 'postMessage' does not exist on type '{}'.",
-     "loc": {
-      "file": "<repo>/tests/corpus/native-worker-terminate-exception-state.ts",
-      "start": 954,
-      "end": 965
-     }
-    },
-    {
-     "code": "SC0001",
-     "message": "Property 'once' does not exist on type 'Worker'.",
-     "loc": {
-      "file": "<repo>/tests/corpus/native-worker-terminate-exception-state.ts",
-      "start": 3697,
-      "end": 3701
-     }
-    },
-    {
-     "code": "SC0001",
-     "message": "Property 'once' does not exist on type 'Worker'.",
-     "loc": {
-      "file": "<repo>/tests/corpus/native-worker-terminate-exception-state.ts",
-      "start": 3838,
-      "end": 3842
-     }
-    },
-    {
-     "code": "SC0001",
-     "message": "Property 'once' does not exist on type 'Worker'.",
-     "loc": {
-      "file": "<repo>/tests/corpus/native-worker-terminate-exception-state.ts",
-      "start": 4299,
-      "end": 4303
-     }
-    }
-   ]
+   "diags": []
   },
   "<repo>/tests/corpus/native-worker-terminate-loop.ts": {
    "order": [
     "<repo>/tests/corpus/native-worker-terminate-loop.ts"
    ],
-   "diags": [
-    {
-     "code": "SC0001",
-     "message": "Argument of type '(code: number) => void' is not assignable to parameter of type '(...args: unknown[]) => void'.\n  Types of parameters 'code' and 'args' are incompatible.\n    Type 'unknown' is not assignable to type 'number'.",
-     "loc": {
-      "file": "<repo>/tests/corpus/native-worker-terminate-loop.ts",
-      "start": 293,
-      "end": 336
-     }
-    },
-    {
-     "code": "SC0001",
-     "message": "Property 'postMessage' does not exist on type '{}'.",
-     "loc": {
-      "file": "<repo>/tests/corpus/native-worker-terminate-loop.ts",
-      "start": 362,
-      "end": 373
-     }
-    }
-   ]
+   "diags": []
   },
   "<repo>/tests/corpus/native-worker-terminate-recursion.ts": {
    "order": [
     "<repo>/tests/corpus/native-worker-terminate-recursion.ts"
    ],
-   "diags": [
-    {
-     "code": "SC0001",
-     "message": "Property 'once' does not exist on type 'Worker'.",
-     "loc": {
-      "file": "<repo>/tests/corpus/native-worker-terminate-recursion.ts",
-      "start": 1479,
-      "end": 1483
-     }
-    },
-    {
-     "code": "SC0001",
-     "message": "Property 'once' does not exist on type 'Worker'.",
-     "loc": {
-      "file": "<repo>/tests/corpus/native-worker-terminate-recursion.ts",
-      "start": 1559,
-      "end": 1563
-     }
-    },
-    {
-     "code": "SC0001",
-     "message": "Property 'postMessage' does not exist on type '{}'.",
-     "loc": {
-      "file": "<repo>/tests/corpus/native-worker-terminate-recursion.ts",
-      "start": 1762,
-      "end": 1773
-     }
-    }
-   ]
+   "diags": []
   },
   "<repo>/tests/corpus/native-worker-terminate-suspended.ts": {
    "order": [
     "<repo>/tests/corpus/native-worker-terminate-suspended.ts"
    ],
-   "diags": [
-    {
-     "code": "SC0001",
-     "message": "Argument of type '(code: number) => void' is not assignable to parameter of type '(...args: unknown[]) => void'.\n  Types of parameters 'code' and 'args' are incompatible.\n    Type 'unknown' is not assignable to type 'number'.",
-     "loc": {
-      "file": "<repo>/tests/corpus/native-worker-terminate-suspended.ts",
-      "start": 636,
-      "end": 679
-     }
-    },
-    {
-     "code": "SC0001",
-     "message": "Property 'on' does not exist on type '{}'.",
-     "loc": {
-      "file": "<repo>/tests/corpus/native-worker-terminate-suspended.ts",
-      "start": 763,
-      "end": 765
-     }
-    },
-    {
-     "code": "SC0001",
-     "message": "Property 'postMessage' does not exist on type '{}'.",
-     "loc": {
-      "file": "<repo>/tests/corpus/native-worker-terminate-suspended.ts",
-      "start": 802,
-      "end": 813
-     }
-    }
-   ]
+   "diags": []
   },
   "<repo>/tests/corpus/native-worker-terminate-tested-loops.ts": {
    "order": [
     "<repo>/tests/corpus/native-worker-terminate-tested-loops.ts"
    ],
-   "diags": [
-    {
-     "code": "SC0001",
-     "message": "Property 'postMessage' does not exist on type '{}'.",
-     "loc": {
-      "file": "<repo>/tests/corpus/native-worker-terminate-tested-loops.ts",
-      "start": 751,
-      "end": 762
-     }
-    },
-    {
-     "code": "SC0001",
-     "message": "Property 'once' does not exist on type 'Worker'.",
-     "loc": {
-      "file": "<repo>/tests/corpus/native-worker-terminate-tested-loops.ts",
-      "start": 2944,
-      "end": 2948
-     }
-    },
-    {
-     "code": "SC0001",
-     "message": "Property 'once' does not exist on type 'Worker'.",
-     "loc": {
-      "file": "<repo>/tests/corpus/native-worker-terminate-tested-loops.ts",
-      "start": 3085,
-      "end": 3089
-     }
-    }
-   ]
+   "diags": []
   },
   "<repo>/tests/corpus/native-worker-terminate-wait.ts": {
    "order": [
     "<repo>/tests/corpus/native-worker-terminate-wait.ts"
    ],
-   "diags": [
-    {
-     "code": "SC0001",
-     "message": "Argument of type '(code: number) => void' is not assignable to parameter of type '(...args: unknown[]) => void'.\n  Types of parameters 'code' and 'args' are incompatible.\n    Type 'unknown' is not assignable to type 'number'.",
-     "loc": {
-      "file": "<repo>/tests/corpus/native-worker-terminate-wait.ts",
-      "start": 443,
-      "end": 486
-     }
-    },
-    {
-     "code": "SC0001",
-     "message": "Property 'postMessage' does not exist on type '{}'.",
-     "loc": {
-      "file": "<repo>/tests/corpus/native-worker-terminate-wait.ts",
-      "start": 578,
-      "end": 589
-     }
-    }
-   ]
+   "diags": []
   },
   "<repo>/tests/corpus/native-worker-typed-arrays.ts": {
    "order": [
     "<repo>/tests/corpus/native-worker-typed-arrays.ts"
    ],
-   "diags": [
-    {
-     "code": "SC0001",
-     "message": "Argument of type '(line: string) => void' is not assignable to parameter of type '(...args: unknown[]) => void'.\n  Types of parameters 'line' and 'args' are incompatible.\n    Type 'unknown' is not assignable to type 'string'.",
-     "loc": {
-      "file": "<repo>/tests/corpus/native-worker-typed-arrays.ts",
-      "start": 1875,
-      "end": 1894
-     }
-    },
-    {
-     "code": "SC0001",
-     "message": "Argument of type '(code: number) => void' is not assignable to parameter of type '(...args: unknown[]) => void'.\n  Types of parameters 'code' and 'args' are incompatible.\n    Type 'unknown' is not assignable to type 'number'.",
-     "loc": {
-      "file": "<repo>/tests/corpus/native-worker-typed-arrays.ts",
-      "start": 1944,
-      "end": 1963
-     }
-    },
-    {
-     "code": "SC0001",
-     "message": "Property 'postMessage' does not exist on type '{}'.",
-     "loc": {
-      "file": "<repo>/tests/corpus/native-worker-typed-arrays.ts",
-      "start": 2244,
-      "end": 2255
-     }
-    },
-    {
-     "code": "SC0001",
-     "message": "Property 'postMessage' does not exist on type '{}'.",
-     "loc": {
-      "file": "<repo>/tests/corpus/native-worker-typed-arrays.ts",
-      "start": 2420,
-      "end": 2431
-     }
-    }
-   ]
+   "diags": []
   },
   "<repo>/tests/corpus/nested-map-cycles.ts": {
    "order": [
@@ -14764,6 +13250,12 @@
    ],
    "diags": []
   },
+  "<repo>/tests/corpus/process-kill-untyped-signal.ts": {
+   "order": [
+    "<repo>/tests/corpus/process-kill-untyped-signal.ts"
+   ],
+   "diags": []
+  },
   "<repo>/tests/corpus/process-named-signals.cjs": {
    "order": [
     "<repo>/tests/corpus/process-named-signals.cjs"
@@ -14984,6 +13476,12 @@
   "<repo>/tests/corpus/regex-split-captures.ts": {
    "order": [
     "<repo>/tests/corpus/regex-split-captures.ts"
+   ],
+   "diags": []
+  },
+  "<repo>/tests/corpus/regex-stored-match-index.ts": {
+   "order": [
+    "<repo>/tests/corpus/regex-stored-match-index.ts"
    ],
    "diags": []
   },
@@ -15522,6 +14020,18 @@
    ],
    "diags": []
   },
+  "<repo>/tests/corpus/typed-array-sort.ts": {
+   "order": [
+    "<repo>/tests/corpus/typed-array-sort.ts"
+   ],
+   "diags": []
+  },
+  "<repo>/tests/corpus/typed-array-union-loops.ts": {
+   "order": [
+    "<repo>/tests/corpus/typed-array-union-loops.ts"
+   ],
+   "diags": []
+  },
   "<repo>/tests/corpus/typed-array-unknown.ts": {
    "order": [
     "<repo>/tests/corpus/typed-array-unknown.ts"
@@ -15725,62 +14235,7 @@
    "order": [
     "<repo>/tests/corpus/worker-class-instance-clone.ts"
    ],
-   "diags": [
-    {
-     "code": "SC0001",
-     "message": "Argument of type '(code: number) => void' is not assignable to parameter of type '(...args: unknown[]) => void'.\n  Types of parameters 'code' and 'args' are incompatible.\n    Type 'unknown' is not assignable to type 'number'.",
-     "loc": {
-      "file": "<repo>/tests/corpus/worker-class-instance-clone.ts",
-      "start": 1527,
-      "end": 1599
-     }
-    },
-    {
-     "code": "SC0001",
-     "message": "Property 'postMessage' does not exist on type '{}'.",
-     "loc": {
-      "file": "<repo>/tests/corpus/worker-class-instance-clone.ts",
-      "start": 1697,
-      "end": 1708
-     }
-    },
-    {
-     "code": "SC0001",
-     "message": "Property 'once' does not exist on type '{}'.",
-     "loc": {
-      "file": "<repo>/tests/corpus/worker-class-instance-clone.ts",
-      "start": 1785,
-      "end": 1789
-     }
-    },
-    {
-     "code": "SC0001",
-     "message": "Property 'postMessage' does not exist on type '{}'.",
-     "loc": {
-      "file": "<repo>/tests/corpus/worker-class-instance-clone.ts",
-      "start": 1873,
-      "end": 1884
-     }
-    },
-    {
-     "code": "SC0001",
-     "message": "Property 'postMessage' does not exist on type '{}'.",
-     "loc": {
-      "file": "<repo>/tests/corpus/worker-class-instance-clone.ts",
-      "start": 2002,
-      "end": 2013
-     }
-    },
-    {
-     "code": "SC0001",
-     "message": "Property 'close' does not exist on type '{}'.",
-     "loc": {
-      "file": "<repo>/tests/corpus/worker-class-instance-clone.ts",
-      "start": 2053,
-      "end": 2058
-     }
-    }
-   ]
+   "diags": []
   },
   "<repo>/tests/diagnostics/accessors.ts": {
    "order": [
@@ -18101,6 +16556,24 @@
   "<repo>/tests/fixtures/node-types/util-types.ts": {
    "order": [
     "<repo>/tests/fixtures/node-types/util-types.ts"
+   ],
+   "diags": []
+  },
+  "<repo>/tests/corpus/array-default-sort-primitives.ts": {
+   "order": [
+    "<repo>/tests/corpus/array-default-sort-primitives.ts"
+   ],
+   "diags": []
+  },
+  "<repo>/tests/corpus/typed-array-to-reversed.ts": {
+   "order": [
+    "<repo>/tests/corpus/typed-array-to-reversed.ts"
+   ],
+   "diags": []
+  },
+  "<repo>/tests/corpus/object-is-union-operands.ts": {
+   "order": [
+    "<repo>/tests/corpus/object-is-union-operands.ts"
    ],
    "diags": []
   }

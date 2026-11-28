@@ -1027,7 +1027,9 @@ function checkLocal() {
     throw new Error(`snapshot targets Node ${snapshot.nodeVersion}/${snapshot.nodeCommit}, pin targets ${pin.version}/${pin.commit}`);
   }
   const ctx = classificationContext();
-  if (snapshot.chapters.length !== 62) throw new Error(`expected 62 pinned Node API chapters, found ${snapshot.chapters.length}`);
+  // v24.22.1 has 63 chapters: 24.15.0's 62 and the experimental stream_iter (--experimental-stream-iter), which no
+  // subsystem owns yet (unreviewed).
+  if (snapshot.chapters.length !== 63) throw new Error(`expected 63 pinned Node API chapters, found ${snapshot.chapters.length}`);
   const ancestors = [];
   for (const row of snapshot.rows) {
     if (row.depth === 0) {

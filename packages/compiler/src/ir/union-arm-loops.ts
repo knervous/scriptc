@@ -1,5 +1,7 @@
+// This file was modified from scriptc (Apache-2.0); see MODIFICATIONS.md.
 import {
   BOOL,
+  F64,
   isUnitType,
   type IrExpr,
   type IrFunction,
@@ -67,11 +69,16 @@ type LoopStmt = IrStmt & { kind: "for" | "while" | "doWhile" };
 export function versionUnionArmLoops(mod: IrModule, nodes?: IrNodeIndex): IrModule {
   if ((mod.unions?.length ?? 0) === 0) return mod;
   const unions = new Map((mod.unions ?? []).map((u) => [u.id, u]));
-  const scan = nodes?.scan(NARROW_KINDS);
+  // Fork: a union element read or length can be an `%arraylike` helper call, which holds no narrow.
+  const helpers = mod.functions.some((f) => f.name.startsWith(ARRAYLIKE_GET) || f.name.startsWith(ARRAYLIKE_LENGTH));
+  const scan = helpers ? undefined : nodes?.scan(NARROW_KINDS);
   let changed = false;
   const functions = mod.functions.map((fn) => {
     if (lacksKinds(fn, scan)) return fn;
-    const next = rewriteFunction(fn, unions);
+    const expanded = helpers ? expandTypedArrayUnionAccess(fn, unions) : fn;
+    const versioned = rewriteFunction(expanded, unions);
+    // A function no loop of which is versioned keeps its helper calls.
+    const next = versioned === expanded ? fn : versioned;
     if (next !== fn) changed = true;
     return next;
   });
@@ -211,6 +218,76 @@ interface Context {
    * versioned yet (the copies of a versioned loop hold their own nested
    * loops, which a different arm may index). */
   rewrite: (s: IrStmt) => IrStmt;
+}
+
+const ARRAYLIKE_GET = "%arraylike.get.";
+const ARRAYLIKE_LENGTH = "%arraylike.length.";
+
+/** Fork: the frontend lowers an element read and `.length` on a union of number containers to its
+ * `%arraylike.get.N(u, i)` / `%arraylike.length.N(u)` helper, and an element store through a held copy of the
+ * receiver and key (`%storeReceiver.N`, `%storeIndex.N`). The WasmGC pass (union-arm-loops-wasmgc.ts) reads those
+ * forms; this one wants upstream's inline dispatch on the source itself. On a union of typed arrays alone (where the
+ * helper's body is exactly that dispatch), a helper call on a plain local with a plain index becomes the inline tag
+ * chain, and a held receiver or key that is a plain local nothing writes in between is read in place. Without this
+ * the loop is never versioned and the lane planner never sees a typed-array loop. Returns `fn` when nothing changes. */
+function expandTypedArrayUnionAccess(fn: IrFunction, unions: ReadonlyMap<string, IrUnionDef>): IrFunction {
+  const facts = functionFacts(fn);
+  const bytesUnion = (e: IrExpr | undefined): IrUnionDef | null => {
+    if (e?.kind !== "varRef" || e.type.kind !== "union") return null;
+    const def = unions.get(e.type.unionId);
+    return def && def.arms.length >= 2 && def.arms.every((arm) => arm.kind === "bytes") ? def : null;
+  };
+  const plain = (e: IrExpr | undefined): boolean => e?.kind === "numLit" || e?.kind === "varRef";
+  let changed = false;
+  const expr = (e: IrExpr): IrExpr => {
+    if (e.kind !== "call") return e;
+    const get = e.callee.startsWith(ARRAYLIKE_GET);
+    if (!get && !e.callee.startsWith(ARRAYLIKE_LENGTH)) return e;
+    const def = bytesUnion(e.args[0]);
+    if (def === null || (get && (e.args.length !== 2 || !plain(e.args[1])))) return e;
+    const u = e.args[0]!;
+    const loc = e.loc;
+    const read = (tag: number): IrExpr => {
+      const receiver: IrExpr = { kind: "unionNarrow", unionId: def.id, tag, value: u, type: def.arms[tag]!, loc };
+      return get
+        ? { kind: "bytesIntrinsic", method: "get", receiver, args: [e.args[1]!], type: F64, loc }
+        : { kind: "bytesIntrinsic", method: "length", receiver, args: [], type: F64, loc };
+    };
+    let chain = read(def.arms.length - 1);
+    for (let tag = def.arms.length - 2; tag >= 0; tag--)
+      chain = { kind: "ternary", cond: { kind: "unionIsTag", unionId: def.id, tag, negated: false, value: u, type: BOOL, loc }, then: read(tag), else_: chain, type: F64, loc };
+    changed = true;
+    return chain;
+  };
+  const stmt = (s: IrStmt): IrStmt => {
+    if (s.kind !== "block" || s.body.length < 4) return s;
+    const [r, k, v] = s.body as [IrStmt, IrStmt, IrStmt];
+    if (r.kind !== "varDecl" || !r.localId.startsWith("%storeReceiver.") || bytesUnion(r.init ?? undefined) === null) return s;
+    if (k.kind !== "varDecl" || !k.localId.startsWith("%storeIndex.") || !plain(k.init ?? undefined)) return s;
+    if (v.kind !== "varDecl" || !v.localId.startsWith("%storeValue.")) return s;
+    const receiver = r.init as IrExpr & { kind: "varRef" };
+    const index = k.init as IrExpr;
+    if (facts.written.has(receiver.localId)) return s;
+    // The key was read before the value ran: in place only when the value cannot change it.
+    if (index.kind === "varRef" && writes(v.init ?? null, index.localId)) return s;
+    const held = new Map<string, IrExpr>([[r.localId, receiver], [k.localId, index]]);
+    const substitute = (e: IrExpr): IrExpr => (e.kind === "varRef" && held.has(e.localId) ? { ...held.get(e.localId)!, loc: e.loc } : e);
+    changed = true;
+    return { ...s, body: [v, ...s.body.slice(3).map((t) => transformStmt(t, { expr: substitute, stmt: (x) => x }))] };
+  };
+  const body = fn.body.map((s) => transformStmt(s, { expr, stmt }));
+  return changed ? { ...fn, body } : fn;
+}
+
+/** Whether `e` assigns local `id`. */
+function writes(e: IrExpr | null, id: string): boolean {
+  if (e === null) return false;
+  let found = false;
+  everyStmtList([{ kind: "exprStmt", expr: e, loc: e.loc }], {
+    expr: (x) => !(found ||= (x.kind === "assignExpr" || x.kind === "incDec") && x.localId === id),
+    stmt: (x) => !(found ||= (x.kind === "assign" || x.kind === "forOf") && x.localId === id),
+  });
+  return found;
 }
 
 function rewriteFunction(fn: IrFunction, unions: ReadonlyMap<string, IrUnionDef>): IrFunction {

@@ -50,9 +50,10 @@ describe("the features a link feature requires", () => {
       expect(withRequiredLinkFeatures(alone)).toBe(alone);
       expect(JSON.stringify(alone), name).toBe(before);
     }
-    const optional: NativeLinkFeatures = { ...noLinkFeatures(), workers: true, nodeIsland: true };
+    // Two features no requirement names (nodeIsland now requires regex, for scr_regex.c's case conversion).
+    const optional: NativeLinkFeatures = { ...noLinkFeatures(), workers: true, copying: true };
     expect(JSON.stringify(withRequiredLinkFeatures(optional))).toBe(
-      JSON.stringify({ ...noLinkFeatures(), workers: true, nodeIsland: true }),
+      JSON.stringify({ ...noLinkFeatures(), workers: true, copying: true }),
     );
   });
 

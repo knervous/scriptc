@@ -180,7 +180,7 @@ static void scr_aggregate_reld(void *obj) {
 
 /* Defaults cover only the instants before main() stamps the program's real
  * preorder intervals; release is permanent. */
-ScrVt scr_error_vts[SCR_ERR_COUNT] = {
+SCR_TL ScrVt scr_error_vts[SCR_ERR_COUNT] = {
     {0, 8, &scr_error_reld}, /* Error */
     {1, 1, &scr_error_reld}, /* TypeError */
     {2, 2, &scr_error_reld}, /* RangeError */
@@ -302,7 +302,7 @@ static ScrStr *scr_error_format(ScrError *e, ScrStr *name, ScrStr *message) {
    * the code-prefix test is exact for runtime-thrown errors; a user
    * assigning an ERR_* code onto a plain Error would bracket here where
    * Node would not (documented — user code owns that spelling). */
-  bool assertion = !e->native_plain && name && e->code && e->code->len >= 4 &&
+  bool assertion = !(scr_error_has_system_fields(e) && e->native_plain) && name && e->code && e->code->len >= 4 &&
                    memcmp(e->code->data, "ERR_", 4) == 0;
   if (!name || name->len == 0) {
     return message ? scr_str_retain(message) : scr_str_new("", 0);

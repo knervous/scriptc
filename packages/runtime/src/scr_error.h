@@ -158,7 +158,16 @@ enum {
   SCR_ERR_COUNT = 11,
 };
 
-extern ScrVt scr_error_vts[SCR_ERR_COUNT]; /* indexed by SCR_ERR_*; main() stamps pre/post */
+extern SCR_TL ScrVt scr_error_vts[SCR_ERR_COUNT]; /* indexed by SCR_ERR_*; main() stamps pre/post */
+
+/* Whether `e` carries the fields past the layout prefix (system_errno through errno_undefined): only errors the runtime
+ * allocates, whose vtables are the builtin ones. This fork's frontend lays a user Error subclass out with the shorter
+ * prefix (name through stack) and puts the subclass's own fields where upstream's puts %systemErrno..%systemDest, so a
+ * read of those fields on one reads the subclass's fields, or past the object. */
+static inline bool scr_error_has_system_fields(const ScrError *e) {
+  uintptr_t vt = (uintptr_t)e->vt;
+  return vt >= (uintptr_t)&scr_error_vts[0] && vt < (uintptr_t)&scr_error_vts[SCR_ERR_COUNT];
+}
 
 struct ScrDyn; /* full declaration below (the checked-dynamic tree section) */
 

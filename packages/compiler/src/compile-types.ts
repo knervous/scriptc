@@ -4,6 +4,7 @@ import type { NativeLinkInfo } from "./backend/native-link-info.js";
 import type { ScrDiagnostic } from "./diagnostics/diagnostic.js";
 import type { CoverageInput } from "./coverage/report.js";
 import type { WasmOptReceipt } from "./backend/wasmgc/emitter.js";
+import type { TargetCpu } from "./backend/target-cpu.js";
 import type { IrModule } from "./ir/ir.js";
 import type { ObjectUnit } from "./link/module-tag.js";
 
@@ -303,6 +304,10 @@ export interface CompileBaseOptions {
   optimization?: "release" | "dev";
   /** Remove symbol/debug payload from an executable at link time. */
   strip?: boolean;
+  /** Compile the program's code for an x86-64 microarchitecture level: the code may use the instructions of that
+   * level, and the executable then runs only on CPUs that support it. Unset or `baseline`, the code runs on any
+   * x86-64 CPU. x86-64 targets only; the runtime pack keeps its baseline code. */
+  targetCpu?: TargetCpu;
   /** Give the executable an x86-64-v3 copy of each program function, which
    * it runs instead of the baseline code on CPUs that support that level
    * (`SCRIPTC_CPU_LEVEL` caps the level at run time). Executables for x86-64

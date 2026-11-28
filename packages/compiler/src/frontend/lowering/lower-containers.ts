@@ -1,5 +1,5 @@
 import { keyedHelperName } from "./stable-names.js";
-import { browserTarget, hostHandlesEnabled, isDomLibFile, nativeDyn } from "../browser-target.js";
+import { browserTarget, hostHandlesEnabled, isDomLibFile, nativeDyn, wasmGcLaneTarget } from "../browser-target.js";
 import { objectEnumerationReceiver } from "./object-enumeration-receiver.js";
 import { InternalCompilerError } from "../../errors.js";
 /* Container-surface call lowering: array methods (including the HOF family
@@ -2998,12 +2998,26 @@ export function tryLowerNumberComparedRead(lowerer: Lowerer, operand: IrExpr, lo
       const fnArg: IrExpr = { kind: "closure", fnName: cmp, captures: [], type: fnT, loc };
       return { kind: "call", callee: helper, args: [receiver, fnArg], type: arrT, loc };
     }
+    // Upstream's default ordering for number, boolean and Date arrays: the runtime's stable sort by each element's
+    // String conversion (which cannot call user code), so [10, 9, 1] sorts as [1, 10, 9]. The native backend lowers
+    // the intrinsic; WasmGC has none yet and keeps the fence.
+    if (call.arguments.length === 0 && !wasmGcLaneTarget() &&
+        (elem.kind === "f64" || elem.kind === "bool" || elem.kind === "date")) {
+      return {
+        kind: "arrIntrinsic",
+        method: copyFirst ? "toSortedPrimitive" : "sortPrimitive",
+        receiver: lowerer.lowerExpr(access.expression),
+        args: [],
+        type: arrT,
+        loc,
+      };
+    }
     if (call.arguments.length !== 1) {
       lowerer.noLowering(
         `.${method} with ${call.arguments.length} arguments`,
         call,
-        "the default string-conversion ordering lowers only for string[] — pass a comparator: " +
-          `${method}((a, b) => a - b) for numbers`,
+        "the default string-conversion ordering lowers for string[] (and, natively, number[], boolean[] and Date[]) — " +
+          `pass a comparator: ${method}((a, b) => a - b) for numbers`,
       );
     }
     const receiver = lowerer.lowerExpr(access.expression);

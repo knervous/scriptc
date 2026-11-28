@@ -9131,105 +9131,8 @@ export function lowerBinary(lowerer: Lowerer, expr: ts.BinaryExpression): IrExpr
           // didn't narrow) — the plain side wraps into the union, which
           // preserves payload identity. Different unions (tsc admits
           // partially-overlapping ones) still need narrowing first.
-          const ut = left.type.kind === "union" ? left.type : (right.type as IrType & { kind: "union" });
-          const bothUnion = left.type.kind === "union" && right.type.kind === "union";
-          const sameUnion = bothUnion && typeEquals(left.type, right.type);
-          const plainFunc = left.type.kind === "func" ? left : right.type.kind === "func" ? right : null;
-          const unionArms = lowerer.unions.get(ut.unionId)?.arms ?? [];
-          const funcArm = unionArms.find((arm) => arm.kind === "func");
-          // `listeners()` reports original prefix callbacks, but the
-          // checker views an indexed result as function | undefined. For
-          // identity comparison, retain the original closure pointer rather
-          // than adapting it to the tuple signature.
-          if (
-            !bothUnion &&
-            plainFunc !== null &&
-            funcArm?.kind === "func" &&
-            unionArms.filter((arm) => arm.kind === "func").length === 1 &&
-            unionArms.some(isUnitType)
-          ) {
-            return {
-              kind: "unionFuncEq",
-              unionId: ut.unionId,
-              tag: lowerer.armTag(ut.unionId, funcArm),
-              union: left.type.kind === "union" ? left : right,
-              func: plainFunc,
-              ...(left.type.kind === "union" ? {} : { funcFirst: true as const }),
-              negated,
-              type: BOOL,
-              loc,
-            };
-          }
-          // Class instances of one hierarchy on both sides (`t === c.stringType`, a `Base` against a `Sub | undefined`
-          // field; `Sub | undefined` against `Base | undefined`): identity is the object's, whatever arm holds it. Both
-          // sides widen into the union of the unit arms and the topmost classes, where each object has one tag (its
-          // ancestor's), and compare there by reference.
-          const hierarchyCommon = classHierarchyCommonUnion(lowerer, left.type, right.type);
-          if (hierarchyCommon !== null) {
-            return {
-              kind: "unionEq",
-              unionId: hierarchyCommon.unionId,
-              negated,
-              sameValue: false,
-              left: lowerer.coerceInto(expr.left, left, hierarchyCommon),
-              right: lowerer.coerceInto(expr.right, right, hierarchyCommon),
-              type: BOOL,
-              loc,
-            };
-          }
-          if ((sameUnion || !bothUnion) && lowerer.eqComparableUnion(ut.unionId)) {
-            return {
-              kind: "unionEq",
-              unionId: ut.unionId,
-              negated,
-              sameValue: false,
-              left: lowerer.coerceInto(expr.left, left, ut),
-              right: lowerer.coerceInto(expr.right, right, ut),
-              type: BOOL,
-              loc,
-            };
-          }
-          if (left.type.kind === "union" && right.type.kind === "union") {
-            const leftDef = lowerer.unions.get(left.type.unionId);
-            const rightDef = lowerer.unions.get(right.type.unionId);
-            if (leftDef && rightDef) {
-              const leftValues = leftDef.arms.filter((arm) => !isUnitType(arm));
-              const rightValues = rightDef.arms.filter((arm) => !isUnitType(arm));
-              const sameValueArms = leftValues.length === rightValues.length &&
-                leftValues.every((arm) => rightValues.some((candidate) => typeEquals(candidate, arm)));
-              // Different unions (tsc admits partially-overlapping ones):
-              // both sides widen into the union of all their arms and
-              // compare per tag (reference arms by identity). Two class
-              // arms where one derives from the other would split one
-              // object over two tags, so those keep the narrow-first fence.
-              const mergedArms = [...leftDef.arms];
-              for (const arm of rightDef.arms) {
-                if (!mergedArms.some((candidate) => typeEquals(candidate, arm))) mergedArms.push(arm);
-              }
-              sortArms(mergedArms);
-              const classArms = mergedArms.filter((arm): arm is IrType & { kind: "object" } => arm.kind === "object");
-              const relatedClassArms = classArms.some((a) => classArms.some((b) =>
-                a !== b && (lowerer.isSubclassOf(a.className, b.className) || lowerer.isSubclassOf(b.className, a.className))));
-              const widenable = sameValueArms || (!relatedClassArms && lowerer.eqComparableUnion(lowerer.unions.intern(mergedArms)));
-              if (widenable) {
-                const arms = mergedArms;
-                const common: IrType & { kind: "union" } = {
-                  kind: "union",
-                  unionId: lowerer.unions.intern(arms),
-                };
-                return {
-                  kind: "unionEq",
-                  unionId: common.unionId,
-                  negated,
-                  sameValue: false,
-                  left: lowerer.coerceInto(expr.left, left, common),
-                  right: lowerer.coerceInto(expr.right, right, common),
-                  type: BOOL,
-                  loc,
-                };
-              }
-            }
-          }
+          const identity = lowerUnionIdentity(lowerer, expr.left, expr.right, left, right, negated, () => false, loc);
+          if (identity !== null) return identity;
           lowerer.unsupported(
             "SC1090",
             expr,
@@ -13995,6 +13898,116 @@ function runtimeOptionalClassField(lowerer: Lowerer, value: IrExpr, node: ts.Pro
   if (!symbol || !lowerer.runtimeOptionalAssignedSymbols.has(symbol)) return false;
   const narrowed = lowerer.mapTypeOf(lowerer.typeOf(node));
   return narrowed !== null && typeEquals(narrowed, lowerer.stripUndefinedArm(value.type));
+}
+
+/** `left === right` (negated: `!==`) where either side is a union, the shapes the strict-equality lowering admits:
+ * a unit-armed union against a plain function, class instances of one hierarchy, one comparable union, or two
+ * unions widened into the union of their arms. `sameValueFor(unionId)` makes that union's number arms compare by
+ * SameValue (Object.is: NaN equals NaN, -0 differs from +0). Null when none applies. */
+export function lowerUnionIdentity(
+  lowerer: Lowerer, leftNode: ts.Expression, rightNode: ts.Expression, left: IrExpr, right: IrExpr, negated: boolean,
+  sameValueFor: (unionId: string) => boolean, loc: SrcLoc,
+): IrExpr | null {
+  const ut = left.type.kind === "union" ? left.type : (right.type as IrType & { kind: "union" });
+  const bothUnion = left.type.kind === "union" && right.type.kind === "union";
+  const sameUnion = bothUnion && typeEquals(left.type, right.type);
+  const plainFunc = left.type.kind === "func" ? left : right.type.kind === "func" ? right : null;
+  const unionArms = lowerer.unions.get(ut.unionId)?.arms ?? [];
+  const funcArm = unionArms.find((arm) => arm.kind === "func");
+  // `listeners()` reports original prefix callbacks, but the
+  // checker views an indexed result as function | undefined. For
+  // identity comparison, retain the original closure pointer rather
+  // than adapting it to the tuple signature.
+  if (
+    !bothUnion &&
+    plainFunc !== null &&
+    funcArm?.kind === "func" &&
+    unionArms.filter((arm) => arm.kind === "func").length === 1 &&
+    unionArms.some(isUnitType)
+  ) {
+    return {
+      kind: "unionFuncEq",
+      unionId: ut.unionId,
+      tag: lowerer.armTag(ut.unionId, funcArm),
+      union: left.type.kind === "union" ? left : right,
+      func: plainFunc,
+      ...(left.type.kind === "union" ? {} : { funcFirst: true as const }),
+      negated,
+      type: BOOL,
+      loc,
+    };
+  }
+  // Class instances of one hierarchy on both sides (`t === c.stringType`, a `Base` against a `Sub | undefined`
+  // field; `Sub | undefined` against `Base | undefined`): identity is the object's, whatever arm holds it. Both
+  // sides widen into the union of the unit arms and the topmost classes, where each object has one tag (its
+  // ancestor's), and compare there by reference.
+  const hierarchyCommon = classHierarchyCommonUnion(lowerer, left.type, right.type);
+  if (hierarchyCommon !== null) {
+    return {
+      kind: "unionEq",
+      unionId: hierarchyCommon.unionId,
+      negated,
+      sameValue: sameValueFor(hierarchyCommon.unionId),
+      left: lowerer.coerceInto(leftNode, left, hierarchyCommon),
+      right: lowerer.coerceInto(rightNode, right, hierarchyCommon),
+      type: BOOL,
+      loc,
+    };
+  }
+  if ((sameUnion || !bothUnion) && lowerer.eqComparableUnion(ut.unionId)) {
+    return {
+      kind: "unionEq",
+      unionId: ut.unionId,
+      negated,
+      sameValue: sameValueFor(ut.unionId),
+      left: lowerer.coerceInto(leftNode, left, ut),
+      right: lowerer.coerceInto(rightNode, right, ut),
+      type: BOOL,
+      loc,
+    };
+  }
+  if (left.type.kind === "union" && right.type.kind === "union") {
+    const leftDef = lowerer.unions.get(left.type.unionId);
+    const rightDef = lowerer.unions.get(right.type.unionId);
+    if (leftDef && rightDef) {
+      const leftValues = leftDef.arms.filter((arm) => !isUnitType(arm));
+      const rightValues = rightDef.arms.filter((arm) => !isUnitType(arm));
+      const sameValueArms = leftValues.length === rightValues.length &&
+        leftValues.every((arm) => rightValues.some((candidate) => typeEquals(candidate, arm)));
+      // Different unions (tsc admits partially-overlapping ones):
+      // both sides widen into the union of all their arms and
+      // compare per tag (reference arms by identity). Two class
+      // arms where one derives from the other would split one
+      // object over two tags, so those keep the narrow-first fence.
+      const mergedArms = [...leftDef.arms];
+      for (const arm of rightDef.arms) {
+        if (!mergedArms.some((candidate) => typeEquals(candidate, arm))) mergedArms.push(arm);
+      }
+      sortArms(mergedArms);
+      const classArms = mergedArms.filter((arm): arm is IrType & { kind: "object" } => arm.kind === "object");
+      const relatedClassArms = classArms.some((a) => classArms.some((b) =>
+        a !== b && (lowerer.isSubclassOf(a.className, b.className) || lowerer.isSubclassOf(b.className, a.className))));
+      const widenable = sameValueArms || (!relatedClassArms && lowerer.eqComparableUnion(lowerer.unions.intern(mergedArms)));
+      if (widenable) {
+        const arms = mergedArms;
+        const common: IrType & { kind: "union" } = {
+          kind: "union",
+          unionId: lowerer.unions.intern(arms),
+        };
+        return {
+          kind: "unionEq",
+          unionId: common.unionId,
+          negated,
+          sameValue: sameValueFor(common.unionId),
+          left: lowerer.coerceInto(leftNode, left, common),
+          right: lowerer.coerceInto(rightNode, right, common),
+          type: BOOL,
+          loc,
+        };
+      }
+    }
+  }
+  return null;
 }
 
 /** The union a `===`/`!==` between class instances of one hierarchy compares in, or null where the existing union

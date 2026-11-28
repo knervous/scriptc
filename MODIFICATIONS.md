@@ -2,7 +2,7 @@
 
 This tree is a derivative of scriptc (https://github.com/vercel-labs/scriptc), licensed under the Apache License, Version 2.0 (LICENSE). It is compared here with upstream commit `97248e92994ff55f7009e0057700241b9109a35e`. The LLVM backend (`packages/compiler/src/backend/llvm`), the IR (`packages/compiler/src/ir`), the runtime (`packages/runtime` and the runtime and LLVM packs) and `native/llvm-codegen` track upstream at that commit, with the changes listed below. The frontend (`packages/compiler/src/frontend`), the compiler's unit and integration tests, the test corpus and fixtures, the compatibility inventory and the documentation are this fork's own and follow an earlier upstream state, so upstream's newer tests and documentation are not included.
 
-As section 4(b) of the license requires, the files below carry changes. 1117 files are modified from that upstream commit and 2944 files are new; 23328 upstream files are not part of this tree (see "Removed files"). Each modified source file of the compiler, the runtime and the repository tooling also says so in its first comment line.
+As section 4(b) of the license requires, the files below carry changes. 1117 files are modified from that upstream commit and 2953 files are new; 23326 upstream files are not part of this tree (see "Removed files"). Each modified source file of the compiler, the runtime and the repository tooling also says so in its first comment line.
 
 ## Modified files
 
@@ -13,7 +13,6 @@ As section 4(b) of the license requires, the files below carry changes. 1117 fil
 - `.github/actions/zig/action.yml`
 - `.github/workflows/ci.yml`
 - `.gitignore`
-- `.node-version`
 - `AGENTS.md`
 - `CHANGELOG.md`
 - `CONTRIBUTING.md`
@@ -158,6 +157,7 @@ As section 4(b) of the license requires, the files below carry changes. 1117 fil
 - `packages/compiler/src/backend/may-throw.ts`
 - `packages/compiler/src/backend/native-codegen-core.ts`
 - `packages/compiler/src/backend/native-codegen.ts`
+- `packages/compiler/src/backend/native-link-info-core.test.ts`
 - `packages/compiler/src/backend/native-link-info-core.ts`
 - `packages/compiler/src/backend/native-toolchain.test.ts`
 - `packages/compiler/src/backend/native/artifact-stamps.ts`
@@ -435,6 +435,7 @@ As section 4(b) of the license requires, the files below carry changes. 1117 fil
 - `packages/compiler/src/ir/builtin-signatures/num.ts`
 - `packages/compiler/src/ir/builtin-signatures/record.ts`
 - `packages/compiler/src/ir/builtin-signatures/rl.ts`
+- `packages/compiler/src/ir/char-unit-locals.test.ts`
 - `packages/compiler/src/ir/codec.generated.ts`
 - `packages/compiler/src/ir/codec.test.ts`
 - `packages/compiler/src/ir/fields.generated.ts`
@@ -461,6 +462,8 @@ As section 4(b) of the license requires, the files below carry changes. 1117 fil
 - `packages/compiler/src/ir/tiers.ts`
 - `packages/compiler/src/ir/traverse.test.ts`
 - `packages/compiler/src/ir/traverse.ts`
+- `packages/compiler/src/ir/union-arm-loops.test.ts`
+- `packages/compiler/src/ir/union-arm-loops.ts`
 - `packages/compiler/src/ir/validate.test.ts`
 - `packages/compiler/src/ir/validate.ts`
 - `packages/compiler/src/library/cache-primitives.ts`
@@ -651,7 +654,9 @@ As section 4(b) of the license requires, the files below carry changes. 1117 fil
 - `packages/runtime/src/scr_util_compare.c`
 - `packages/runtime/src/scr_zlib.c`
 - `packages/runtime/src/scr_zlib.h`
+- `packages/runtime/test/error-seed-atexit.test.ts`
 - `packages/runtime/vendor/README.md`
+- `packages/types/package.json`
 - `pnpm-lock.yaml`
 - `pnpm-workspace.yaml`
 - `scripts/bench-ast-access.mjs`
@@ -712,7 +717,6 @@ As section 4(b) of the license requires, the files below carry changes. 1117 fil
 - `tests/corpus/1562-spawn-conditional-spread.ts`
 - `tests/corpus/1565-union-element-join.ts`
 - `tests/corpus/1595-js-island-gap/main.js`
-- `tests/corpus/1640-fd-read-decode.ts`
 - `tests/corpus/2026-width-spread.ts`
 - `tests/corpus/2050-dynamic-import-own-module/main.ts`
 - `tests/corpus/2051-dynamic-import-then/main.ts`
@@ -728,7 +732,6 @@ As section 4(b) of the license requires, the files below carry changes. 1117 fil
 - `tests/corpus/2195-require-missing-package/lib.cjs`
 - `tests/corpus/2196-island-computed-key-chain.ts`
 - `tests/corpus/2215-process-emit-warning-exit.cjs`
-- `tests/corpus/2283-structured-clone.cjs`
 - `tests/corpus/2364-in-runtime-key.ts`
 - `tests/corpus/2365-dyn-into-island.ts`
 - `tests/corpus/2447-island-boundary-slots/main.ts`
@@ -751,7 +754,6 @@ As section 4(b) of the license requires, the files below carry changes. 1117 fil
 - `tests/corpus/2584-jsval-object-statics.js`
 - `tests/corpus/2585-dyn-nullish-coalesce.js`
 - `tests/corpus/2590-object-create-dynamic.js`
-- `tests/corpus/2599-stream-arg-ladders.cjs`
 - `tests/corpus/2603-island-keyed-write-dyn.js`
 - `tests/corpus/2606-dynamic-import-cycle/main.ts`
 - `tests/corpus/2632-dyn-jsval-iterate.js`
@@ -779,7 +781,6 @@ As section 4(b) of the license requires, the files below carry changes. 1117 fil
 - `tests/corpus/3058-optional-array-chain-join.ts`
 - `tests/corpus/3068-debug-variables/main.ts`
 - `tests/corpus/3113-union-array-removal.ts`
-- `tests/corpus/3136-fs-file-handle-options.ts`
 - `tests/corpus/4067-dynamic-import-cycle-tdz/main.ts`
 - `tests/corpus/4476-string-ascii-header-fact.ts`
 - `tests/corpus/4642-acyclic-contract.ts`
@@ -1116,7 +1117,6 @@ As section 4(b) of the license requires, the files below carry changes. 1117 fil
 - `tests/library-mode/reinit/profile.json`
 - `tests/library-mode/traps/probe.c`
 - `tests/test262/README.md`
-- `tests/test262/compile-worker.ts`
 - `tests/test262/execute.ts`
 - `tests/test262/harness.ts`
 - `tests/test262/run.ts`
@@ -2453,6 +2453,7 @@ As section 4(b) of the license requires, the files below carry changes. 1117 fil
 - `packages/runtime/src/scr_web.c`
 - `packages/runtime/src/scr_zlib_island.c`
 - `packages/runtime/test/host-abi.test.ts`
+- `packages/runtime/test/test_error_user_prefix.c`
 - `packages/runtime/test/test_small_alloc.c`
 - `packages/runtime/vendor/curl/COPYRIGHT`
 - `packages/runtime/vendor/curl/include/curl/curl.h`
@@ -2515,11 +2516,18 @@ As section 4(b) of the license requires, the files below carry changes. 1117 fil
 - `tests/corpus/760-any-arithmetic.ts`
 - `tests/corpus/763-any-flow.ts`
 - `tests/corpus/968-jsval-lift.ts`
+- `tests/corpus/array-default-sort-primitives.ts`
+- `tests/corpus/error-subclass-assigned-fields-dyn.js`
 - `tests/corpus/error-subclass-message-accessor-keyed.js`
 - `tests/corpus/inc-dec-non-null-operand.ts`
 - `tests/corpus/map-long-string-keys.ts`
+- `tests/corpus/object-is-union-operands.ts`
+- `tests/corpus/process-kill-untyped-signal.ts`
 - `tests/corpus/regex-stored-match-index.ts`
 - `tests/corpus/typed-array-missing-index-read.ts`
+- `tests/corpus/typed-array-sort.ts`
+- `tests/corpus/typed-array-to-reversed.ts`
+- `tests/corpus/typed-array-union-loops.ts`
 - `tests/diagnostics/any-unit-exit.ts`
 - `tests/diagnostics/arrow-bind.ts`
 - `tests/diagnostics/checker-panic-infinity.ts`
@@ -2708,6 +2716,7 @@ As section 4(b) of the license requires, the files below carry changes. 1117 fil
 - `tests/harness/vercel-e2e.test.ts`
 - `tests/harness/web-globals.test.ts`
 - `tests/provenance.mjs`
+- `tests/test262/compile-worker.mts`
 - `tests/wasmgc-browser/.gitignore`
 - `tests/wasmgc-browser/closed-model/README.md`
 - `tests/wasmgc-browser/closed-model/index.html`
@@ -4073,7 +4082,7 @@ As section 4(b) of the license requires, the files below carry changes. 1117 fil
 
 ## Removed files
 
-These 23328 files are in upstream commit `97248e92994ff55f7009e0057700241b9109a35e` and not in this tree. Most were added upstream after the state this fork's frontend and tests follow; the rest were removed by the fork. By directory:
+These 23326 files are in upstream commit `97248e92994ff55f7009e0057700241b9109a35e` and not in this tree. Most were added upstream after the state this fork's frontend and tests follow; the rest were removed by the fork. By directory:
 
 <table>
 <tr><th>Directory</th><th>Files</th></tr>
@@ -4091,11 +4100,11 @@ These 23328 files are in upstream commit `97248e92994ff55f7009e0057700241b9109a3
 <tr><td><code>scripts/</code></td><td>68</td></tr>
 <tr><td><code>tests/corpus-node-islands-order/</code></td><td>37</td></tr>
 <tr><td><code>tests/library-mode/</code></td><td>23</td></tr>
-<tr><td>27 other directories</td><td>175</td></tr>
+<tr><td>26 other directories</td><td>173</td></tr>
 </table>
 
 <details>
-<summary>All 23328 removed paths</summary>
+<summary>All 23326 removed paths</summary>
 
 - `.agents/skills/scriptc-dev-loop/SKILL.md`
 - `.agents/skills/technical-writer/SKILL.md`
@@ -14200,9 +14209,6 @@ These 23328 files are in upstream commit `97248e92994ff55f7009e0057700241b9109a3
 - `packages/threads/index.d.ts`
 - `packages/threads/index.js`
 - `packages/threads/package.json`
-- `packages/types/README.md`
-- `packages/types/index.d.ts`
-- `packages/types/package.json`
 - `patches/vitest@3.2.7.patch`
 - `scratch-cov4.mjs`
 - `scratch-cov5.mjs`
@@ -27402,6 +27408,7 @@ These 23328 files are in upstream commit `97248e92994ff55f7009e0057700241b9109a3
 - `tests/node-parallel/common/wpt.cjs`
 - `tests/node-parallel/run.mjs`
 - `tests/node-parallel/verdict.mjs`
+- `tests/test262/compile-worker.ts`
 - `tests/test262/island-marker.ts`
 - `tests/test262/select.mjs`
 - `tests/test262/test-typed-array.js`
