@@ -274,6 +274,8 @@ const FEATURES = binaryen.Features.GC | binaryen.Features.ReferenceTypes
 
 /* Vendored wasm-opt (Binaryen 133, as Wasm) and the exact stable feature set
  * we ship: `-all` would enable proposals V8 rejects (custom descriptors). */
+/** The name suffix of a function wasm-opt must not fully inline: it holds a loop that run-once code calls (onceLoops). */
+const ONCE_LOOP_SUFFIX = ".once-loop";
 const WASM_OPT = fileURLToPath(new URL("../../../../../vendor/binaryen-133/binaryen-version_133/wasm-opt.js", import.meta.url));
 /** The same release's native wasm-opt 133 for this platform (vendor/binaryen-133/fetch-wasm-merge.sh extracts it from the
  * sha-pinned tarball; gitignored), as client/scripts/wasmgc/wasm-optimize.mjs uses it. Multi-threaded, and no wasm32 heap
@@ -412,7 +414,8 @@ function optimiseWithWasmOpt(binary: Uint8Array, level: number, shrink: number, 
     // crafting UI slice neutral. SCRIPTC_WASMGC_ONE_CALLER_INLINE=<n> (-1:
     // unlimited) overrides it for A/B.
     const oneCaller = typeof process !== "undefined" && process.env?.SCRIPTC_WASMGC_ONE_CALLER_INLINE ? process.env.SCRIPTC_WASMGC_ONE_CALLER_INLINE : "1000";
-    const common = [...WASM_OPT_FEATURES, "--closed-world", ...(NAMED_RELEASE ? ["-g"] : []), "--no-inline=*.cold*", `--one-caller-inline-max-function-size=${oneCaller}`, ...extra];
+    // A loop the program's top level calls keeps its own function (ONCE_LOOP_SUFFIX, emitModule's onceLoops).
+    const common = [...WASM_OPT_FEATURES, "--closed-world", ...(NAMED_RELEASE ? ["-g"] : []), "--no-inline=*.cold*", `--no-full-inline=*${ONCE_LOOP_SUFFIX}`, `--one-caller-inline-max-function-size=${oneCaller}`, ...extra];
     const run = (args: string[]) => {
       const entry = { args: args.map((a) => a.startsWith(dir) ? `$tmp${a.slice(dir.length)}` : a), ok: false };
       receipt.runs.push(entry);
@@ -876,7 +879,22 @@ function emitModule(given: IrModule, opts: WasmGcEmitOptions, setPhase: (phase: 
       types.narrowFields = out;
     }
   }
-  const symbol = (name: string) => name.replace(/[^A-Za-z0-9_.$]/g, c => `_${c.charCodeAt(0).toString(16)}`);
+  /* Wasm has no on-stack replacement: a function's optimized code serves only its later calls, so a loop inlined into
+   * code that runs once (the entry, a module initializer) runs in the engine's baseline code for the whole program. A
+   * function holding a loop that such code calls directly keeps its own body: its name ends in ONCE_LOOP_SUFFIX, which
+   * wasm-opt does not fully inline (--no-full-inline). The calls from its own callers stay as they are. */
+  const onceLoops = ((): Set<string> => {
+    const out = new Set<string>();
+    const isLoop = (v: any) => v?.kind === "for" || v?.kind === "while" || v?.kind === "doWhile" || v?.kind === "forOf" || v?.kind === "forIn";
+    const loopy = new Set<string>();
+    for (const f of mod.functions) { let found = false; walkObjects(f.body, (v: any) => { if (isLoop(v)) found = true; }); if (found) loopy.add(f.name); }
+    for (const f of mod.functions) {
+      if (f.name !== mod.entry && !/^%init\.\d+$/.test(f.name)) continue;
+      walkObjects(f.body, (v: any) => { if (v?.kind === "call" && typeof v.callee === "string" && loopy.has(v.callee) && v.callee !== f.name) out.add(v.callee); });
+    }
+    return out;
+  })();
+  const symbol = (name: string) => { const s = name.replace(/[^A-Za-z0-9_.$]/g, c => `_${c.charCodeAt(0).toString(16)}`); return onceLoops.has(name) ? s + ONCE_LOOP_SUFFIX : s; };
   /** Property names inside helper names: injective (every character outside
    * [A-Za-z0-9$], "_" and "." included, becomes `_<hex>_`), because helpers
    * dedupe by name — `symbol` maps "é" and "_e9" to the same text. */
@@ -14205,6 +14223,7 @@ function emitModule(given: IrModule, opts: WasmGcEmitOptions, setPhase: (phase: 
     return out;
   };
   let i32Kinds: { get(id: string): "s" | "u" | undefined } = new Map();
+  const ATOMIC_INT_RESULTS = new Set(["atomics.load", "atomics.add", "atomics.sub", "atomics.and", "atomics.or", "atomics.xor", "atomics.exchange", "atomics.compareExchange"]);
   /* Integer ranges (ir/integer-ranges.ts, the native backend's analysis): per function, the exact integer range each
    * number expression evaluates to, where the function's dataflow proves one, with its int32 call ABI parameters
    * (computeI32Abi) entering as int32. intKind answers "s"/"u" for any expression whose range fits int32/uint32:
@@ -14237,7 +14256,14 @@ function emitModule(given: IrModule, opts: WasmGcEmitOptions, setPhase: (phase: 
     switch (e.kind) {
       case "numLit": return Number.isInteger(e.value) && e.value >= -(2 ** 31) && e.value < 2 ** 31 && !Object.is(e.value, -0) ? "s" : Number.isInteger(e.value) && e.value >= 2 ** 31 && e.value < 2 ** 32 ? "u" : null;
       case "bin": return I32_BIN[e.op] ? (e.op === ">>>" ? "u" : "s") : null;
-      case "libCall": return e.fn === "math.imul" ? "s" : null;
+      case "libCall": {
+        if (e.fn === "math.imul") return "s";
+        // An Atomics read-modify-write, load or notify answers the element's exact value (bytes.atomics: a narrow kind
+        // or Int32Array is an int32, Uint32Array a uint32) or a waiter count; store answers its operand, not an element.
+        const recv = e.args[0]?.type;
+        if (ATOMIC_INT_RESULTS.has(e.fn) && recv?.kind === "bytes") return recv.elem === "u32" ? "u" : recv.elem === "f32" || recv.elem === "f64" ? null : "s";
+        return e.fn === "atomics.notify" ? "s" : null;
+      }
       // A direct call to a function whose every return is proven an int32 (i32 call ABI, computeI32Abi).
       case "call": return abiResults?.has(e.callee) ? "s" : null;
       case "dynCheck": return types.nativeDyn && e.type.kind === "f64" && e.value.kind === "libCall" && e.value.fn === "dyn.bitwise" && e.value.args[2]?.kind === "strLit" && BITWISE_OPS.has(e.value.args[2].value)
@@ -14255,6 +14281,28 @@ function emitModule(given: IrModule, opts: WasmGcEmitOptions, setPhase: (phase: 
       }
       default: return null;
     }
+  };
+  /** An expression its range proves an integer (so within ±2^53, never NaN or -0) as the exact i64 it equals, when it is
+   * built from int32 values, i64-shadowed or i32 locals, integer operators and Math.min/Math.max of such; else null. */
+  const i64Ranged = (e: IrExpr): number | null => {
+    if (e.kind !== "numLit" && !curRanges.get(e)) return null;
+    const clamp = e.kind === "libCall" && (e.fn === "math.min" || e.fn === "math.max") && e.args.length === 2;
+    if (!clamp && intKind(e) === "s") return m.i64.extend_s(i32Value(e));
+    if (isIntExpr(e, intTerm)) return i64Expr(e);
+    if (clamp) {
+      const left = i64Ranged(e.args[0]!); if (left === null) return null;
+      const right = i64Ranged(e.args[1]!); if (right === null) return null;
+      const a = temp(binaryen.i64), b = temp(binaryen.i64), I64 = binaryen.i64;
+      return m.block(null, [m.local.set(a, left), m.local.set(b, right),
+        m.select((e.fn === "math.min" ? m.i64.lt_s : m.i64.gt_s)(m.local.get(a, I64), m.local.get(b, I64)), m.local.get(a, I64), m.local.get(b, I64))], I64);
+    }
+    return null;
+  };
+  /** Math.min or Math.max of two int32-valued expressions, in i32 (both evaluated once, in order). */
+  const minMaxI32 = (min: boolean, left: IrExpr, right: IrExpr): number => {
+    const a = temp(i32), b = temp(i32);
+    return m.block(null, [m.local.set(a, i32Value(left)), m.local.set(b, i32Value(right)),
+      m.select((min ? m.i32.lt_s : m.i32.gt_s)(m.local.get(a, i32), m.local.get(b, i32)), m.local.get(a, i32), m.local.get(b, i32))], i32);
   };
   /** ToInt32(e) as an i32, natively when e is int-valued. */
   const i32Value = (e: IrExpr): number => {
@@ -14275,6 +14323,11 @@ function emitModule(given: IrModule, opts: WasmGcEmitOptions, setPhase: (phase: 
       if (r !== null) return r;
     }
     if (e.kind === "ternary" && intKind(e)) return m.if(expr(e.cond), i32Value(e.then), i32Value(e.else_));
+    if (e.kind === "libCall" && (e.fn === "math.min" || e.fn === "math.max") && e.args.length === 2 && intKind(e.args[0]!) === "s" && intKind(e.args[1]!) === "s")
+      return minMaxI32(e.fn === "math.min", e.args[0]!, e.args[1]!);
+    // A clamp its range proves an int32 over wider exact integers (`Math.min(H - 1, Math.max(0, y + k))` with `y` an
+    // i64-shadowed counter past int32's range): computed in i64, exact, then its low 32 bits.
+    if (e.kind === "libCall" && (e.fn === "math.min" || e.fn === "math.max") && rangeKind(e)) { const v = i64Ranged(e); if (v !== null) return m.i32.wrap(v); }
     // A sum, difference or product its range proves an int32 or uint32, over int-valued operands: the i32 operation is
     // exact (its result's low 32 bits are the value's), as is an unsigned remainder of a non-negative value.
     const ranged = rangeKind(e);
@@ -14580,14 +14633,33 @@ function emitModule(given: IrModule, opts: WasmGcEmitOptions, setPhase: (phase: 
   /** A class method whose body reads or writes typed-array or DataView storage (a layout view's accessor, `getX(i)` over
    * `this.view`): its direct calls may take the i32 ABI as a module function's do, its index arriving as an exact int32
    * and the access taking the integer bounds test. The method's other reaches (virtual dispatch, dyn code) keep a
-   * double-ABI copy of the body (I32Abi.dual). */
+   * double-ABI copy of the body (I32Abi.dual). Atomics on a typed array count as storage (an atomic cell's `add`), and
+   * so does a direct call of another such method (a work counter's `claim` over its cell's `add`): the integer that the
+   * storage answers then reaches the caller's caller as an int32. */
+  let storageMethods: Set<string> | null = null;
   const i32MethodCandidate = (f: IrFunction): boolean => {
-    if (!f.name.startsWith("%") || f.params[0]?.name !== "this") return false;
-    const dot = f.name.lastIndexOf("."), cls = classDef(f.name.slice(1, dot)), member = f.name.slice(dot + 1);
-    if (cls === undefined || member === "constructor" || !(cls.methods ?? []).includes(member)) return false;
-    let storage = false;
-    walkObjects(f.body, (v: any) => { if (v?.kind === "bytesIntrinsic" || v?.kind === "bytesGet" || v?.kind === "bytesSet") storage = true; });
-    return storage;
+    if (!storageMethods) {
+      const methods = mod.functions.filter(g => {
+        if (!g.name.startsWith("%") || g.params[0]?.name !== "this") return false;
+        const dot = g.name.lastIndexOf("."), cls = classDef(g.name.slice(1, dot)), member = g.name.slice(dot + 1);
+        return cls !== undefined && member !== "constructor" && (cls.methods ?? []).includes(member);
+      });
+      const found = new Set<string>(), callees = new Map<string, Set<string>>();
+      for (const g of methods) {
+        const called = new Set<string>();
+        walkObjects(g.body, (v: any) => {
+          if (v?.kind === "bytesIntrinsic" || v?.kind === "bytesGet" || v?.kind === "bytesSet" || v?.kind === "libCall" && typeof v.fn === "string" && v.fn.startsWith("atomics.")) found.add(g.name);
+          else if (v?.kind === "call" && typeof v.callee === "string") called.add(v.callee);
+        });
+        callees.set(g.name, called);
+      }
+      for (let changed = true; changed;) {
+        changed = false;
+        for (const [name, called] of callees) if (!found.has(name) && [...called].some(c => found.has(c))) { found.add(name); changed = true; }
+      }
+      storageMethods = found;
+    }
+    return storageMethods.has(f.name);
   };
   const computeI32Abi = (): void => {
     if (I32_ABI_OFF || shared || census) return;
@@ -14916,6 +14988,12 @@ function emitModule(given: IrModule, opts: WasmGcEmitOptions, setPhase: (phase: 
   /** i32 index of an IR index expression: -1 when it is not a valid index. An integer expression over shadowed and i32
    * locals (`t + 1`) is computed exactly in i64 and range-checked, instead of in f64 and converted back with checks. */
   const indexOf = (e: IrExpr): number => {
+    // An index its range proves an integer in [0, 2^31) is that i32 exactly: no double round trip or integrality test
+    // (`Math.min(H - 1, Math.max(0, y + k)) * W + x` over int32 terms).
+    if (e.kind !== "numLit" && e.kind !== "varRef") {
+      const r = curRanges.get(e);
+      if (r && r.min >= 0 && r.max < 2 ** 31) return i32Value(e);
+    }
     if (e.kind === "numLit" || e.kind === "varRef" && !fn.ints?.has(e.localId) || !isIntExpr(e, intTerm)) return index(expr(e));
     const v = temp(binaryen.i64);
     return m.block(null, [m.local.set(v, i64Expr(e)),
@@ -15213,8 +15291,11 @@ function emitModule(given: IrModule, opts: WasmGcEmitOptions, setPhase: (phase: 
         });
         return m.call(helper, [expr(args[0]!)], f64);
       }
-      case "math.min": return m.f64.min(expr(args[0]!), expr(args[1]!));
-      case "math.max": return m.f64.max(expr(args[0]!), expr(args[1]!));
+      case "math.min": case "math.max": {
+        // Over int32 operands: an i32 compare and select, with no NaN or signed-zero cases (f64.min/f64.max's).
+        if (args.length === 2 && intKind(args[0]!) === "s" && intKind(args[1]!) === "s") return m.f64.convert_s.i32(minMaxI32(name === "math.min", args[0]!, args[1]!));
+        return (name === "math.min" ? m.f64.min : m.f64.max)(expr(args[0]!), expr(args[1]!));
+      }
       case "math.round": return m.call(roundHelper(), [expr(args[0]!)], f64);
       case "math.sign": return m.call(signHelper(), [expr(args[0]!)], f64);
       case "math.imul": return m.f64.convert_s.i32(m.i32.mul(i32Value(args[0]!), i32Value(args[1]!)));

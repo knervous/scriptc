@@ -135,3 +135,30 @@ test("entry ranges seed eligible locals until a write replaces them", () => {
   const boxedProduct = bin("*", ref(), num(16));
   expect(analyzeIntegerRanges(fn([{ loc, kind: "return", value: boxedProduct }], true), new Set(), new Map([["x", { min: 0, max: 255 }]])).get(boxedProduct)).toBeNull();
 });
+
+test("a counter's update reads the range its condition proved: for (k = -3; k <= 3; k++)", () => {
+  const update = bin("+", ref(), num(1));
+  const other = (): IrStmt => ({ loc, kind: "assign", localId: "y", value: num(Infinity) });
+  const loop: IrStmt = {
+    loc, kind: "for",
+    init: { loc, kind: "varDecl", localId: "x", init: num(-3) },
+    cond: { ...bin("<=", ref(), num(3)), type: BOOL },
+    update: { loc, kind: "assign", localId: "x", value: update },
+    body: [other()],
+  };
+  const f = fn([loop]);
+  f.locals.push({ id: "y", name: "y", type: F64, mutable: true });
+  expect(analyzeIntegerRanges(f).get(update)).toEqual({ min: -2, max: 4 });
+  // A local the body writes keeps no condition fact at the update.
+  const yUpdate = bin("+", ref("y"), num(1));
+  const guarded: IrStmt = {
+    loc, kind: "for",
+    init: { loc, kind: "varDecl", localId: "x", init: num(0) },
+    cond: { ...bin("<", ref("y"), num(3)), type: BOOL },
+    update: { loc, kind: "assign", localId: "y", value: yUpdate },
+    body: [other()],
+  };
+  const g = fn([{ loc, kind: "assign", localId: "y", value: num(0) }, guarded]);
+  g.locals.push({ id: "y", name: "y", type: F64, mutable: true });
+  expect(analyzeIntegerRanges(g).get(yUpdate)).toBeNull();
+});

@@ -1,10 +1,10 @@
 {
   "app": "qoi",
-  "node": "v24.22.3",
+  "node": "v24.22.1",
   "platform": "linux-x64",
   "cpus": 4,
-  "cpu": "Intel(R) Xeon(R) Processor @ 2.10GHz",
-  "date": "2026-11-28T09:02:36.365Z",
+  "cpu": "Intel(R) Xeon(R) Processor @ 2.30GHz",
+  "date": "2026-11-28T16:52:24.801Z",
   "results": [
     "qoi bytes 553732 of 1048576 encoded 4085297757 round trip exact"
   ],
@@ -12,58 +12,58 @@
     "js": {
       "match": true,
       "times": {
-        "time.encode": 16.5,
-        "time.decode": 16.3,
-        "time": 32.8
+        "time.encode": 19.6,
+        "time.decode": 18,
+        "time": 37.7
       }
     },
     "js+fallback": {
       "match": true,
       "times": {
-        "time.encode": 18,
-        "time.decode": 19.5,
-        "time": 37.6
+        "time.encode": 15.7,
+        "time.decode": 16.8,
+        "time": 32.5
       }
     },
     "wasmgc-base": {
       "match": true,
       "times": {
-        "time.encode": 51.3,
-        "time.decode": 58,
-        "time": 109.3
+        "time.encode": 49.6,
+        "time.decode": 54.4,
+        "time": 103.9
       },
-      "bytes": 13693,
-      "compileMs": 1146
+      "bytes": 13850,
+      "compileMs": 1110
     },
     "wasmgc": {
       "match": true,
       "times": {
-        "time.encode": 55.5,
-        "time.decode": 61.1,
-        "time": 116.6
+        "time.encode": 49.7,
+        "time.decode": 56.3,
+        "time": 106
       },
-      "bytes": 13247,
-      "compileMs": 1327
+      "bytes": 13339,
+      "compileMs": 1182
     },
     "native-base": {
       "match": true,
       "times": {
-        "time.encode": 20.2,
-        "time.decode": 14,
-        "time": 34.2
+        "time.encode": 12.8,
+        "time.decode": 13.2,
+        "time": 26
       },
       "bytes": 416976,
-      "compileMs": 1083
+      "compileMs": 1016
     },
     "native": {
       "match": true,
       "times": {
-        "time.encode": 8.6,
-        "time.decode": 14.6,
-        "time": 23.2
+        "time.encode": 7.4,
+        "time.decode": 13.6,
+        "time": 21
       },
       "bytes": 412160,
-      "compileMs": 1061
+      "compileMs": 1098
     }
   }
 }

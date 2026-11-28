@@ -1,10 +1,10 @@
 {
   "app": "lz4",
-  "node": "v24.22.3",
+  "node": "v24.22.1",
   "platform": "linux-x64",
   "cpus": 4,
-  "cpu": "Intel(R) Xeon(R) Processor @ 2.10GHz",
-  "date": "2026-11-28T09:02:42.958Z",
+  "cpu": "Intel(R) Xeon(R) Processor @ 2.30GHz",
+  "date": "2026-11-28T16:52:31.252Z",
   "results": [
     "lz4 bytes 1008099 of 2097152 packed 858022416 round trip exact"
   ],
@@ -12,58 +12,58 @@
     "js": {
       "match": true,
       "times": {
-        "time.compress": 82.8,
-        "time.decompress": 239.4,
-        "time": 322.2
+        "time.compress": 61.2,
+        "time.decompress": 206.7,
+        "time": 268
       }
     },
     "js+fallback": {
       "match": true,
       "times": {
-        "time.compress": 65.3,
-        "time.decompress": 224,
-        "time": 289.3
+        "time.compress": 57.1,
+        "time.decompress": 247.8,
+        "time": 304.9
       }
     },
     "wasmgc-base": {
       "match": true,
       "times": {
-        "time.compress": 127.1,
-        "time.decompress": 227,
-        "time": 354.1
+        "time.compress": 118,
+        "time.decompress": 178.8,
+        "time": 296.7
       },
-      "bytes": 8758,
-      "compileMs": 984
+      "bytes": 8761,
+      "compileMs": 1090
     },
     "wasmgc": {
       "match": true,
       "times": {
-        "time.compress": 74.9,
-        "time.decompress": 244.4,
-        "time": 319.4
+        "time.compress": 67.8,
+        "time.decompress": 180.6,
+        "time": 248.5
       },
-      "bytes": 8617,
-      "compileMs": 1116
+      "bytes": 8612,
+      "compileMs": 1026
     },
     "native-base": {
       "match": true,
       "times": {
-        "time.compress": 71.6,
-        "time.decompress": 151.1,
-        "time": 222.6
+        "time.compress": 63.6,
+        "time.decompress": 135,
+        "time": 198.5
       },
-      "bytes": 435728,
-      "compileMs": 996
+      "bytes": 435792,
+      "compileMs": 941
     },
     "native": {
       "match": true,
       "times": {
-        "time.compress": 51.1,
-        "time.decompress": 171.2,
-        "time": 222.3
+        "time.compress": 59,
+        "time.decompress": 212.5,
+        "time": 271.5
       },
-      "bytes": 435232,
-      "compileMs": 1018
+      "bytes": 435896,
+      "compileMs": 1069
     }
   }
 }

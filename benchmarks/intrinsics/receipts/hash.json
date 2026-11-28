@@ -1,10 +1,10 @@
 {
   "app": "hash",
-  "node": "v24.22.3",
+  "node": "v24.22.1",
   "platform": "linux-x64",
   "cpus": 4,
-  "cpu": "Intel(R) Xeon(R) Processor @ 2.10GHz",
-  "date": "2026-11-28T09:02:30.886Z",
+  "cpu": "Intel(R) Xeon(R) Processor @ 2.30GHz",
+  "date": "2026-11-28T16:52:19.622Z",
   "results": [
     "xxh32 2799302071 crc32 3593467393 xxh64 64066dcfcdb4c131",
     "xxh32 of 'abc' 852579327 xxh64 of 'abc' 44bc2cf5ad770999"
@@ -13,64 +13,64 @@
     "js": {
       "match": true,
       "times": {
-        "time.xxh32": 34.9,
-        "time.crc32": 97.8,
-        "time.xxh64": 12.9,
-        "time": 145.6
+        "time.xxh32": 28.5,
+        "time.crc32": 90.1,
+        "time.xxh64": 12.3,
+        "time": 130.9
       }
     },
     "js+fallback": {
       "match": true,
       "times": {
-        "time.xxh32": 38.6,
-        "time.crc32": 96.8,
-        "time.xxh64": 18.3,
-        "time": 153.7
+        "time.xxh32": 36.6,
+        "time.crc32": 93.9,
+        "time.xxh64": 16.6,
+        "time": 147
       }
     },
     "wasmgc-base": {
       "match": true,
       "times": {
-        "time.xxh32": 317.9,
-        "time.crc32": 129.9,
-        "time.xxh64": 23.7,
-        "time": 471.6
+        "time.xxh32": 289.7,
+        "time.crc32": 112,
+        "time.xxh64": 23.2,
+        "time": 424.9
       },
-      "bytes": 7965,
-      "compileMs": 1497
+      "bytes": 7991,
+      "compileMs": 1517
     },
     "wasmgc": {
       "match": true,
       "times": {
-        "time.xxh32": 89.4,
-        "time.crc32": 132.1,
-        "time.xxh64": 8.4,
-        "time": 229.9
+        "time.xxh32": 79.8,
+        "time.crc32": 111.6,
+        "time.xxh64": 6.2,
+        "time": 197.6
       },
-      "bytes": 6697,
-      "compileMs": 1066
+      "bytes": 6724,
+      "compileMs": 1125
     },
     "native-base": {
       "match": true,
       "times": {
-        "time.xxh32": 63.2,
-        "time.crc32": 96.2,
-        "time.xxh64": 7.5,
-        "time": 166.9
+        "time.xxh32": 95,
+        "time.crc32": 91.3,
+        "time.xxh64": 11.3,
+        "time": 197.6
       },
       "bytes": 457816,
-      "compileMs": 1363
+      "compileMs": 1470
     },
     "native": {
       "match": true,
       "times": {
-        "time.xxh32": 45.6,
-        "time.crc32": 96.1,
-        "time.xxh64": 1.7,
-        "time": 143.4
+        "time.xxh32": 29.5,
+        "time.crc32": 88.2,
+        "time.xxh64": 1.5,
+        "time": 119.2
       },
       "bytes": 438496,
-      "compileMs": 1104
+      "compileMs": 1122
     }
   }
 }

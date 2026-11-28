@@ -255,8 +255,21 @@ export function analyzeIntegerRanges(fn: IrFunction, inBounds: ReadonlySet<unkno
           if (s.cond) refine(s.cond, true, inside);
           body(s.body, inside);
           // Continue can bypass any body assignment. The update therefore
-          // starts from header invariants rather than the body's exit facts.
-          if (s.update) body([s.update], new Map(loop));
+          // starts from header invariants rather than the body's exit facts,
+          // plus what the condition proved about bindings the body never
+          // writes (they still hold the values the condition tested): the
+          // counter of `for (k = -3; k <= 3; k++)` is in [-3, 3] there.
+          if (s.update) {
+            const entry = new Map(loop);
+            if (s.cond) {
+              const refined = new Map(loop);
+              refine(s.cond, true, refined);
+              const written = new Set<string>();
+              for (const node of s.body) for (const id of writes(node)) written.add(id);
+              for (const [id, range] of refined) if (!written.has(id)) entry.set(id, range);
+            }
+            body([s.update], entry);
+          }
           invalidate(facts, [s]); break;
         }
         case "while": case "doWhile": {

@@ -4,7 +4,7 @@
   "platform": "linux-x64",
   "cpus": 4,
   "cpu": "Intel(R) Xeon(R) Processor @ 2.30GHz",
-  "date": "2026-11-28T13:38:13.579Z",
+  "date": "2026-11-28T16:52:47.439Z",
   "results": [
     "packets 300 bytes 1125685 per packet 3752 hash 3139431730 mirror equal"
   ],
@@ -12,46 +12,46 @@
     "js": {
       "match": true,
       "times": {
-        "time": 18
+        "time": 23.4
       }
     },
     "js+fallback": {
       "match": true,
       "times": {
-        "time": 21.5
+        "time": 28.9
       }
     },
     "wasmgc-base": {
       "match": true,
       "times": {
-        "time": 21.4
+        "time": 15.2
       },
-      "bytes": 7012,
-      "compileMs": 1099
+      "bytes": 7095,
+      "compileMs": 1017
     },
     "wasmgc": {
       "match": true,
       "times": {
-        "time": 29.9
+        "time": 25.1
       },
-      "bytes": 8406,
-      "compileMs": 969
+      "bytes": 8567,
+      "compileMs": 1023
     },
     "native-base": {
       "match": true,
       "times": {
-        "time": 5.2
+        "time": 9.5
       },
       "bytes": 445664,
-      "compileMs": 1176
+      "compileMs": 980
     },
     "native": {
       "match": true,
       "times": {
-        "time": 13.3
+        "time": 17.2
       },
       "bytes": 444128,
-      "compileMs": 1119
+      "compileMs": 1093
     }
   }
 }

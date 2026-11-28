@@ -50,3 +50,27 @@ test("accesses at a stable base and bounded offsets run behind one guard, as the
   // A base the body writes, fewer than three accesses, or a base declared in a loop body: unchanged.
   for (const name of ["moved", "two", "looped"]) expect(fn(mod, name)).toBe(fn(before, name));
 });
+
+test("a never-assigned number parameter the index math needs as an integer is tested once in the guard", async () => {
+  // y0 = band * 4 has an integer range only when band is an integer: the plain ranges prove nothing here.
+  const mod = versionTypedArrayBounds(await lower(`
+    function column(t: Uint16Array, band: number, x: number): number {
+      const y0 = band * 4;
+      let s = 0;
+      for (let y = y0; y < y0 + 4; y++)
+        for (let k = -1; k <= 1; k++) s += t[Math.min(9, Math.max(0, y + k)) * 4 + (x & 3)]! + t[Math.min(9, Math.max(0, y)) * 4]! + t[(x & 3)]!;
+      return s;
+    }
+    const t = new Uint16Array(40);
+    for (let i = 0; i < t.length; i++) t[i] = i;
+    console.log(column(t, 1, 2), column(t, 0.5, 2), column(t, -0, 1));
+  `));
+  const f = fn(mod, "column");
+  expect(proven(f)).toBe(3);
+  // The guard tests band once, as an int32, and the array's length against the largest index (39).
+  const guard = f.body.find((s): s is IrStmt & { kind: "if" } => s.kind === "if")!;
+  const text = JSON.stringify(guard.cond);
+  expect(text).toContain('"op":"|"');
+  expect(text).toContain('"localId":"band.0"');
+  expect(text).not.toContain('"localId":"x.0"');
+});

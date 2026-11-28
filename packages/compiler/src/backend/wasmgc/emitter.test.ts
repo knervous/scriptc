@@ -4,15 +4,16 @@ import { join } from "node:path";
 import { expect, test } from "vitest";
 import { compile, deserializeModule } from "../../index.js";
 import type { IrModule } from "../../ir/ir.js";
+import binaryen from "binaryen";
 import { emitWasmGcModule } from "./emitter.js";
 
-async function lower(source: string): Promise<IrModule> {
+async function lower(source: string, options: { browser?: boolean } = {}): Promise<IrModule> {
   const dir = await mkdtemp(join(tmpdir(), "scriptc-wasmgc-emitter-"));
   try {
     const entry = join(dir, "main.ts");
     const outPath = join(dir, "main.ir.json");
     await writeFile(entry, source);
-    const result = await compile(entry, { outDir: dir, outPath, outputKind: "ir" });
+    const result = await compile(entry, { outDir: dir, outPath, outputKind: "ir", ...options });
     if (!result.ok) throw new Error(result.diagnostics.map((d) => `${d.code}: ${d.message}`).join("\n"));
     return deserializeModule(await readFile(outPath, "utf8"));
   } finally {
@@ -23,7 +24,8 @@ async function lower(source: string): Promise<IrModule> {
 /** The text of the emitted function whose name ends in `name` (the i32-ABI body when there is one). */
 function funcText(text: string, name: string): string {
   const funcs = text.split(/\n(?= \(func )/).filter((b) => b.startsWith(" (func "));
-  const named = (b: string) => b.slice(0, b.indexOf("\n")).split(" ")[2]!;
+  // (a function the entry calls that holds a loop carries the once-loop suffix: it stays out of line)
+  const named = (b: string) => b.slice(0, b.indexOf("\n")).split(" ")[2]!.replace(/\.once-loop$/, "");
   const found = funcs.find((b) => named(b) === `$i32:${name}`) ?? funcs.find((b) => named(b) === `$${name}`);
   if (!found) throw new Error(`no function ${name}`);
   return found;
@@ -75,3 +77,61 @@ test("a bounds-versioned body keeps Float32Array reads used in f64 math across a
   // f32 (an f64 copy of the coefficients measured slower in the fork's mat4 multiply-into).
   expect(promotedLocalReads(funcText(text, "into"))).toBe(8);
 });
+
+test("an atomic work counter's claims reach a callee as int32, and int32 clamps compare in i32", async () => {
+  // The browser target lowers Atomics for WasmGC (an IR-only compile otherwise refuses them).
+  const mod = await lower(`
+    class Cell {
+      readonly cells: Int32Array; readonly index: number;
+      constructor(cells: Int32Array, index: number) { this.cells = cells; this.index = index; }
+      add(v: number): number { return Atomics.add(this.cells, this.index, v); }
+    }
+    class Counter {
+      readonly cell: Cell; readonly total: number;
+      constructor(cells: Int32Array, total: number) { this.cell = new Cell(cells, 0); this.total = total; }
+      claim(): number { const job = this.cell.add(1); return job < this.total ? job : -1; }
+    }
+    function work(out: Uint8Array, band: number): void {
+      for (let x = 0; x < 8; x++) out[band * 8 + Math.min(7, Math.max(0, x - 1))] = x;
+    }
+    const out = new Uint8Array(64), counter = new Counter(new Int32Array(1), 8);
+    for (let band = counter.claim(); band >= 0; band = counter.claim()) work(out, band);
+    console.log(out.join(","));
+  `, { browser: true });
+  const text = emitWasmGcModule(mod, { browser: true, text: true }).text!;
+  // The claim (an Atomics.add result through two methods) is an int32 at work's call site: work takes the i32 ABI.
+  expect(text).toMatch(/\(func \$i32:work(\.once-loop)? /);
+  expect(text).toMatch(/\(func \$i32:_25Counter\.claim /);
+  // Math.min/Math.max of int32 operands: compare and select, no f64.min or f64.max.
+  const work = funcText(text, "work");
+  expect(work).not.toMatch(/f64\.(min|max)/);
+  expect(work).toMatch(/\(i32\.(lt_s|gt_s)/);
+});
+
+test("a loop the program's top level calls stays a function of its own (wasm has no on-stack replacement)", async () => {
+  const dir = await mkdtemp(join(tmpdir(), "scriptc-wasmgc-once-"));
+  try {
+    const entry = join(dir, "main.ts"), outPath = join(dir, "main.wasm");
+    // kernel has one call site, so single-caller inlining would fold it into the entry, which runs once: its loop
+    // would then run in the engine's baseline code for the whole program.
+    await writeFile(entry, `
+      function kernel(a: Float64Array): number { let s = 0; for (let i = 0; i < a.length; i++) s += a[i]! * 2; return s; }
+      const a = new Float64Array(100);
+      for (let i = 0; i < a.length; i++) a[i] = i;
+      let t = 0;
+      for (let r = 0; r < 3; r++) t += kernel(a);
+      console.log(t);
+    `);
+    const result = await compile(entry, { outDir: dir, outPath, outputKind: "wasmgc", release: true });
+    if (!result.ok) throw new Error(result.diagnostics.map((d) => `${d.code}: ${d.message}`).join("\n"));
+    const module = binaryen.readBinary(await readFile(outPath));
+    module.setFeatures(binaryen.Features.All);
+    const text = module.emitText();
+    const funcs = text.split(/\n(?= \(func )/).filter((b) => b.startsWith(" (func "));
+    const loops = funcs.map((b) => (b.match(/\(loop /g) ?? []).length).filter((n) => n > 0);
+    // The kernel's loop in one function, the entry's two loops in another.
+    expect(loops.sort()).toEqual([1, 2]);
+  } finally {
+    await rm(dir, { recursive: true, force: true });
+  }
+}, 120000);

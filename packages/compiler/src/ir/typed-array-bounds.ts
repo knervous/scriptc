@@ -37,6 +37,7 @@ const MAX_GUARDS = 6;
 const MAX_REGION_COST = 1200;
 const MAX_FUNCTION_COST = 2400;
 const INT32_MAX = 2147483647;
+const SIGNED_RANGE: IntegerRange = { min: -2147483648, max: 2147483647 };
 
 /** The accesses (bytesIntrinsic get, bytesSet) of the versioned copies that are in bounds, to the base local their
  * guard proved an int32 (as the copy names it), or null. */
@@ -54,12 +55,18 @@ export function versionTypedArrayBounds(mod: IrModule): IrModule {
 
 type Access = (IrExpr & { kind: "bytesIntrinsic" }) | (IrStmt & { kind: "bytesSet" });
 
-/** One access's guard requirement: receiver `p`, base `x` (or null), offsets [lo, hi]. */
-interface Need { access: Access; p: string; x: string | null; lo: number; hi: number }
+/** One access's guard requirement: receiver `p`, base `x` (or null), offsets [lo, hi]; its index and the declarations
+ * it saw, to decompose it again. */
+interface Need { access: Access; p: string; x: string | null; lo: number; hi: number; index: IrExpr; visible: ReadonlyMap<string, IrExpr> }
 
 interface Facts {
   fn: IrFunction;
   ranges: ReadonlyMap<IrExpr, IntegerRange | null>;
+  /** The ranges with the never-assigned number parameters entering as int32, and those parameters (see list()). */
+  assumedRanges: ReadonlyMap<IrExpr, IntegerRange | null> | null;
+  assumable: ReadonlySet<string>;
+  /** Set while a list is tried under assumedRanges: the parameters whose int32 test the guard adds. */
+  assume: ReadonlySet<string> | null;
   locals: ReadonlyMap<string, IrLocal>;
   /** Locals nothing assigns: a parameter, or a local every declaration of which initializes it. */
   single: ReadonlySet<string>;
@@ -102,10 +109,20 @@ function rewriteFunction(fn: IrFunction): IrFunction {
     const d = decls.get(l.id) ?? 0;
     if (params.has(l.id) ? d === 0 : d >= 1 && !uninitialized.has(l.id)) single.add(l.id);
   }
-  const facts: Facts = { fn, ranges: analyzeIntegerRanges(fn), locals, single, budget: MAX_FUNCTION_COST, added: [], used: new Set(fn.locals.map((l) => l.id)) };
+  // Number parameters nothing assigns: a guard can test that each is an int32 (`p === (p | 0)`) once, and the copy then
+  // holds every fact that follows from it (`band * BAND` an integer, so `Math.min(H - 1, Math.max(0, y + k)) * W + x`
+  // has a range). Only tried where the plain ranges version nothing, so a region that qualifies today keeps its guard.
+  const assumable = new Set(fn.params.filter((p) => p.type.kind === "f64" && single.has(p.localId)).map((p) => p.localId));
+  const facts: Facts = { fn, ranges: analyzeIntegerRanges(fn), locals, single, budget: MAX_FUNCTION_COST, added: [], used: new Set(fn.locals.map((l) => l.id)),
+    assumedRanges: assumable.size ? analyzeIntegerRanges(fn, new Set(), new Map([...assumable].map((id) => [id, SIGNED_RANGE]))) : null, assumable, assume: null };
   let changed = false;
   const list = (stmts: IrStmt[], visible: ReadonlyMap<string, IrExpr>): IrStmt[] => {
-    const versioned = versionList(stmts, visible, facts);
+    let versioned = versionList(stmts, visible, facts);
+    if (versioned === null && facts.assumedRanges !== null) {
+      const plain = facts.ranges;
+      facts.ranges = facts.assumedRanges; facts.assume = facts.assumable;
+      try { versioned = versionList(stmts, visible, facts); } finally { facts.ranges = plain; facts.assume = null; }
+    }
     if (versioned !== null) changed = true;
     // The statements before a versioned region (all of them when there is none) may hold lists of their own.
     const head = versioned === null ? stmts.length : versioned.at;
@@ -201,7 +218,7 @@ function collect(s: IrStmt, visible: ReadonlyMap<string, IrExpr>, facts: Facts, 
     const p = receiverOf(recv, visible, facts);
     if (p === null) return;
     const d = decompose(index, visible, facts);
-    if (d !== null) out.push({ access, p, ...d });
+    if (d !== null) out.push({ access, p, ...d, index, visible: new Map(visible) });
   };
   const list = (stmts: IrStmt[], from: ReadonlyMap<string, IrExpr> = visible): void => {
     const scope = new Map(from);
@@ -316,6 +333,26 @@ function versionList(stmts: IrStmt[], visible: ReadonlyMap<string, IrExpr>, fact
     const x = () => ref(g.x!);
     // x >= -lo and x < 2^31 - 1 - hi first (they bound x for the copy's ranges), then x an integer, then the length.
     tests.push(bin(">=", x(), num(-g.lo)), bin("<", x(), num(INT32_MAX - g.hi)), bin("===", bin("|", x(), num(0)), x()), bin("<", bin("+", x(), num(g.hi)), length(g.p)));
+  }
+  // Under the parameter assumption: each assumed parameter the region reads is an int32 (-0 passes, and reads as 0 in
+  // the index math the assumption proved, as it does without it).
+  // A parameter the proofs do not need (every chosen access decomposes within its group's offsets without assuming it)
+  // is not tested: a fractional argument there must not keep the region off its fast copy.
+  if (facts.assume !== null) {
+    const read = new Set<string>();
+    everyStmtList(region, { expr: (e) => { if (e.kind === "varRef" && facts.assume!.has(e.localId)) read.add(e.localId); return true; }, stmt: () => true });
+    const assumed = new Set(read);
+    for (const id of read) {
+      const others = new Set([...assumed].filter((a) => a !== id));
+      const ranges = analyzeIntegerRanges(facts.fn, new Set(), new Map([...others].map((a) => [a, SIGNED_RANGE])));
+      const saved = facts.ranges;
+      facts.ranges = ranges;
+      try {
+        const holds = kept.every((g) => g.needs.every((n) => { const d = decompose(n.index, n.visible, facts); return d !== null && d.x === n.x && d.lo >= g.lo && d.hi <= g.hi; }));
+        if (holds) assumed.delete(id);
+      } finally { facts.ranges = saved; }
+    }
+    for (const id of [...assumed].reverse()) tests.unshift(bin("===", bin("|", ref(id), num(0)), ref(id)));
   }
   const cond = tests.reduce((all, test): IrExpr => ({ kind: "logical", op: "&&", left: all, right: test, type: BOOL, loc }));
   // The fast copy's own locals (declared in the region, read nowhere else) take fresh ids, so the backend types them

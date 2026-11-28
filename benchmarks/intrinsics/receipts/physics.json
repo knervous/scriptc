@@ -1,10 +1,10 @@
 {
   "app": "physics",
-  "node": "v24.22.3",
+  "node": "v24.22.1",
   "platform": "linux-x64",
   "cpus": 4,
-  "cpu": "Intel(R) Xeon(R) Processor @ 2.10GHz",
-  "date": "2026-11-28T09:02:55.436Z",
+  "cpu": "Intel(R) Xeon(R) Processor @ 2.30GHz",
+  "date": "2026-11-28T16:52:42.868Z",
   "results": [
     "state hashes b92cc968 c3416bc8 e97dc6b5 51db6ee6",
     "body 0 25.646762624708504 4.742620337933584 -0.5632975382999408"
@@ -13,46 +13,46 @@
     "js": {
       "match": true,
       "times": {
-        "time": 128
+        "time": 82.5
       }
     },
     "js+fallback": {
       "match": true,
       "times": {
-        "time": 169.8
+        "time": 164.7
       }
     },
     "wasmgc-base": {
       "match": true,
       "times": {
-        "time": 206
+        "time": 218.4
       },
-      "bytes": 17702,
-      "compileMs": 1252
+      "bytes": 17764,
+      "compileMs": 1215
     },
     "wasmgc": {
       "match": true,
       "times": {
-        "time": 212.1
+        "time": 232.9
       },
-      "bytes": 20462,
-      "compileMs": 1847
+      "bytes": 20635,
+      "compileMs": 1859
     },
     "native-base": {
       "match": true,
       "times": {
-        "time": 49.8
+        "time": 43.5
       },
       "bytes": 386112,
-      "compileMs": 1097
+      "compileMs": 1089
     },
     "native": {
       "match": true,
       "times": {
-        "time": 74.8
+        "time": 64.9
       },
       "bytes": 481376,
-      "compileMs": 1454
+      "compileMs": 1389
     }
   }
 }
