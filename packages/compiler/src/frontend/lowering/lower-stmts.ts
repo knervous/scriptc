@@ -5462,6 +5462,14 @@ export function isStrictDelete(node: ts.DeleteExpression): boolean {
   function lowerCjsSingleValueExport(lowerer: Lowerer, expr: ts.BinaryExpression, loc: SrcLoc): IrStmt | null {
     let rhs: ts.Expression = expr.right;
     while (ts.isParenthesizedExpression(rhs)) rhs = rhs.expression;
+    // `module.exports = require("./impl")` — a whole-module re-export (a NODE_ENV-switched entry once `define` folds
+    // its switch): importers alias straight to the required module's exports, so the statement is that module's
+    // guarded %init call at this position, as a bare `require("./impl");` is.
+    if (ts.isCallExpression(rhs) && ts.isIdentifier(rhs.expression) && requireSpecOf(rhs) !== null &&
+        createRequireCalleeFileOf(lowerer, rhs.expression) === null) {
+      const init = lowerer.requireInitStmt(requireSpecOf(rhs)!, rhs);
+      if (init) return init;
+    }
     if (ts.isIdentifier(rhs)) {
       const sym = lowerer.resolveValueSymbol(rhs);
       if (!sym) return null;

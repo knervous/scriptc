@@ -63,7 +63,7 @@ import { npmStaticDeclarationReexports, npmStaticRuntimeClassTargets, parseNpmSt
 import type { FrontendServices } from "./services.js";
 import type { NpmStaticDeclarationFunctions, NpmStaticDeclarationOverloads, NpmStaticDeclarationProperties, NpmStaticOverloadSignature } from "./npm-static-declaration-syntax.js";
 import { provenanceEntryFor, provenancePaths } from "./provenance-registry.js";
-import { cjsLexedExportsOfFile, cjsVisibleNames } from "./cjs-syntax.js";
+import { cjsLexedExportsOfFile, cjsVisibleNames, isModuleExports } from "./cjs-syntax.js";
 import {
   ambientDtsPath,
   fallbackDtsPath,
@@ -1126,7 +1126,16 @@ function requiresOf7(
 ): { spec: string; node: ts.Node; decl: ts.VariableDeclaration | null }[] {
   if (ts.isExpressionStatement(stmt)) {
     const spec = requireSpecOf7(stmt.expression);
-    return spec !== null ? [{ spec, node: stmt.expression, decl: null }] : [];
+    if (spec !== null) return [{ spec, node: stmt.expression, decl: null }];
+    // `module.exports = require("./impl")`: a whole-module re-export (a NODE_ENV-switched entry once its switch
+    // folds) is a module edge too; importers bind through it to the required module's exports.
+    const e = stmt.expression;
+    if (ts.isBinaryExpression(e) && e.operatorToken.kind === ts.SyntaxKind.EqualsToken && isModuleExports(e.left)) {
+      const rhs = stripRequireCasts7(e.right);
+      const reexport = ts.isCallExpression(rhs) ? requireSpecOf7(rhs) : null;
+      if (reexport !== null) return [{ spec: reexport, node: rhs, decl: null }];
+    }
+    return [];
   }
   if (!ts.isVariableStatement(stmt)) return [];
   const out: { spec: string; node: ts.Node; decl: ts.VariableDeclaration | null }[] = [];

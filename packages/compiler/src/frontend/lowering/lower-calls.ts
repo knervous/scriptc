@@ -6796,6 +6796,11 @@ function lowerOptionalStringNumber(
     const getR = (id: string) => lowerer.shapes.get(id);
     const getU = (id: string) => lowerer.unions.get(id);
     const anyJsvalSpread = spreadParts.some((p) => p.v.type.kind === "jsval");
+    // Web host: a dynamic callee (a compiled npm function, `createElement(type, props, ...children)`) spread a page
+    // array: the page spreads it (the island lane below), calling the compiled function through its page wrapper.
+    if (anyJsvalSpread && callee.type.kind === "dyn" && browserTarget() && nativeDyn() && !hostHandlesEnabled()) {
+      callee = lowerer.coerceToExpected(callee, JSVAL);
+    }
     if (
       !anyJsvalSpread &&
       (callee.type.kind === "dyn" || (callee.type.kind === "func" && canBoxFuncIntoDyn(callee.type, getR, getU))) &&

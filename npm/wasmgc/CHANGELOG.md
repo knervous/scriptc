@@ -9,6 +9,10 @@
 - `--compile-packages <list>` (and `compilePackages` in `compile()`) compiles the named npm packages' JavaScript into the module instead of leaving it as npm JavaScript the page supplies.
 - The README describes how a page hands the npm packages a page program imports to the loader (`modules`).
 - A JavaScript function in a build without `--browser` no longer makes an invalid module when it never reads `this`.
+- An object or array literal passed straight to a page function (`createElement(type, { className }, ...)`) is built as a plain page object in one host call, not as a compiled object the page reads through a proxy. A page program built against published React makes about a third of the host calls it did, and its table operations run 1.3–2.9 times faster (create1k 2.5).
+- A compiled function called with a page value spread into its arguments (`createElement(type, props, ...children)` with React compiled in) builds instead of being refused.
+- A page object handed to a typed function whose record parameter has a string field only ever set from literals no longer traps.
+- `--compile-packages` follows a CommonJS entry that re-exports another file (`module.exports = require("./impl")`), and, with the compiler's `define`, one that picks its build from `process.env.NODE_ENV`.
 
 ## 0.1.0 (2026-11-28)
 

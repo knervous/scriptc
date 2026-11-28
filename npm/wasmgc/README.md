@@ -130,7 +130,7 @@ const program = await instantiateWasmGc(bytes, {
 await program.main();
 ```
 
-The program's own code is compiled; each call into the package, and each value it hands over, crosses to the page. `--compile-packages <list>` (`compilePackages` in `compile`) compiles the named packages' JavaScript into the module instead, so nothing crosses. It takes packages whose CommonJS or ES module exports the compiler can follow; React does not compile this way yet (its entry chooses its build with `process.env.NODE_ENV` at run time), so React stays npm JavaScript.
+The program's own code is compiled; each call into the package, and each value it hands over, crosses to the page. `--compile-packages <list>` (`compilePackages` in `compile`) compiles the named packages' JavaScript into the module instead, so nothing crosses. It takes packages whose CommonJS or ES module exports the compiler can follow. A package whose entry chooses its build with `process.env.NODE_ENV` at load time, as React's does, needs that name defined (the compiler's `define` option, which the package does not expose yet), and for React the result is slower than leaving it npm JavaScript, so React stays npm JavaScript.
 
 ## The compiler as a function
 
@@ -232,12 +232,12 @@ The same table program (js-framework-benchmark's operations) was measured on fou
 | SolidJS | per-call, published | 1.72 | 1.40 | 1.99 | 4.25 | 2.09 | 2.17 | 1.79 | 1.16 |
 | LUI | stream | 1.66 | 1.53 | 1.13 | 1.19 | 1.04 | 1.28 | 1.59 | 1.75 |
 | LUI | per-call | 1.54 | 1.28 | 1.19 | 1.20 | 1.04 | 1.26 | 1.59 | 1.08 |
-| React | published, npm JavaScript | 3.29 | 2.23 | 4.98 | 7.71 | 1.48 | 5.37 | 3.75 | 1.07 |
+| React | published, npm JavaScript | 1.45 | 1.22 | 2.32 | 2.72 | 1.12 | 2.17 | 1.49 | 0.99 |
 | Svelte 5 | per-call, published | 2.48 | 2.55 | 2.46 | 8.60 | 3.05 | 2.66 | 2.94 | 1.78 |
 
 - **SolidJS** fits best: fine-grained updates, templates the bridge clones in one command, and a runtime small enough to type. It is also the fastest in absolute terms, as JavaScript and compiled.
 - **LUI** (`@scriptw/lui` on npm) is written for this compiler and needs no port; its compiled ratios are close to Solid's. `scriptw build --browser` compiles it from the installed package, and `--conditions dom-stream` puts it on the DOM stream.
-- **React** works out of the box: the app is compiled, and React itself stays the page's npm JavaScript (see [npm packages](#npm-packages-in-a-page-program)). The gap is the boundary: each element a compiled component creates is a call into React with its props converted. Compiling React into the module does not work yet. The repository's strict TypeScript port of React's client packages (`packages/react-ts`), on the DOM stream, shows what compiling and typing React buys: 2.27, 1.43, 2.10, 3.14, 1.11, 2.94, 2.07 and 1.00 on the same operations.
+- **React** works out of the box: `npx scriptw build app.ts --browser --release`, with the page handing React to the loader (see [npm packages](#npm-packages-in-a-page-program)). The app is compiled and React itself stays the page's npm JavaScript; the gap is the boundary, about 31 host calls per table row (each element a compiled component creates is a call into React). Compiling React into the module is slower (1.5–13 times React's JavaScript on the same operations), because React's internals then compile untyped. The repository's strict TypeScript port of React's client packages (`packages/react-ts`), on the DOM stream, shows what typing React's internals buys: 2.27, 1.43, 2.10, 3.14, 1.11, 2.94, 2.07 and 1.00 on the same operations.
 - **Svelte 5** compiles from its published runtime, untyped, so it pays dynamic dispatch throughout.
 
 The full results (every lane, host calls per operation, where the time goes, and what was tried) are in `benchmarks/frameworks/RESULTS.md` in the repository. The harness is `benchmarks/frameworks` (with React's in `benchmarks/react-dom`), and `node benchmarks/frameworks/run.mjs` reproduces it.

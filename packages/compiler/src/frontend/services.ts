@@ -5,6 +5,7 @@ import { NpmFetchAnalyzer, type FetchAnalysisModule } from "./npm-fetch-analysis
 import { rewriteBundlerCjsWithParser } from "./npm-static-rewrite-host.js";
 import { isBundlerCjsCandidate } from "./npm-static-rewrite-syntax.js";
 import * as syntax from "./npm-static-declaration-syntax.js";
+import { applyNpmStaticDefinedBranches } from "./npm-static-defined-branches.js";
 import type { SourceFile } from "./ts7/ast-types.js";
 
 /** Evaluate an isolated, self-contained TypeScript callback under a finite
@@ -69,6 +70,11 @@ export class FrontendServices {
     this.ensureOpen();
     if (!isBundlerCjsCandidate(source)) return null;
     return rewriteBundlerCjsWithParser(this.sourceParser(), source, path);
+  }
+  definedBranches(path: string, source: string, table: ReadonlyMap<string, string | number | boolean | null>): string | null {
+    this.ensureOpen();
+    if (table.size === 0) return null;
+    return applyNpmStaticDefinedBranches(this.parse(path, source, "js"), source, table);
   }
   shadowedModuleParams(path: string, source: string): string | null {
     this.ensureOpen();

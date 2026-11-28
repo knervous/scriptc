@@ -16,6 +16,12 @@ Object.assign(globalThis, {
   auditAdd: (f) => { listeners.add(f); },
   auditRemove: (f) => { listeners.delete(f); },
   auditFire: () => { for (const f of listeners) f(); },
+  // Fires the listeners from the page's own timer, outside any compiled call (an event the browser dispatches).
+  // A page list (fixtures declare it as a lib.dom collection): spreads as its elements.
+  auditPageList: (...xs) => xs,
+  // A plain object the page itself makes (no compiled value behind it).
+  auditAction: (kind, id) => ({ kind, id }),
+  auditFireLater: () => { setTimeout(() => { for (const f of listeners) f(); console.log("page fired"); }, 0); },
   auditCount: () => listeners.size,
   auditIdentity: (v) => v,
   auditCallWith: (f, self, ...args) => f.apply(self, args),
@@ -85,6 +91,10 @@ Object.assign(globalThis, {
   auditReceiver: o => { const r = {}; const ok = Reflect.set(o, 'x', 9, r); return ok + '|' + o.x + '|' + r.x; },
   auditIterator: () => ({ [Symbol.iterator]() { return { next() { return { value: 42, done: false }; }, return() { closed++; return { done: true }; } }; } }),
   auditClosed: () => closed,
+  // Page-object literals: what a page function sees of a literal argument (prototype, own keys, JSON, nesting).
+  auditLiteral: (...xs) => xs.map(o => (Array.isArray(o) ? 'Array' : Object.getPrototypeOf(o) === Object.prototype ? 'Object' : 'other') + ' ' + JSON.stringify(o) + ' keys=' + Object.keys(o).join(',')).join(' | '),
+  auditElement: (type, props, children) => { kept = props; return { type, props, children }; },
+  auditInvoke: o => o.onClick(o.label) + '/' + typeof o.onClick,
 });
 
 // Custom host iterable for dynamic call-spread differential coverage.

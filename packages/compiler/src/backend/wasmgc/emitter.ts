@@ -8398,6 +8398,52 @@ function emitModule(given: IrModule, opts: WasmGcEmitOptions, setPhase: (phase: 
     /** ToPrimitive of an operand for a compiled-side operator: ours runs the compiled protocol, a host value the host's (js.toPrimitive(v, hint): 0 default, 1 number, 2 string; a primitive answers itself). */
     const prim = (x: number, number: boolean): number => m.if(isOurs(x), m.call(dynToPrimitive(), [fromJs(x), m.i32.const(number ? 2 : 0)], A),
       fromJs(hostCall("js.toPrimitive", [x, m.i32.const(number ? 1 : 0)], [E, i32], E)));
+    /* Page-object literals. An object or array literal written straight as an argument of a call is built where its
+     * callee runs: a page callee gets a plain page object made in one host call (js.objLit.N / js.arrLit.N), not a
+     * compiled object behind a facade whose every read, key listing and prototype query would cross back; a compiled
+     * callee gets the compiled value, as before. The literal's values are evaluated once, in order, before either. */
+    type Lit = { kind: "leaf"; t: number } | { kind: "obj"; keys: string[]; vals: Lit[] } | { kind: "arr"; vals: Lit[] };
+    const litKeys = (x: IrExpr & { kind: "jsOp" }): string[] | null => {
+      const keys: string[] = [];
+      for (let i = 0; i < x.args.length; i += 2) {
+        let k = x.args[i]!;
+        if (k.kind === "jsMarshal" && k.value.kind === "strLit") k = k.value;
+        if (k.kind !== "strLit") return null;
+        keys.push(k.value);
+      }
+      return new Set(keys).size !== keys.length || keys.length > 64 || keys.includes("__proto__") ? null : keys;
+    };
+    const planLit = (x: IrExpr, sets: number[]): Lit => {
+      if (x.kind === "jsOp" && x.op === "objLit") {
+        const keys = litKeys(x);
+        if (keys !== null) return { kind: "obj", keys, vals: keys.map((_, i) => planLit(x.args[2 * i + 1]!, sets)) };
+      }
+      if (x.kind === "jsOp" && x.op === "arrLit" && x.args.length <= 64) return { kind: "arr", vals: x.args.map(v => planLit(v, sets)) };
+      const t = temp(E);
+      sets.push(m.local.set(t, expr(x)));
+      return { kind: "leaf", t };
+    };
+    const litOurs = (l: Lit): number => {
+      if (l.kind === "leaf") return fromJs(m.local.get(l.t, E));
+      if (l.kind === "obj") return dobj.literal(l.keys, l.vals.map(litOurs));
+      const t = temp(dynArr().ref);
+      return m.block(null, [m.local.set(t, newDynArr(m.i32.const(Math.max(4, l.vals.length)))),
+        ...l.vals.map(v => m.call(dynArrPush(), [m.local.get(t, dynArr().ref), litOurs(v)], binaryen.none)), m.local.get(t, dynArr().ref)], A);
+    };
+    const litPage = (l: Lit): number => {
+      if (l.kind === "leaf") return m.local.get(l.t, E);
+      if (l.kind === "obj") return hostCall(`js.objLit.${l.keys.length * 2}`, l.keys.flatMap((k, i) => [stringConst(m, k), litPage(l.vals[i]!)]), Array(l.keys.length * 2).fill(E), E);
+      return hostCall(`js.arrLit.${l.vals.length}`, l.vals.map(litPage), Array(l.vals.length).fill(E), E);
+    };
+    /** withArgs for a call: `get(i)` is argument i as a page value, `own(i)` as a compiled one; a literal argument is
+     * built by whichever the branch asks for (each at most once per branch). The first `lead` arguments (the callee or
+     * receiver, and a `this`) are plain values. */
+    const withCallArgs = (lead: number, build: (get: (i: number) => number, own: (i: number) => number) => number, resultType: number): number => {
+      const sets: number[] = [];
+      const leaf = (x: IrExpr): Lit => { const t = temp(E); sets.push(m.local.set(t, expr(x))); return { kind: "leaf", t }; };
+      const plans = e.args.map((x, i) => i < lead ? leaf(x) : planLit(x, sets));
+      return m.block(null, [...sets, build(i => litPage(plans[i]!), i => litOurs(plans[i]!))], resultType);
+    };
     switch (e.op) {
       case "getProp": { const dom = domDirectImport("get", e.name!);
         return withArgs(get => m.if(isOurs(get(0)), toJs(m.call(dynGetAtom(), [fromJs(get(0)), m.i32.const(dobj.atom(e.name!))], A)),
@@ -8411,13 +8457,13 @@ function emitModule(given: IrModule, opts: WasmGcEmitOptions, setPhase: (phase: 
         hostCall("js.set", [get(0), keyFormAny(get(1)), get(2)], [E, E, E], binaryen.none)), binaryen.none);
       case "callMethod": {
         const n = e.args.length - 1, dom = domDirectImport("call", e.name!, n);
-        const ownCall = (get: (i: number) => number) => toJs(dynCallValues(m.call(dynGetAtom(), [fromJs(get(0)), m.i32.const(dobj.atom(e.name!))], A), fromJs(get(0)), Array.from({ length: n }, (_, i) => fromJs(get(i + 1))), e.calleeName ?? e.name!));
+        const ownCall = (get: (i: number) => number, own: (i: number) => number) => toJs(dynCallValues(m.call(dynGetAtom(), [fromJs(get(0)), m.i32.const(dobj.atom(e.name!))], A), fromJs(get(0)), Array.from({ length: n }, (_, i) => own(i + 1)), e.calleeName ?? e.name!));
         // A typed Map/Set (held as a page-typed value): its methods dispatch on the collection type.
         const collArity = TCOLL_METHODS.get(e.name!);
-        const ownOrColl = (get: (i: number) => number) => collArity === undefined ? ownCall(get)
+        const ownOrColl = (get: (i: number) => number, own: (i: number) => number) => collArity === undefined ? ownCall(get, own)
           : m.if(m.call("$tcoll.is", [fromJs(get(0))], i32),
-            toJs(m.call(`$tcoll.${e.name!}`, [fromJs(get(0)), ...Array.from({ length: collArity }, (_, i) => i < n ? fromJs(get(i + 1)) : m.ref.null(A))], A)),
-            ownCall(get));
+            toJs(m.call(`$tcoll.${e.name!}`, [fromJs(get(0)), ...Array.from({ length: collArity }, (_, i) => i < n ? own(i + 1) : m.ref.null(A))], A)),
+            ownCall(get, own));
         const pageCall = (get: (i: number) => number) =>
           dom ? (domMirrorJsCall(e.name!, Array.from({ length: n + 1 }, (_, i) => get(i))) ?? hostCall(dom, Array.from({ length: n + 1 }, (_, i) => get(i)), Array(n + 1).fill(E), E))
             // A page value without that callable member: V8's "<call site> is not a function" (the host's own call would name `o[k]`).
@@ -8427,8 +8473,8 @@ function emitModule(given: IrModule, opts: WasmGcEmitOptions, setPhase: (phase: 
             : hostCall(`js.${sinkCall(e.name!, n)}.${n}`, [get(0), stringConst(m, e.name!), ...Array.from({ length: n }, (_, i) => get(i + 1))], [E, E, ...Array(n).fill(E)], E);
         // Native host (hostHandles): a receiver statically typed as a lib.dom interface
         // is always the page's, so the compiled-object branch is dead and not emitted.
-        if (opts.hostHandles && e.domReceiver) return withArgs(get => pageCall(get), E);
-        return withArgs(get => m.if(isOurs(get(0)), ownOrColl(get), pageCall(get)), E);
+        if (opts.hostHandles && e.domReceiver) return withCallArgs(1, get => pageCall(get), E);
+        return withCallArgs(1, (get, own) => m.if(isOurs(get(0)), ownOrColl(get, own), pageCall(get)), E);
       }
       // `o.name?.(...)`: the member is read once; a nullish member is undefined and the arguments never run
       // (so no withArgs: they are evaluated only on the calling side); otherwise it is called with `this` = o.
@@ -8459,8 +8505,8 @@ function emitModule(given: IrModule, opts: WasmGcEmitOptions, setPhase: (phase: 
         // Native host (hostHandles): an absent global (null or the undefined sentinel) called is the spec TypeError, never a call into the host.
         const calleeText = e.calleeName ?? (e.args[0]?.kind === "jsOp" && e.args[0].op === "globalGet" && e.args[0].name ? e.args[0].name : "value");
         const hostInvoke = (get: (i: number) => number) => hostCall(`js.${e.op}.${n}`, Array.from({ length: n + 1 + self }, (_, i) => get(i)), Array(n + 1 + self).fill(E), E);
-        return withArgs(get => m.if(isOurs(get(0)),
-          toJs(dynCallValues(fromJs(get(0)), self ? fromJs(get(1)) : m.ref.null(A), Array.from({ length: n }, (_, i) => fromJs(get(i + 1 + self))), "function")),
+        return withCallArgs(1 + self, (get, own) => m.if(isOurs(get(0)),
+          toJs(dynCallValues(fromJs(get(0)), self ? fromJs(get(1)) : m.ref.null(A), Array.from({ length: n }, (_, i) => own(i + 1 + self)), "function")),
           opts.hostHandles ? m.if(pageAbsent(get(0)), m.block(null, [m.throw("$exn", [newError("%TypeError", stringConst(m, `${calleeText} is not a function`), m.i32.const(1), stringConst(m, ""))]), m.unreachable()], E), hostInvoke(get))
             : hostInvoke(get)), E);
       }
@@ -11377,10 +11423,13 @@ function emitModule(given: IrModule, opts: WasmGcEmitOptions, setPhase: (phase: 
         // throws where JS would, at the property read.
         const pageBacked = () => {
           markPaged(t.shapeId, "dynCheck page-backed");
-          const ops = shape.fields.map(f => defaultValue(valueType(f.type)));
+          // (the fields are never read: every read of a page-backed record goes to its page object. An interned-string
+          // field holds atom 0, as pageRecord's struct.new_default leaves it: interning the default null string traps.)
+          const ops = recOps(t.shapeId, shape.fields.map(f => defaultValue(valueType(f.type))))
+            .map((o, i) => atomRec(t.shapeId, shape.fields[i]!.name) ? m.i32.const(0) : o);
           if (shape.indexValue) ops.push(m.ref.null(ovfRuntime(t.shapeId).M));
           const page = m.if(m.ref.is_null(v()), hostCall("js.undefined", [], [], binaryen.externref), m.call(dynToJs(), [v()], binaryen.externref));
-          return m.block(null, [pageGuard(t.shapeId), m.struct.new(withJs(info, recOps(t.shapeId, ops), page), info.heap)], info.ref);
+          return m.block(null, [pageGuard(t.shapeId), m.struct.new(withJs(info, ops, page), info.heap)], info.ref);
         };
         const parts: number[] = [
           // Native dyn: the typed record itself (it entered dyn without a copy) keeps its identity.

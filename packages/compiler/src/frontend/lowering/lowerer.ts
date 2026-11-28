@@ -105,6 +105,7 @@ import {
   isCjsExportTableLiteral,
   isCjsJsFile,
   isJsSourceFile,
+  isModuleExportsAccess,
   isNodeEsmFile,
   isNodeTypesPath,
   locOf,
@@ -3073,10 +3074,36 @@ export class Lowerer {
     if (!ts.isVariableDeclaration(decl) || !ts.isIdentifier(decl.name) || !decl.initializer) return null;
     const directSpec = requireSpecOf(decl.initializer);
     if (directSpec !== null) {
-      return resolveImport(this.program, decl.getSourceFile(), directSpec, "require") ??
+      const dep = resolveImport(this.program, decl.getSourceFile(), directSpec, "require") ??
         npmStaticDepSf7(this.program, decl.getSourceFile(), directSpec, "require");
+      return dep === null ? null : this.reexportedModuleOf(dep);
     }
     return createRequireProgramModuleOf(this, decl.initializer)?.dep ?? null;
+  }
+
+  /** The module a CommonJS module's exports ARE: itself, or, for a module whose whole export is
+   * `module.exports = require("./impl")` (a NODE_ENV-switched entry once `define` folds its switch), the module it
+   * re-exports, followed to the end of the chain. A namespace binding of the first is a namespace over the last's
+   * export table. */
+  private reexportedModuleOf(sf: ts.SourceFile): ts.SourceFile {
+    for (let hops = 0; hops < 8 && isJsSourceFile(sf); hops++) {
+      let spec: string | null = null;
+      for (const stmt of sf.statements) {
+        if (!ts.isExpressionStatement(stmt) || !ts.isBinaryExpression(stmt.expression)) continue;
+        const e = stmt.expression;
+        if (e.operatorToken.kind !== ts.SyntaxKind.EqualsToken || !isModuleExportsAccess(e.left)) continue;
+        let rhs: ts.Expression = e.right;
+        while (ts.isParenthesizedExpression(rhs)) rhs = rhs.expression;
+        const s = requireSpecOf(rhs);
+        if (s === null || spec !== null) return sf; // not a re-export, or more than one whole export
+        spec = s;
+      }
+      if (spec === null) return sf;
+      const next = resolveImport(this.program, sf, spec, "require") ?? npmStaticDepSf7(this.program, sf, spec, "require");
+      if (next === null || next === sf) return sf;
+      sf = next;
+    }
+    return sf;
   }
 
   /** The represented single value behind a createRequire binding, or null
@@ -3170,6 +3197,11 @@ export class Lowerer {
       // single VALUE, not a namespace whose members must appear in Node's
       // CJS lexer export table.
       if (d && ts.isBinaryExpression(d)) {
+        // A whole-module re-export (`module.exports = require("./impl")`): a namespace over the re-exported module's
+        // export table (localModuleBindingDepOf follows it there).
+        let rr: ts.Expression = d.right;
+        while (ts.isParenthesizedExpression(rr)) rr = rr.expression;
+        if (requireSpecOf(rr) !== null) return true;
         if (this.globalsByDeclNode.has(d)) return false;
         let r: ts.Expression = d.right;
         while (ts.isParenthesizedExpression(r)) r = r.expression;

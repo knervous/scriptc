@@ -66,6 +66,7 @@ import type { FrontendServices } from "./services.js";
 import type { NpmStaticDeclarationFunctions, NpmStaticDeclarationOverloads, NpmStaticDeclarationProperties } from "./npm-static-declaration-syntax.js";
 import { npmPackageNameOf, registerWorkspacePackage, workspacePackageOfPath } from "./workspace-registry.js";
 import { trackedExists, trackedReadFile, trackedRealpath } from "./input-tracker.js";
+import { defines } from "./browser-target.js";
 
 let activePackages: ReadonlySet<string> = new Set();
 let declarationOverloads: ReadonlyMap<string, NpmStaticDeclarationOverloads> = new Map();
@@ -392,7 +393,11 @@ export function npmStaticFsShadow(services: FrontendServices): NpmStaticFsShadow
         if (hit !== undefined) return hit ?? undefined;
         let rewritten: string | null = null;
         try {
-          const original = trackedReadFile(path);
+          const read = trackedReadFile(path);
+          // A load-time build switch the `define` table decides (`if (process.env.NODE_ENV === 'production')`) keeps
+          // only its live arm, as a bundler's fold does (npm-static-defined-branches.ts).
+          const folded = read === null ? null : services.definedBranches(path, read, defines());
+          const original = folded ?? read;
           if (original !== null) {
             const unshadowed = services.shadowedModuleParams(path, original);
             const namepaths = services.jsDocNamepaths(path, unshadowed ?? original) ?? unshadowed;
@@ -419,7 +424,7 @@ export function npmStaticFsShadow(services: FrontendServices): NpmStaticFsShadow
             if (answer !== null && typeof answer === "object") {
               reportNpmStaticOffender(target.pkg, answer.degrade);
             } else {
-              rewritten = answer ?? latest ?? namepaths;
+              rewritten = answer ?? latest ?? namepaths ?? folded;
             }
           }
         } catch {

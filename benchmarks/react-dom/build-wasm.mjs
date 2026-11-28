@@ -1,11 +1,13 @@
 // Builds the React table app to WasmGC with this repository's compiler, against the TypeScript port of React
 // (packages/react-ts) and with React DOM on the DOM stream (packages/react-ts/PATCHES.md).
 //
-//   node benchmarks/react-dom/build-wasm.mjs [out.wasm] [--dev] [--published]
+//   node benchmarks/react-dom/build-wasm.mjs [out.wasm] [--dev] [--published [--exploratory]]
 //
 // --published builds against published React instead (react and react-dom from npm, unmodified), with the scriptw
 // package's own compile options (npm/wasmgc/lib/compile.mjs: what `scriptw build --browser --release` passes): React
-// stays npm JavaScript, which the page loads and hands to the loader (`modules`, out/react-modules.js).
+// stays npm JavaScript, which the page loads and hands to the loader (`modules`, out/react-modules.js). --exploratory
+// drops `release` (what `scriptw build` without --release does): code the compiler cannot lower yet is a fence that
+// throws if it runs, rather than a build error.
 //
 // The module exports mount(id) and cycle(). BUILD_OPTIONS (JSON) adds compile options; SCRIPTC_WASMGC_NAMED=1 keeps function
 // names for the profiler.
@@ -24,7 +26,7 @@ fs.mkdirSync(path.dirname(out), { recursive: true });
 const published = argv.includes("--published");
 const r = await compile(path.join(here, published ? "published/entry.ts" : "wasm/entry.ts"), published ? {
   ...extra,
-  outDir: path.dirname(out), outPath: out, outputKind: "wasmgc", release: true, browser: true, dynModel: "native", conditions: ["wasmgc"],
+  outDir: path.dirname(out), outPath: out, outputKind: "wasmgc", release: !argv.includes("--exploratory"), browser: true, dynModel: "native", conditions: ["wasmgc"],
   capabilities: "auto", optimization: argv.includes("--dev") ? "dev" : undefined,
   // (not a compile option of the package: the page calls these two, where a user's own page program would run from main)
   wasmLink: { exports: ["mount", "cycle"] },

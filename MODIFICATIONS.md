@@ -2,7 +2,7 @@
 
 This tree is a derivative of scriptc (https://github.com/vercel-labs/scriptc), licensed under the Apache License, Version 2.0 (LICENSE). It is compared here with upstream commit `97248e92994ff55f7009e0057700241b9109a35e`. The LLVM backend (`packages/compiler/src/backend/llvm`), the IR (`packages/compiler/src/ir`), the runtime (`packages/runtime` and the runtime and LLVM packs) and `native/llvm-codegen` track upstream at that commit, with the changes listed below. The frontend (`packages/compiler/src/frontend`), the compiler's unit and integration tests, the test corpus and fixtures, the compatibility inventory and the documentation are this fork's own and follow an earlier upstream state, so upstream's newer tests and documentation are not included.
 
-As section 4(b) of the license requires, the files below carry changes. 1119 files are modified from that upstream commit and 3432 files are new; 23326 upstream files are not part of this tree (see "Removed files"). Each modified source file of the compiler, the runtime and the repository tooling also says so in its first comment line.
+As section 4(b) of the license requires, the files below carry changes. 1119 files are modified from that upstream commit and 3446 files are new; 23326 upstream files are not part of this tree (see "Removed files"). Each modified source file of the compiler, the runtime and the repository tooling also says so in its first comment line.
 
 ## Modified files
 
@@ -1172,6 +1172,10 @@ As section 4(b) of the license requires, the files below carry changes. 1119 fil
 - `benchmarks/frameworks/receipts/final.json`
 - `benchmarks/frameworks/receipts/lanes-1.json`
 - `benchmarks/frameworks/receipts/react-after-codegen.json`
+- `benchmarks/frameworks/receipts/react-compiled-counts.json`
+- `benchmarks/frameworks/receipts/react-lanes-ab.json`
+- `benchmarks/frameworks/receipts/react-literals-counts.json`
+- `benchmarks/frameworks/receipts/react-literals.json`
 - `benchmarks/frameworks/receipts/react-published-counts.json`
 - `benchmarks/frameworks/receipts/react-published.json`
 - `benchmarks/frameworks/run.mjs`
@@ -2518,6 +2522,7 @@ As section 4(b) of the license requires, the files below carry changes. 1119 fil
 - `packages/compiler/src/frontend/npm-fetch-analysis.ts`
 - `packages/compiler/src/frontend/npm-fetch-node.ts`
 - `packages/compiler/src/frontend/npm-fetch-syntax.ts`
+- `packages/compiler/src/frontend/npm-static-defined-branches.ts`
 - `packages/compiler/src/ir/builtin-signatures/host.ts`
 - `packages/compiler/src/ir/builtin-signatures/island.ts`
 - `packages/compiler/src/ir/capture-values-wasmgc.ts`
@@ -2578,6 +2583,7 @@ As section 4(b) of the license requires, the files below carry changes. 1119 fil
 - `packages/compiler/test/native-entry-thread-locals.test.ts`
 - `packages/compiler/test/npm-fetch-analysis.test.ts`
 - `packages/compiler/test/npm-fetch-cases.ts`
+- `packages/compiler/test/npm-static-defined-branches.test.ts`
 - `packages/compiler/test/profile-specialization.test.ts`
 - `packages/compiler/test/strict-frontend.test.ts`
 - `packages/compiler/test/strict-nan.test.ts`
@@ -3440,6 +3446,8 @@ As section 4(b) of the license requires, the files below carry changes. 1119 fil
 - `tests/wasmgc-browser/fixtures/dyn-bitwise-helper.js`
 - `tests/wasmgc-browser/fixtures/dyn-bitwise.ts`
 - `tests/wasmgc-browser/fixtures/dyn-call-spread-ts.ts`
+- `tests/wasmgc-browser/fixtures/dyn-callee-page-spread-helper.js`
+- `tests/wasmgc-browser/fixtures/dyn-callee-page-spread.ts`
 - `tests/wasmgc-browser/fixtures/dyn-check-page-field-reject.ts`
 - `tests/wasmgc-browser/fixtures/dyn-check-page-field.ts`
 - `tests/wasmgc-browser/fixtures/dyn-construct-boxes-helper.js`
@@ -3691,6 +3699,8 @@ As section 4(b) of the license requires, the files below carry changes. 1119 fil
 - `tests/wasmgc-browser/fixtures/js-builtin-std-members.ts`
 - `tests/wasmgc-browser/fixtures/js-callback-noop-default-helper.js`
 - `tests/wasmgc-browser/fixtures/js-callback-noop-default.ts`
+- `tests/wasmgc-browser/fixtures/js-calls-typed-reducer-helper.js`
+- `tests/wasmgc-browser/fixtures/js-calls-typed-reducer.ts`
 - `tests/wasmgc-browser/fixtures/js-chained-member-assign-helper.js`
 - `tests/wasmgc-browser/fixtures/js-chained-member-assign.ts`
 - `tests/wasmgc-browser/fixtures/js-class-instance-delete-helper.js`
@@ -4001,6 +4011,7 @@ As section 4(b) of the license requires, the files below carry changes. 1119 fil
 - `tests/wasmgc-browser/fixtures/page-array-cast-exit.ts`
 - `tests/wasmgc-browser/fixtures/page-buffer-source-positions.ts`
 - `tests/wasmgc-browser/fixtures/page-callback-bytes-promise.ts`
+- `tests/wasmgc-browser/fixtures/page-callback-queues-microtask.ts`
 - `tests/wasmgc-browser/fixtures/page-closure-globals-null-string.ts`
 - `tests/wasmgc-browser/fixtures/page-data-into-interface-layouts.ts`
 - `tests/wasmgc-browser/fixtures/page-interface-method-receiver.ts`
@@ -4013,6 +4024,9 @@ As section 4(b) of the license requires, the files below carry changes. 1119 fil
 - `tests/wasmgc-browser/fixtures/page-nullable-opaque-helper.js`
 - `tests/wasmgc-browser/fixtures/page-nullable-opaque.ts`
 - `tests/wasmgc-browser/fixtures/page-nullish-assign.ts`
+- `tests/wasmgc-browser/fixtures/page-object-atom-record-helper.js`
+- `tests/wasmgc-browser/fixtures/page-object-atom-record.ts`
+- `tests/wasmgc-browser/fixtures/page-object-literal-args.ts`
 - `tests/wasmgc-browser/fixtures/page-object-record-methods.ts`
 - `tests/wasmgc-browser/fixtures/page-opt-call-method.ts`
 - `tests/wasmgc-browser/fixtures/page-plain-data-with-typed-array.ts`
