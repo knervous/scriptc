@@ -2,13 +2,21 @@
 
 ## Setup
 
-Use the Node.js version in [.node-version](./.node-version) and install pnpm. From the repository root, install dependencies and build the workspace:
+Use the Node.js version in [.node-version](./.node-version) (24.22.1) and pnpm 11.1.3, the version CI installs. From the repository root, install dependencies and build the workspace:
 
 ```console
 $ pnpm install && pnpm -r build
 ```
 
 The workspace build compiles the TypeScript packages and checks the compatibility inventory. It does not rebuild packaged native artifacts and needs no local LLVM installation.
+
+## Pull requests
+
+Work on a feature branch of this repository and open a pull request against `main`. Pull requests are squash-merged, so the pull request's title and description become the commit on `main`.
+
+- CI must be green before merge, or the pull request explains each failure it leaves (an unrelated flaky job, a platform the change does not touch).
+- Run `node scripts/modifications.mjs --check`; CI runs it too. When a change adds or removes a file, or modifies one that upstream scriptc has, run `node scripts/modifications.mjs` and commit the regenerated `MODIFICATIONS.md` and the in-place notices it adds or removes.
+- Commits on `main` are authored as the maintainer and carry no generated-by or co-author trailers.
 
 ## Tests
 

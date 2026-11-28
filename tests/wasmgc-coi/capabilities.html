@@ -1,0 +1,38 @@
+<!doctype html>
+<html><head><meta charset="utf-8"><title>COI capabilities</title>
+<style>body{font:14px system-ui;margin:2rem;background:#fff;color:#111} pre{white-space:pre-wrap} .pass{color:#060} .fail{color:#a00}</style></head>
+<body><h3>Deployment capabilities (cross-origin isolation required; the backend's feature profile)</h3><pre id="status">running…</pre>
+<script type="module">
+// The deployment check (requireDeploymentCapabilities) plus the execution
+// probe built by build-probe.mjs. PASS needs both.
+const status = document.getElementById("status");
+const { deploymentCapabilities, requireDeploymentCapabilities } = await import("./host.js?t=" + Date.now());
+const lines = [JSON.stringify(deploymentCapabilities(), null, 1)];
+const finish = (ok, text) => { lines.push(text); status.className = ok ? "pass" : "fail"; status.textContent = lines.join("\n"); window.__result = lines; };
+try { requireDeploymentCapabilities([...["crossOriginIsolated", "sharedArrayBuffer", "atomics", "atomicsWaitAsync", "sharedWasmMemory"], "jspi"]); }
+catch (e) { finish(false, "\nREFUSED: " + e.message); throw e; }
+try {
+  const memory = new WebAssembly.Memory({ initial: 1, maximum: 16, shared: true });
+  let next = null, ticked = false;
+  const wait = new WebAssembly.Suspending(() => next());
+  const { instance } = await WebAssembly.instantiate(await (await fetch("probe.wasm")).arrayBuffer(), { env: { memory }, probe: { wait } });
+  const run = WebAssembly.promising(instance.exports.run);
+  const probes = [];
+  // Delayed: the Promise is pending, so Wasm suspends and the event loop runs.
+  next = () => new Promise((r) => setTimeout(() => r(41), 20));
+  setTimeout(() => { ticked = true; }, 0);
+  probes.push(["JSPI delayed result", (await run()) === 42 && ticked]);
+  // Immediate: a non-Promise result does not suspend.
+  next = () => 9;
+  probes.push(["JSPI immediate result", (await run()) === 10]);
+  // Rejection propagates through the suspended Wasm frame to the caller.
+  const boom = new Error("probe rejection");
+  next = () => Promise.reject(boom);
+  probes.push(["JSPI rejection", await run().then(() => false, (e) => e === boom)]);
+  // Bulk memory + atomics on the shared memory, seen through the page's view.
+  const word = instance.exports.bulk();
+  probes.push(["bulk memory + atomics", word === 0x07070707 + 5 && Atomics.load(new Int32Array(memory.buffer), 128) === word]);
+  const ok = probes.every(([, v]) => v);
+  finish(ok, "\n" + probes.map(([k, v]) => `${v ? "ok  " : "FAIL"} ${k}`).join("\n") + `\n\n${ok ? "PASS" : "FAIL"}: deployment requirements met; feature probe ${ok ? "passed" : "failed"}`);
+} catch (e) { finish(false, "\nFAIL: probe threw " + (e?.stack ?? e)); }
+</script></body></html>

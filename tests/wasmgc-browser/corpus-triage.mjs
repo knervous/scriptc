@@ -5,10 +5,11 @@
 import fs from "node:fs";
 import path from "node:path";
 import { fileURLToPath } from "node:url";
-import { reportsDir } from "./fixture-dirs.mjs";
+import { reportDirs } from "./fixture-dirs.mjs";
 
 const here = path.dirname(fileURLToPath(import.meta.url));
-const file = process.argv[2] ?? fs.readdirSync(reportsDir).filter((f) => f.startsWith("corpus-js-native-")).map((f) => path.join(reportsDir, f))
+const file = process.argv[2] ?? reportDirs.filter((dir) => fs.existsSync(dir))
+  .flatMap((dir) => fs.readdirSync(dir).filter((f) => f.startsWith("corpus-js-native-")).map((f) => path.join(dir, f)))
   .sort((a, b) => fs.statSync(b).mtimeMs - fs.statSync(a).mtimeMs)[0];
 const report = JSON.parse(fs.readFileSync(file, "utf8"));
 const signature = (r) => {

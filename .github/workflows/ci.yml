@@ -224,6 +224,19 @@ jobs:
           packages/compiler/src/native/sanitizer.test.ts
           --testNamePattern "host-native clang static build|sanitized vendor archives"
 
+  # MODIFICATIONS.md and the in-place modification notices against the pinned upstream commit (section 4(b) of the
+  # licence): scripts/modifications.mjs reads only git and the committed upstream manifest.
+  modifications:
+    name: check (MODIFICATIONS.md and notices)
+    runs-on: ubuntu-24.04
+    timeout-minutes: 5
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-node@v4
+        with:
+          node-version-file: .node-version
+      - run: node scripts/modifications.mjs --check
+
   # The TS7 parity sweep exercises the compiler frontend, so it can run
   # alongside the Linux LLVM/runtime package build instead of following it.
   ts7_parity:

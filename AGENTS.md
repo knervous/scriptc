@@ -133,6 +133,7 @@ Never hand-edit these files:
 - `docs/src/generated/node-v24-compatibility.json`
 - `docs/src/generated/node-v24-compatibility-meta.json`
 - `packages/runtime/src/scr_island_manifest.h`
+- `MODIFICATIONS.md`, `scripts/modifications-upstream.tsv` and the one-line "modified from scriptc" notices at the top of modified sources (`node scripts/modifications.mjs`)
 
 Change compiler decision sources or the implementation-owned compatibility manifests, then regenerate. Use `pnpm manifest` when compiler decision tables change and `pnpm node-compat` whenever the Node pin, compatibility manifests, compiler surface manifest, or dynamic registry changes.
 
@@ -197,6 +198,10 @@ NEXT_DIST_DIR=.next-check pnpm check
 ```
 
 `pnpm check` generates the content source and route types, then runs the compatibility drift check, TypeScript check, production build, and HTTP route tests. It is required before landing docs or compatibility output changes. The route tests start and stop their own production server on an available local port and use `NEXT_DIST_DIR` when set. The site preserves the repository's `language:filename` fences through `docs/src/lib/remark-docs.ts`.
+
+## Pull requests
+
+Changes land in this repository through pull requests from feature branches, squash-merged to `main`; see [CONTRIBUTING.md](./CONTRIBUTING.md). CI must be green, or the pull request explains each failure. Run `node scripts/modifications.mjs --check` before pushing, and `node scripts/modifications.mjs` (then commit its output) when the change adds or removes a file or modifies one upstream scriptc has. Commits on `main` are authored as the maintainer and carry no generated-by or co-author trailers.
 
 ## Releases
 

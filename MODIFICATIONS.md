@@ -2,7 +2,7 @@
 
 This tree is a derivative of scriptc (https://github.com/vercel-labs/scriptc), licensed under the Apache License, Version 2.0 (LICENSE). It is compared here with upstream commit `97248e92994ff55f7009e0057700241b9109a35e`. The LLVM backend (`packages/compiler/src/backend/llvm`), the IR (`packages/compiler/src/ir`), the runtime (`packages/runtime` and the runtime and LLVM packs) and `native/llvm-codegen` track upstream at that commit, with the changes listed below. The frontend (`packages/compiler/src/frontend`), the compiler's unit and integration tests, the test corpus and fixtures, the compatibility inventory and the documentation are this fork's own and follow an earlier upstream state, so upstream's newer tests and documentation are not included.
 
-As section 4(b) of the license requires, the files below carry changes. 1117 files are modified from that upstream commit and 2953 files are new; 23326 upstream files are not part of this tree (see "Removed files"). Each modified source file of the compiler, the runtime and the repository tooling also says so in its first comment line.
+As section 4(b) of the license requires, the files below carry changes. 1117 files are modified from that upstream commit and 2961 files are new; 23326 upstream files are not part of this tree (see "Removed files"). Each modified source file of the compiler, the runtime and the repository tooling also says so in its first comment line.
 
 ## Modified files
 
@@ -1128,6 +1128,7 @@ As section 4(b) of the license requires, the files below carry changes. 1117 fil
 
 - `.github/workflows/host-sets.yml`
 - `.github/workflows/release-scriptw.yml`
+- `NOTICE`
 - `docs/public/Geist-Regular.ttf`
 - `docs/public/GeistPixel-Square.ttf`
 - `docs/src/app/og/og-image.tsx`
@@ -2264,6 +2265,7 @@ As section 4(b) of the license requires, the files below carry changes. 1117 fil
 - `npm/wasmgc/README.md`
 - `npm/wasmgc/bin/cli.mjs`
 - `npm/wasmgc/bin/native.mjs`
+- `npm/wasmgc/identity.json`
 - `npm/wasmgc/lib/compile.mjs`
 - `npm/wasmgc/lib/host.d.ts`
 - `npm/wasmgc/lib/host.mjs`
@@ -2469,6 +2471,8 @@ As section 4(b) of the license requires, the files below carry changes. 1117 fil
 - `packages/runtime/vendor/curl/include/curl/urlapi.h`
 - `packages/runtime/vendor/curl/include/curl/websockets.h`
 - `packages/simd/simd.intrinsics.ts`
+- `scripts/modifications-upstream.tsv`
+- `scripts/modifications.mjs`
 - `scripts/wasmgc-corpus.mjs`
 - `scripts/wasmgc-diff.mjs`
 - `tests/corpus/1100-island-eval-basics.ts`
@@ -4048,6 +4052,10 @@ As section 4(b) of the license requires, the files below carry changes. 1117 fil
 - `tests/wasmgc-browser/tsconfig.json`
 - `tests/wasmgc-browser/world/fixture-world.d.ts`
 - `tests/wasmgc-browser/world/page-env.d.ts`
+- `tests/wasmgc-coi/.gitignore`
+- `tests/wasmgc-coi/build-probe.mjs`
+- `tests/wasmgc-coi/capabilities.html`
+- `tests/wasmgc-coi/serve-coi.mjs`
 - `tests/wasmgc-gc/README.md`
 - `tests/wasmgc-gc/classes.mjs`
 - `tests/wasmgc-gc/gcbench.ts`

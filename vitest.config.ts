@@ -1,6 +1,9 @@
 import { chmodSync, mkdirSync } from "node:fs";
 import { fileURLToPath } from "node:url";
+import { delimiter } from "node:path";
 import { defineConfig } from "vitest/config";
+
+const extraTests = (process.env["SCRIPTC_EXTRA_TESTS"] ?? "").split(delimiter).filter((glob) => glob.trim() !== "");
 
 // Compiled-binary + oracle caches for the test lanes (see cc.ts's cache block
 // and tests/harness/README.md). Workers inherit SCRIPTC_CACHE_DIR from here;
@@ -50,8 +53,9 @@ export default defineConfig({
       "tests/harness/**/*.test.ts",
       "packages/*/src/**/*.test.ts",
       "packages/*/test/**/*.test.ts",
-      // The private layer's own unit tests (not in an export).
-      "private/tests/**/*.test.ts",
+      // Test files kept outside this tree: SCRIPTC_EXTRA_TESTS lists globs (absolute, or relative to this directory),
+      // separated by the platform's path delimiter (`:`, `;` on Windows).
+      ...extraTests,
     ],
     // Differential tests spawn clang + binaries; give them room. 300s is a
     // hang detector, not a performance bound: under a merge gate sharing
