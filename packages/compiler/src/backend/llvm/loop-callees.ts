@@ -1,3 +1,4 @@
+// This file was modified from scriptc (Apache-2.0); see MODIFICATIONS.md.
 import type { IrExpr, IrModule, IrStmt } from "../../ir/ir.js";
 import { everyExprChild, everyStmtChild } from "../../ir/traverse.js";
 
@@ -5,6 +6,9 @@ import { everyExprChild, everyStmtChild } from "../../ir/traverse.js";
 const MAX_STATEMENTS = 12;
 /** Direct call sites a callee may have. */
 const MAX_CALL_SITES = 2;
+/** A one-statement leaf (an accessor such as a layout view's `getX(i)`, one checked load or store) is about the size
+ * of the call it replaces, so it may have up to this many call sites, each inside a loop. */
+const MAX_ONE_STATEMENT_CALL_SITES = 32;
 /** The longest run of bodies a loop may pull in, the leaf included, so that
  * a copied chain stays small. */
 const MAX_INLINE_DEPTH = 4;
@@ -50,6 +54,8 @@ interface Shape {
   bounded: boolean;
   /** Makes no call at all. */
   leaf: boolean;
+  /** One statement (a leaf accessor's `return`). */
+  single: boolean;
   /** Every call is a direct `call` naming its callee. */
   directCalls: boolean;
   /** The functions the direct calls name. */
@@ -111,6 +117,7 @@ export function findLoopCallees(mod: IrModule): LoopInlining {
         !fn.async && !fn.generator && fn.captures === undefined && fn.classCaptures === undefined,
       bounded: statements <= MAX_STATEMENTS && loops <= 1,
       leaf,
+      single: statements === 1 && loops === 0,
       directCalls,
       calls,
     });
@@ -173,8 +180,11 @@ export function findLoopCallees(mod: IrModule): LoopInlining {
     fn.body.every(stmt);
   }
   const callees = new Set<string>();
-  for (const [name, site] of sites)
-    if (site.inLoops && site.count >= 1 && site.count <= MAX_CALL_SITES) callees.add(name);
+  for (const [name, site] of sites) {
+    const shape = shapes.get(name)!;
+    const limit = shape.leaf && shape.single ? MAX_ONE_STATEMENT_CALL_SITES : MAX_CALL_SITES;
+    if (site.inLoops && site.count >= 1 && site.count <= limit) callees.add(name);
+  }
   // Every body an inlined callee reaches through other inlined bodies goes
   // into the loop with it, so each of their calls is marked where that body
   // is emitted: the whole chain inlines, not just the outer wrapper's calls.

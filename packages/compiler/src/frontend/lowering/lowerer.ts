@@ -10189,9 +10189,10 @@ export class Lowerer {
         }
       }
     }
-    // A DataView is a bytes<u8> value at the IR level: crossing into untyped code
-    // it would become a Uint8Array (other members, typeof and instanceof). Refuse.
-    if ((expected.kind === "dyn" || expected.kind === "jsval") && expr.type.kind === "bytes" && expr.type.elem === "u8") {
+    // A DataView is a bytes<u8> value at the IR level: crossing into WasmGC's untyped code
+    // it would become a Uint8Array (other members, typeof and instanceof). Refuse there. The
+    // native runtime's dynamic values keep the DataView.
+    if (wasmGcLaneTarget() && (expected.kind === "dyn" || expected.kind === "jsval") && expr.type.kind === "bytes" && expr.type.elem === "u8") {
       const actual = this.typeOf(node), sym = actual.getSymbol();
       if (sym?.name === "DataView" && this.isStdlibSymbol(sym)) {
         this.unsupported("SC1090", node, "a DataView passed to untyped code (it would cross as a Uint8Array; keep it in DataView-typed bindings)");

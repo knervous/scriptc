@@ -1,5 +1,5 @@
 import { execFileSync } from "node:child_process";
-import { mkdtempSync, writeFileSync } from "node:fs";
+import { mkdtempSync, readFileSync, writeFileSync } from "node:fs";
 import { tmpdir } from "node:os";
 import { dirname, join } from "node:path";
 import { fileURLToPath } from "node:url";
@@ -25,7 +25,10 @@ test("an optimized native build keeps each typed array's finalization token (clo
   ].join("\n") + "\n");
   const r = await compile(join(dir, "main.ts"), { outDir: dir, outPath: out, outputKind: "wasmgc", browser: true, dynModel: "native", hostHandles: true, noPageFacades: true, release: true });
   expect(r.ok ? [] : r.diagnostics.map((d) => d.message)).toEqual([]);
-  const text = execFileSync(process.execPath, [WASM_OPT, "--all-features", out, "-S", "-o", "-"], { encoding: "utf8", maxBuffer: 1 << 28 });
+  // To a file: wasm-opt.js exits before a pipe drains, so text read from its stdout can end early.
+  const wat = join(dir, "main.wat");
+  execFileSync(process.execPath, [WASM_OPT, "--all-features", out, "-S", "-o", wat], { encoding: "utf8" });
+  const text = readFileSync(wat, "utf8");
   const track = /\(import "host" "bytes\.track" \(func (\$\S+)/.exec(text)?.[1];
   expect(track).toBeDefined();
   expect(text).toContain(`(call ${track}`);

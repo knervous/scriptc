@@ -92,13 +92,25 @@ test("a chain of small bodies inlines as one, up to the depth limit", () => {
   expect(bodyCalls([leaf, put, base, deeper, deepest, beyond])).toEqual([]);
 });
 
+test("a one-statement leaf inlines at up to 32 call sites, each in a loop", () => {
+  // A layout view's accessor: `getX(i) { return this.view.getFloat32(i * 20, true); }`, called from many loops.
+  const leaf = fn("leaf", [ret(ref("x"))]);
+  const sites = (n: number) => fn("caller", [loop(Array.from({ length: n }, () => run(call("leaf"))))]);
+  expect(callees([leaf, sites(3)])).toEqual(["leaf"]);
+  expect(callees([leaf, sites(32)])).toEqual(["leaf"]);
+  expect(callees([leaf, sites(33)])).toEqual([]);
+  // A site outside any loop still keeps every call.
+  expect(callees([leaf, fn("caller", [run(call("leaf")), loop([run(call("leaf")), run(call("leaf"))])])])).toEqual([]);
+});
+
 test("a call outside a loop, a third call site, an own call or a large body keeps the call", () => {
   const leaf = fn("leaf", [ret(ref("x"))]);
   // A call site outside any loop.
   expect(callees([leaf, fn("caller", [run(call("leaf")), loop([run(call("leaf"))])])])).toEqual([]);
-  // Three call sites.
+  // Three call sites of a leaf of more than one statement.
+  const two = fn("leaf", [run(ref("x")), ret(ref("x"))]);
   const three = fn("caller", [loop([run(call("leaf")), run(call("leaf")), run(call("leaf"))])]);
-  expect(callees([leaf, three])).toEqual([]);
+  expect(callees([two, three])).toEqual([]);
   // A wrapper with a call site outside any loop.
   const wrapper = fn("calling", [ret(call("leaf"))]);
   expect(
