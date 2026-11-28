@@ -9,8 +9,8 @@ From a clone, with Node 24 (`.node-version` pins the release CI uses) and pnpm:
 ```console
 $ pnpm install --frozen-lockfile && pnpm build
 $ node npm/wasmgc/scripts/assemble.mjs
-$ node npm/wasmgc/test/smoke.mjs npm/wasmgc/.stage/scriptw-0.1.0.tgz
-$ node npm/wasmgc/test/browser.mjs npm/wasmgc/.stage/scriptw-0.1.0.tgz
+$ node npm/wasmgc/test/smoke.mjs npm/wasmgc/.stage/scriptw-<version>.tgz
+$ node npm/wasmgc/test/browser.mjs npm/wasmgc/.stage/scriptw-<version>.tgz
 $ node --test npm/wasmgc/test/native.test.mjs
 ```
 

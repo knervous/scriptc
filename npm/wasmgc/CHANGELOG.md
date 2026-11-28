@@ -1,6 +1,6 @@
 # Changelog
 
-## Unreleased
+## 0.2.0 (2026-11-28)
 
 - Intrinsic libraries, as subpath exports: `scriptw/int` (fixed-width integers and bit operations), `scriptw/math` (deterministic math), `scriptw/layout` (fixed-layout records in linear memory), `scriptw/f16` (binary16 storage), `scriptw/atomics` (typed atomic cells) and `scriptw/simd` (the SIMD library). Each runs as exact JavaScript uncompiled; compiled, its calls lower to instructions on WasmGC and natively. The compiler recognises a library by a pragma in its source, wherever it is installed.
 - Contract types `Uint32`, `Int8`, `Uint8`, `Int16`, `Uint16`, `Int64` and `Uint64`, beside `Int32`, from `scriptw/int` or `@scriptc/types`. Every write to a contract slot is proven, or the build fails with SC7002 naming the write (SC7003 for one it cannot check); before this, contracts were not checked at all. 8- and 16-bit class fields are packed on WasmGC.
