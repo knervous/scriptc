@@ -10,10 +10,18 @@
  * in a register, a literal is a constant, any other bigint is read with
  * scr_bigint_to_i64) and give a frame-owned bigint built from the i64. */
 import type { IrExpr } from "../../ir/ir.js";
-import { INT_LOWERED, MATH_WORDS, intrinsicMemberName, intrinsicModule, isIntrinsicMember } from "../../ir/intrinsic-libraries.js";
+import { INT_LOWERED, MATH_WORDS, intrinsicMemberName, intrinsicModule, isIntrinsicMember, loweredIntrinsicCall } from "../../ir/intrinsic-libraries.js";
 import type { LlValue, LlvmEmitterContext } from "./expr-context.js";
 
 type CallExpr = IrExpr & { kind: "call" };
+
+const libraries = new WeakMap<object, Map<string, ReturnType<typeof intrinsicModule>>>();
+function libraryOf(host: LlvmEmitterContext, library: string) {
+  let known = libraries.get(host.mod);
+  if (!known) { known = new Map(); libraries.set(host.mod, known); }
+  if (!known.has(library)) known.set(library, intrinsicModule(host.mod, library));
+  return known.get(library) ?? null;
+}
 
 const libs = new WeakMap<object, ReturnType<typeof intrinsicModule>>();
 function intLib(host: LlvmEmitterContext) {
@@ -82,7 +90,18 @@ function emitF16(host: LlvmEmitterContext, e: CallExpr): LlValue | null {
 }
 
 /** The call's value (a double or a bigint), or null when it is not a lowered intrinsic. */
-export function emitIntIntrinsic(host: LlvmEmitterContext, e: CallExpr): LlValue | null {
+export function emitIntIntrinsic(host: LlvmEmitterContext, given: CallExpr): LlValue | null {
+  // Only calls with plain arguments lower (loweredIntrinsicCall): a member also used as a function value has widened
+  // parameters, and a call passing anything but a plain number or bigint runs the member's body.
+  let e = given;
+  for (const library of ["int", "math", "f16"]) {
+    const lib = libraryOf(host, library);
+    if (!lib || !isIntrinsicMember(lib, e.callee)) continue;
+    const plain = loweredIntrinsicCall(lib, e.callee, e.args);
+    if (plain === null) return null;
+    e = { ...e, args: plain };
+    break;
+  }
   const word = emitMathWord(host, e) ?? emitF16(host, e);
   if (word) return word;
   const name = member(host, e.callee);
@@ -117,7 +136,8 @@ function raw(host: LlvmEmitterContext, name: string, args: IrExpr[]): string {
   const b = (e: IrExpr): string => {
     if (e.kind === "call") {
       const inner = member(host, e.callee);
-      if (inner !== null && (INT_LOWERED[inner]!.result === "i64" || INT_LOWERED[inner]!.result === "u64")) return raw(host, inner, e.args);
+      const plain = inner !== null ? loweredIntrinsicCall(intLib(host), e.callee, e.args) : null;
+      if (inner !== null && plain !== null && (INT_LOWERED[inner]!.result === "i64" || INT_LOWERED[inner]!.result === "u64")) return raw(host, inner, plain);
     }
     if (e.kind === "libCall" && e.fn === "bigint.parse" && e.args[0]?.kind === "strLit") {
       try { return BigInt.asIntN(64, BigInt(e.args[0].value)).toString(); } catch { /* read below */ }

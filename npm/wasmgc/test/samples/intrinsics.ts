@@ -17,3 +17,8 @@ const a = new AtomicInt32(new Int32Array(1));
 a.add(41);
 console.log(h, addSat(0x7fffffff, 5), mulWrap64(0xffffffffffffffffn, 3n), sin(1), pow(2, 0.5), f16round(0.1), v.f32(3, 0), v.u16(3, 4), a.load(), new Px(300).r, f32x4.extract_lane(f32x4.splat(1.5), 2));
 console.error(F16_PATH === "engine" || F16_PATH === "software" ? "f16 ok" : "f16 ?");
+// Members inside closures and as function values, beside direct calls of the same members.
+const xs: number[] = [0, 0.5, 1];
+let acc = 0;
+for (let i = 0; i < 200; i++) acc += sin(i * 0.37);
+console.log(xs.map((x) => sin(x)).join(" "), xs.map(sin).join(" "), xs.map((x) => popcnt(x)).join(" "), acc);

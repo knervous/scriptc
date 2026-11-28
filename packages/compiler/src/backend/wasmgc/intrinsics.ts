@@ -11,7 +11,7 @@
  * the i64 they compute. */
 import binaryen from "binaryen";
 import type { IrExpr, IrIntrinsicModule, SrcLoc } from "../../ir/ir.js";
-import { INT_LOWERED, MATH_FUNCTIONS, MATH_WORDS, intrinsicMemberName, isIntrinsicMember } from "../../ir/intrinsic-libraries.js";
+import { INT_LOWERED, MATH_FUNCTIONS, MATH_WORDS, intrinsicMemberName, isIntrinsicMember, loweredIntrinsicCall } from "../../ir/intrinsic-libraries.js";
 
 export { INT_LOWERED };
 
@@ -34,7 +34,8 @@ export function intLowering(lib: IrIntrinsicModule, ctx: IntrinsicContext) {
     const name = intrinsicMemberName(lib, callee);
     return Object.hasOwn(INT_LOWERED, name) ? name : null;
   };
-  const lowers = (callee: string): boolean => member(callee) !== null;
+  /** Whether this call lowers: a member with a lowering, called with plain arguments (loweredIntrinsicCall). */
+  const lowers = (callee: string, args: readonly IrExpr[]): boolean => loweredIntrinsicCall(lib, callee, args) !== null;
 
   /* Out-of-line helpers for the members that need a value twice (binaryen inlines them when it pays). */
   const helpers = new Map<string, string>();
@@ -107,8 +108,8 @@ export function intLowering(lib: IrIntrinsicModule, ctx: IntrinsicContext) {
   /** A bigint argument as an i64: a lowered 64-bit call stays i64, a literal is a constant, anything else crosses. */
   const b = (e: IrExpr): number => {
     if (e.kind === "call") {
-      const name = member(e.callee);
-      if (name !== null && (INT_LOWERED[name]!.result === "i64" || INT_LOWERED[name]!.result === "u64")) return raw(name, e.args, e.loc);
+      const name = member(e.callee), plain = loweredIntrinsicCall(lib, e.callee, e.args);
+      if (name !== null && plain !== null && (INT_LOWERED[name]!.result === "i64" || INT_LOWERED[name]!.result === "u64")) return raw(name, plain, e.loc);
     }
     if (e.kind === "libCall" && e.fn === "bigint.parse" && e.args[0]?.kind === "strLit") {
       try { return k64(m, BigInt(e.args[0].value)); } catch { /* not a literal BigInt() accepts: cross below */ }
@@ -180,7 +181,7 @@ export function intLowering(lib: IrIntrinsicModule, ctx: IntrinsicContext) {
   /** The call's value in the IR's representation: f64 for numbers, a bigint externref for bigints. */
   const call = (callee: string, args: IrExpr[], loc: SrcLoc): number => {
     const name = member(callee)!;
-    const v = raw(name, args, loc);
+    const v = raw(name, loweredIntrinsicCall(lib, callee, args)!, loc);
     switch (INT_LOWERED[name]!.result) {
       case "i32": case "count": return m.f64.convert_s.i32(v);
       case "u32": return m.f64.convert_u.i32(v);
@@ -201,12 +202,13 @@ export function mathLowering(lib: IrIntrinsicModule, ctx: IntrinsicContext & { r
     const name = intrinsicMemberName(lib, callee);
     return MATH_FUNCTIONS.has(name) || MATH_WORDS.has(name) ? name : null;
   };
-  const lowers = (callee: string): boolean => member(callee) !== null;
+  /** Whether this call lowers: a member with a lowering, called with plain arguments (loweredIntrinsicCall). */
+  const lowers = (callee: string, args: readonly IrExpr[]): boolean => loweredIntrinsicCall(lib, callee, args) !== null;
   const f64 = binaryen.f64;
   const k32 = () => k64(m, 32n);
   const call = (callee: string, args: IrExpr[]): number => {
     const name = member(callee)!;
-    const a = args.map(x => ctx.expr(x));
+    const a = loweredIntrinsicCall(lib, callee, args)!.map(x => ctx.expr(x));
     switch (name) {
       case "__hi": return m.f64.convert_s.i32(m.i32.wrap(m.i64.shr_u(m.i64.reinterpret(a[0]!), k32())));
       case "__lo": return m.f64.convert_s.i32(m.i32.wrap(m.i64.reinterpret(a[0]!)));
@@ -233,7 +235,8 @@ export function f16Lowering(lib: IrIntrinsicModule, ctx: IntrinsicContext) {
     const name = intrinsicMemberName(lib, callee);
     return name === "toF16Bits" || name === "fromF16Bits" ? name : null;
   };
-  const lowers = (callee: string): boolean => member(callee) !== null;
+  /** Whether this call lowers: a member with a lowering, called with plain arguments (loweredIntrinsicCall). */
+  const lowers = (callee: string, args: readonly IrExpr[]): boolean => loweredIntrinsicCall(lib, callee, args) !== null;
   const I = (v: number) => m.i32.const(v), L = (v: bigint) => k64(m, v);
   const defined = new Set<string>();
   const toBits = (): string => {
@@ -285,8 +288,9 @@ export function f16Lowering(lib: IrIntrinsicModule, ctx: IntrinsicContext) {
     ], binaryen.f64));
     return name;
   };
-  const call = (callee: string, args: IrExpr[]): number => {
+  const call = (callee: string, given: IrExpr[]): number => {
     const name = member(callee)!;
+    const args = loweredIntrinsicCall(lib, callee, given)!;
     if (name === "toF16Bits") return m.f64.convert_u.i32(m.call(toBits(), [ctx.expr(args[0]!)], binaryen.i32));
     return m.call(fromBits(), [m.i32.and(ctx.toInt32(ctx.expr(args[0]!)), I(0xffff))], binaryen.f64);
   };

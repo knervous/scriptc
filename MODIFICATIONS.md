@@ -2,7 +2,7 @@
 
 This tree is a derivative of scriptc (https://github.com/vercel-labs/scriptc), licensed under the Apache License, Version 2.0 (LICENSE). It is compared here with upstream commit `97248e92994ff55f7009e0057700241b9109a35e`. The LLVM backend (`packages/compiler/src/backend/llvm`), the IR (`packages/compiler/src/ir`), the runtime (`packages/runtime` and the runtime and LLVM packs) and `native/llvm-codegen` track upstream at that commit, with the changes listed below. The frontend (`packages/compiler/src/frontend`), the compiler's unit and integration tests, the test corpus and fixtures, the compatibility inventory and the documentation are this fork's own and follow an earlier upstream state, so upstream's newer tests and documentation are not included.
 
-As section 4(b) of the license requires, the files below carry changes. 1119 files are modified from that upstream commit and 3446 files are new; 23326 upstream files are not part of this tree (see "Removed files"). Each modified source file of the compiler, the runtime and the repository tooling also says so in its first comment line.
+As section 4(b) of the license requires, the files below carry changes. 1119 files are modified from that upstream commit and 3447 files are new; 23326 upstream files are not part of this tree (see "Removed files"). Each modified source file of the compiler, the runtime and the repository tooling also says so in its first comment line.
 
 ## Modified files
 
@@ -2975,6 +2975,7 @@ As section 4(b) of the license requires, the files below carry changes. 1119 fil
 - `tests/corpus/4730-intrinsics-int-fields.ts`
 - `tests/corpus/4731-intrinsics-strict-math.ts`
 - `tests/corpus/4732-intrinsics-f16-layout-atomics.ts`
+- `tests/corpus/4733-intrinsics-closures-and-values.ts`
 - `tests/corpus/760-any-arithmetic.ts`
 - `tests/corpus/763-any-flow.ts`
 - `tests/corpus/968-jsval-lift.ts`

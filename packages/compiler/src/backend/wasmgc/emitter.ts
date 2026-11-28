@@ -47,7 +47,7 @@ import { FORK_BYTES_ELEMENT_NAME, FORK_BYTES_ELEMENT_SIZE, DYN_CLASS_PROPERTIES,
 import { bytesRuntime } from "./bytes.js";
 import { findSimdModule, simdLowering } from "./simd.js";
 import { INT_LOWERED, f16Lowering, intLowering, mathLowering } from "./intrinsics.js";
-import { MATH_FUNCTIONS, MATH_WORDS, intrinsicMemberName, intrinsicModule, isIntrinsicMember } from "../../ir/intrinsic-libraries.js";
+import { intrinsicModule, loweredIntrinsicCall } from "../../ir/intrinsic-libraries.js";
 import { BASELINE_MODE, CAPABILITY_SECTION, encodeCapabilitySection, fixedMiB, resolvedRecord, type CapabilityMode, type CapabilityUses, type ResolvedCapabilities } from "./capabilities.js";
 import { jsBridge } from "./jsbridge.js";
 import { fdlibmFor, parseFdlibm, type FdProgram } from "./fdlibm.js";
@@ -849,9 +849,11 @@ function emitModule(given: IrModule, opts: WasmGcEmitOptions, setPhase: (phase: 
   const simdLib = findSimdModule(mod);
   const intLib = intrinsicModule(mod, "int");
   /** A call the int library lowers (intrinsics.ts): its callee's body is never emitted for it. */
-  const intLowered = (callee: string): boolean => (intLib !== null && isIntrinsicMember(intLib, callee) && Object.hasOwn(INT_LOWERED, intrinsicMemberName(intLib, callee)))
-    || (mathLib !== null && isIntrinsicMember(mathLib, callee) && (MATH_FUNCTIONS.has(intrinsicMemberName(mathLib, callee)) || MATH_WORDS.has(intrinsicMemberName(mathLib, callee))))
-    || (f16Lib !== null && isIntrinsicMember(f16Lib, callee) && ["toF16Bits", "fromF16Bits"].includes(intrinsicMemberName(f16Lib, callee)));
+  /** A call an intrinsic library lowers (intrinsics.ts): its callee's body is not emitted for it. A call with an
+   * argument that is not a plain number or bigint (the member is also used as a function value, so its parameters
+   * are widened) runs the member's body instead (loweredIntrinsicCall). */
+  const intLowered = (callee: string, args: readonly IrExpr[]): boolean =>
+    [intLib, mathLib, f16Lib].some(lib => loweredIntrinsicCall(lib, callee, args) !== null);
   const mathLib = intrinsicModule(mod, "math");
   const f16Lib = intrinsicModule(mod, "f16");
   if (simdLib) types.simdV128 = simdLib.v128Class;
@@ -1046,7 +1048,7 @@ function emitModule(given: IrModule, opts: WasmGcEmitOptions, setPhase: (phase: 
   const inspectValue = (value: any): void => {
       if (pureInitOn && typeof value === "string" && pureGlobals.has(value)) { readSeen.add(value); const st = deferredInits.get(value); if (st !== undefined) { deferredInits.delete(value); pendingTrees.push(st); } }
       if (value && typeof value === "object" && typeof value.kind === "string") {
-        if (value.kind === "call") { if ((!simdLib || !value.callee.startsWith(simdLib.prefix)) && !intLowered(value.callee)) visit(value.callee); }
+        if (value.kind === "call") { if ((!simdLib || !value.callee.startsWith(simdLib.prefix)) && !intLowered(value.callee, value.args)) visit(value.callee); }
         // `l || d` that re-tags its truthy side calls the retag helper by name (orDefault.retag).
         else if (value.kind === "orDefault" && typeof value.retag === "string") visit(value.retag);
         else if (value.kind === "closure") {
@@ -12900,9 +12902,9 @@ function emitModule(given: IrModule, opts: WasmGcEmitOptions, setPhase: (phase: 
           }
         }
         if (simd?.isIntrinsic(e.callee)) return simd.call(e.callee, e.args, e.loc);
-        if (intOps?.lowers(e.callee)) return intOps.call(e.callee, e.args, e.loc);
-        if (mathOps?.lowers(e.callee)) return mathOps.call(e.callee, e.args);
-        if (f16Ops?.lowers(e.callee)) return f16Ops.call(e.callee, e.args);
+        if (intOps?.lowers(e.callee, e.args)) return intOps.call(e.callee, e.args, e.loc);
+        if (mathOps?.lowers(e.callee, e.args)) return mathOps.call(e.callee, e.args);
+        if (f16Ops?.lowers(e.callee, e.args)) return f16Ops.call(e.callee, e.args);
         // `a.localeCompare(b)` asks the host, as the dyn path does: the page's ICU collation (the JS build's order), the
         // native host's root-collation approximation. The frontend's helper compares code units, so "a" sorted after "B".
         if (e.callee === "%str.localeCompare" && e.args.length === 2 && e.args.every((a) => a.type.kind === "string"))

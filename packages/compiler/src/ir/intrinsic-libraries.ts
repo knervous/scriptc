@@ -3,7 +3,7 @@
  * is one when its leading comments include the pragma
  * `@scriptc-intrinsics <library>/<version>`: recognition reads the module's
  * text, so it holds wherever the module is installed. */
-import type { IrIntrinsicModule, IrModule } from "./ir.js";
+import type { IrExpr, IrIntrinsicModule, IrModule } from "./ir.js";
 
 /** The libraries this compiler knows, with the newest version it lowers. A
  * module naming another library or a newer version still compiles, from its
@@ -80,3 +80,42 @@ export const INT_LOWERED: Readonly<Record<string, IntOp>> = {
 export const MATH_FUNCTIONS: ReadonlySet<string> = new Set(["sin", "cos", "tan", "asin", "acos", "atan", "atan2", "exp", "expm1", "log",
   "log1p", "log2", "log10", "pow", "sinh", "cosh", "tanh", "asinh", "acosh", "atanh", "cbrt"]);
 export const MATH_WORDS: ReadonlySet<string> = new Set(["__hi", "__lo", "__mk"]);
+
+/* ── which calls lower ── */
+
+/** Argument kinds of the math and f16 members a backend replaces ("n": a number). */
+const MATH_ARITY: Readonly<Record<string, number>> = { atan2: 2, pow: 2, __mk: 2 };
+export const F16_LOWERED: ReadonlySet<string> = new Set(["toF16Bits", "fromF16Bits"]);
+
+/** A call's arguments as the plain values a lowering takes, or null when the call must run the member's own body.
+ * A lowering reads numbers as f64 and bigints as bigint values. When a member is also used as a function value, the
+ * frontend widens its parameters (a union), and every call then passes its arguments wrapped: a wrap of a plain
+ * value unwraps here; any other argument (a value that may not be a number, a missing argument) keeps the call on
+ * the member's body, whose JavaScript semantics cover it. */
+export function plainIntrinsicArgs(kinds: readonly ("n" | "b")[], args: readonly IrExpr[]): IrExpr[] | null {
+  if (args.length !== kinds.length) return null;
+  const out: IrExpr[] = [];
+  for (let i = 0; i < args.length; i++) {
+    const want = kinds[i] === "n" ? "f64" : "bigint";
+    let a = args[i]!;
+    while (a.kind === "unionWrap" || a.kind === "upcast") a = a.value;
+    if (a.type.kind !== want) return null;
+    out.push(a);
+  }
+  return out;
+}
+
+/** The argument kinds of a member of `library` that backends lower, or null. */
+export function loweredMemberKinds(library: string, name: string): readonly ("n" | "b")[] | null {
+  if (library === "int") return Object.hasOwn(INT_LOWERED, name) ? INT_LOWERED[name]!.args : null;
+  if (library === "math") return MATH_FUNCTIONS.has(name) || MATH_WORDS.has(name) ? new Array<"n">(MATH_ARITY[name] ?? 1).fill("n") : null;
+  if (library === "f16") return F16_LOWERED.has(name) ? ["n"] : null;
+  return null;
+}
+
+/** The plain arguments of a call a backend lowers into `lib`, or null when the call keeps the member's body. */
+export function loweredIntrinsicCall(lib: IrIntrinsicModule | null, callee: string, args: readonly IrExpr[]): IrExpr[] | null {
+  if (!lib || !isIntrinsicMember(lib, callee)) return null;
+  const kinds = loweredMemberKinds(lib.library, intrinsicMemberName(lib, callee));
+  return kinds ? plainIntrinsicArgs(kinds, args) : null;
+}
